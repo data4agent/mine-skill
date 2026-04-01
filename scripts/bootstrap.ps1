@@ -31,13 +31,35 @@ Test-HostDependencies
 # Install awp-wallet if not present
 $AwpWallet = Get-Command awp-wallet -ErrorAction SilentlyContinue
 if (-not $AwpWallet) {
-    Write-Host "Installing awp-wallet..."
-    $Npm = Get-Command npm -ErrorAction SilentlyContinue
-    if (-not $Npm) {
-        throw "npm not found. Please install Node.js from https://nodejs.org"
+    Write-Host "Installing awp-wallet from GitHub..."
+
+    # Check prerequisites
+    $Git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $Git) {
+        throw "git not found. Please install Git from https://git-scm.com"
     }
-    Invoke-CheckedExternal "npm" @("install", "-g", "@aspect/awp-wallet")
-    Write-Host "awp-wallet installed successfully"
+
+    $Node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $Node) {
+        throw "Node.js not found. Please install Node.js 20+ from https://nodejs.org"
+    }
+
+    # Clone and install from GitHub
+    $TempDir = Join-Path $env:TEMP "awp-wallet-install"
+    if (Test-Path $TempDir) {
+        Remove-Item $TempDir -Recurse -Force
+    }
+
+    Invoke-CheckedExternal "git" @("clone", "https://github.com/awp-core/awp-wallet.git", $TempDir)
+    Push-Location $TempDir
+    try {
+        Invoke-CheckedExternal "npm" @("install")
+        Invoke-CheckedExternal "npm" @("install", "-g", ".")
+        Write-Host "awp-wallet installed successfully from GitHub"
+    } finally {
+        Pop-Location
+        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 } else {
     Write-Host "awp-wallet already installed: $($AwpWallet.Source)"
 }

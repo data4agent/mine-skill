@@ -16,13 +16,11 @@ class PlatformClient:
         *,
         base_url: str,
         token: str,
-        miner_id: str,
         signer: "WalletSigner | None" = None,
         eip712_chain_id: int = 1,
         eip712_domain_name: str = "Platform Service",
         eip712_verifying_contract: str = "0x0000000000000000000000000000000000000000",
     ) -> None:
-        self.miner_id = miner_id
         self._base_url = base_url.rstrip("/")
         self._signer = signer
         self._eip712_chain_id = eip712_chain_id
@@ -134,13 +132,16 @@ class PlatformClient:
         return data if isinstance(data, dict) else {}
 
     def fetch_miner_status(self) -> dict[str, Any]:
-        return self._request_optional_data("GET", f"/api/mining/v1/miners/{self.miner_id}/status")
+        miner_id = self._signer.get_address() if self._signer else ""
+        return self._request_optional_data("GET", f"/api/mining/v1/miners/{miner_id}/status")
 
     def fetch_settlement(self) -> dict[str, Any]:
-        return self._request_optional_data("GET", f"/api/mining/v1/miners/{self.miner_id}/settlement")
+        miner_id = self._signer.get_address() if self._signer else ""
+        return self._request_optional_data("GET", f"/api/mining/v1/miners/{miner_id}/settlement")
 
     def fetch_reward_summary(self) -> dict[str, Any]:
-        return self._request_optional_data("GET", f"/api/mining/v1/miners/{self.miner_id}/reward-summary")
+        miner_id = self._signer.get_address() if self._signer else ""
+        return self._request_optional_data("GET", f"/api/mining/v1/miners/{miner_id}/reward-summary")
 
     def _claim(self, path: str) -> dict[str, Any] | None:
         try:

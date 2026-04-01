@@ -85,13 +85,30 @@ check_host_dependencies
 
 # Install awp-wallet if not present
 if ! command -v awp-wallet >/dev/null 2>&1; then
-  echo "Installing awp-wallet..."
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "ERROR: npm not found. Please install Node.js from https://nodejs.org"
+  echo "Installing awp-wallet from GitHub..."
+
+  # Check prerequisites
+  if ! command -v git >/dev/null 2>&1; then
+    echo "ERROR: git not found. Please install git"
     exit 1
   fi
-  npm install -g @aspect/awp-wallet
-  echo "awp-wallet installed successfully ✓"
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: Node.js not found. Please install Node.js 20+ from https://nodejs.org"
+    exit 1
+  fi
+
+  # Clone and install from GitHub
+  TEMP_DIR=$(mktemp -d)
+  trap "rm -rf $TEMP_DIR" EXIT
+
+  git clone https://github.com/awp-core/awp-wallet.git "$TEMP_DIR"
+  cd "$TEMP_DIR"
+  npm install
+  npm install -g .
+  cd -
+
+  echo "awp-wallet installed successfully from GitHub ✓"
 else
   echo "awp-wallet already installed: $(command -v awp-wallet) ✓"
 fi

@@ -1312,7 +1312,6 @@ def build_worker_from_env() -> AgentWorker:
     config = WorkerConfig(
         base_url=os.environ["PLATFORM_BASE_URL"],
         token=os.environ.get("PLATFORM_TOKEN", ""),
-        miner_id=os.environ["MINER_ID"],
         output_root=output_root,
         crawler_root=CRAWLER_ROOT,
         python_bin=python_bin,
@@ -1340,7 +1339,6 @@ def build_worker_from_env() -> AgentWorker:
     client = PlatformClient(
         base_url=config.base_url,
         token=config.token,
-        miner_id=config.miner_id,
         signer=signer,
         eip712_chain_id=config.eip712_chain_id,
         eip712_domain_name=config.eip712_domain_name,
