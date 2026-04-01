@@ -217,9 +217,23 @@ def render_first_load_experience() -> str:
             "",
             f"{SYM_CHECK} All dependencies ready.",
             "",
-            "Or just tell me what you'd like to do.",
+            SYM_DIVIDER,
+            "Available Commands:",
             "",
-            f"Commands: /mine-start | /mine-status | /mine-pause | /mine-stop"
+            "  Main Actions:",
+            "    /mine-start     — Begin autonomous mining (runs in background agent)",
+            "    /mine-pause     — Pause mining and save progress",
+            "    /mine-resume    — Resume from saved state",
+            "    /mine-stop      — Stop mining and show summary",
+            "",
+            "  Status & Info:",
+            "    /mine-status    — Check mining progress, credit score, epoch stats",
+            "    /mine-datasets  — List available datasets to mine",
+            "",
+            "  Diagnostics:",
+            "    /mine-doctor    — Diagnose issues and get fix commands",
+            "",
+            "Or just tell me what you'd like to do in natural language.",
         ])
         return "\n".join(lines)
 
@@ -244,7 +258,7 @@ def render_first_load_experience() -> str:
         "",
         f"Run these, then say 'check again' and I'll re-verify.",
         "",
-        "Command: /mine-doctor"
+        "Command: /mine-doctor for detailed diagnostics"
     ])
     return "\n".join(lines)
 
@@ -369,9 +383,19 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
             f"Target: {epoch_target} submissions this epoch.",
             f"Strategy: {strategy}.",
             "",
-            f"Starting batch 1...",
+            SYM_DIVIDER,
+            "Starting autonomous mining...",
             "",
-            f"Commands: /mine-pause | /mine-stop",
+            f"{SYM_CHECK} Mining will run in a background process",
+            f"{SYM_CHECK} I'll update you on progress periodically",
+            f"{SYM_CHECK} You can still ask me questions anytime",
+            "",
+            "Controls:",
+            "  /mine-pause  — Pause and save progress",
+            "  /mine-stop   — Stop and show summary",
+            "  /mine-status — Check current progress",
+            "",
+            f"Starting batch 1... say 'pause' or 'stop' anytime.",
         ])
     else:
         lines.append("Mining session is ready.")

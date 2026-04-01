@@ -28,6 +28,20 @@ if (Test-Path $VenvDir) {
 
 Test-HostDependencies
 
+# Install awp-wallet if not present
+$AwpWallet = Get-Command awp-wallet -ErrorAction SilentlyContinue
+if (-not $AwpWallet) {
+    Write-Host "Installing awp-wallet..."
+    $Npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $Npm) {
+        throw "npm not found. Please install Node.js from https://nodejs.org"
+    }
+    Invoke-CheckedExternal "npm" @("install", "-g", "@aspect/awp-wallet")
+    Write-Host "awp-wallet installed successfully"
+} else {
+    Write-Host "awp-wallet already installed: $($AwpWallet.Source)"
+}
+
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 Invoke-CheckedExternal $VenvPython @("-m", "pip", "install", "-r", "requirements-core.txt")
 if ($InstallProfile -eq "browser" -or $InstallProfile -eq "full") {
@@ -38,3 +52,7 @@ if ($InstallProfile -eq "full") {
 }
 Invoke-CheckedExternal $VenvPython @("scripts/verify_env.py", "--profile", $InstallProfile)
 Invoke-CheckedExternal $VenvPython @("scripts/smoke_test.py")
+
+Write-Host ""
+Write-Host "Running post-install check..."
+Invoke-CheckedExternal $VenvPython @("scripts/post_install_check.py")

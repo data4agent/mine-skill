@@ -22,9 +22,8 @@ output/
 .omx/
 .tmp-debug*/
 
-# 本地目录不纳入版本库（测试与文档在本地维护）
+# 本地目录不纳入版本库（测试在本地维护）
 tests/
-docs/
 
 # 本地规划与草稿（个人笔记）
 1.md
@@ -36,3 +35,21 @@ mine-ux-preview.html
 social-data-crawler-code-review-optimization-2026-04-01.md
 会议记录.md
 schema(1)/
+
+# 开发调试脚本（临时测试文件）
+test_*.py
+diagnose_*.py
+scripts/test_*.py
+scripts/test_*.sh
+scripts/test_*.cmd
+
+# 临时文档（开发过程）
+AUTHENTICATION_DIAGNOSIS.md
+BATCH_PROGRESS_STATUS.md
+CHANGES_EIP712.md
+COMMANDS.md
+MINING_AGENT_DESIGN.md
+OPTIMIZATION_SUMMARY.md
+SCENE3_IMPLEMENTATION.md
+TOOL_COMMANDS_OPTIMIZED.md
+解决方案.md

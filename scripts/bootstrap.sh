@@ -82,6 +82,25 @@ else
 fi
 
 check_host_dependencies
+
+# Install awp-wallet if not present
+if ! command -v awp-wallet >/dev/null 2>&1; then
+  echo "Installing awp-wallet..."
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "ERROR: npm not found. Please install Node.js from https://nodejs.org"
+    exit 1
+  fi
+  npm install -g @aspect/awp-wallet
+  echo "awp-wallet installed successfully ✓"
+else
+  echo "awp-wallet already installed: $(command -v awp-wallet) ✓"
+fi
+echo ""
+
 install_requirements
 "$VENV_DIR/bin/python" scripts/verify_env.py --profile "$INSTALL_PROFILE"
 "$VENV_DIR/bin/python" scripts/smoke_test.py
+
+echo ""
+echo "Running post-install check..."
+"$VENV_DIR/bin/python" scripts/post_install_check.py
