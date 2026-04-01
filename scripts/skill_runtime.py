@@ -10,7 +10,9 @@ from typing import Any
 from common import resolve_wallet_config
 
 
-DEFAULT_TESTNET_PLATFORM_URL = "http://101.47.73.95"
+# Network URLs (user must explicitly choose)
+TESTNET_PLATFORM_URL = "http://101.47.73.95"
+MAINNET_PLATFORM_URL = ""  # TBD - will be announced when available
 
 # Unicode symbols for consistent UX
 SYM_CHECK = "✓"
@@ -117,10 +119,17 @@ def _platform_line() -> tuple[bool, str, list[str]]:
     """Check platform URL. Returns (ok, status_line, fix_commands)."""
     configured = os.environ.get("PLATFORM_BASE_URL", "").strip()
     if configured:
-        return True, f"{SYM_CHECK} Platform Service {SYM_DASH} {configured}", []
-    return False, f"{SYM_WARN} Platform Service {SYM_DASH} not set, using default ({DEFAULT_TESTNET_PLATFORM_URL})", [
-        f"# Optional: Set explicit platform URL",
-        f"export PLATFORM_BASE_URL={DEFAULT_TESTNET_PLATFORM_URL}",
+        # Detect network from URL
+        network = "testnet" if "101.47.73.95" in configured else "configured"
+        return True, f"{SYM_CHECK} Platform Service {SYM_DASH} {configured} ({network})", []
+    # Require explicit network selection
+    return False, f"{SYM_CROSS} Platform Service {SYM_DASH} not configured (network selection required)", [
+        "# Choose your network:",
+        f"# Testnet: export PLATFORM_BASE_URL={TESTNET_PLATFORM_URL}",
+        "# Mainnet: (URL will be announced when available)",
+        "",
+        "# For testnet, run:",
+        f"export PLATFORM_BASE_URL={TESTNET_PLATFORM_URL}",
     ]
 
 

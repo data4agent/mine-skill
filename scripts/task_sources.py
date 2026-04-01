@@ -247,9 +247,14 @@ class DatasetDiscoverySource:
 
     def collect(self, *, min_interval_seconds: int) -> list[WorkItem]:
         items: list[WorkItem] = []
-        for dataset in self.client.list_datasets():
+        datasets = self.client.list_datasets()
+
+        # Smart rotation: prioritize datasets by gap to target and availability
+        prioritized = self._prioritize_datasets(datasets, min_interval_seconds=min_interval_seconds)
+
+        for dataset in prioritized:
             dataset_id = optional_string(dataset.get("id"))
-            if not dataset_id or not self.state_store.should_schedule_dataset(dataset_id, min_interval_seconds=min_interval_seconds):
+            if not dataset_id:
                 continue
             for domain in _dataset_domains(dataset):
                 seed_url = _discovery_seed_url(domain)
@@ -273,6 +278,63 @@ class DatasetDiscoverySource:
                 )
             self.state_store.mark_dataset_scheduled(dataset_id)
         return items
+
+    def _prioritize_datasets(
+        self,
+        datasets: list[dict[str, Any]],
+        *,
+        min_interval_seconds: int,
+    ) -> list[dict[str, Any]]:
+        """Sort datasets by priority: largest gap to target first, then by staleness.
+
+        Priority factors:
+        1. Not in cooldown (rate limited datasets go last)
+        2. Gap to target (datasets further from target get priority)
+        3. Time since last scheduled (stale datasets get priority)
+        """
+        import time
+
+        now = int(time.time())
+        cooldowns = self.state_store.active_dataset_cooldowns(now=now)
+
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for dataset in datasets:
+            dataset_id = optional_string(dataset.get("id"))
+            if not dataset_id:
+                continue
+
+            # Skip if not due for scheduling
+            if not self.state_store.should_schedule_dataset(dataset_id, min_interval_seconds=min_interval_seconds):
+                continue
+
+            # Calculate priority score (higher = more priority)
+            score = 0.0
+
+            # Factor 1: Cooldown penalty (datasets in cooldown get deprioritized)
+            if dataset_id in cooldowns:
+                score -= 10000  # Heavy penalty for rate-limited datasets
+
+            # Factor 2: Gap to target (from dataset metadata if available)
+            epoch_submitted = int(dataset.get("epoch_submitted") or dataset.get("submitted") or 0)
+            epoch_target = int(dataset.get("epoch_target") or dataset.get("target") or 80)
+            gap = max(0, epoch_target - epoch_submitted)
+            score += gap * 10  # Larger gap = higher priority
+
+            # Factor 3: Completion percentage (less complete = higher priority)
+            if epoch_target > 0:
+                completion_ratio = epoch_submitted / epoch_target
+                score += (1 - completion_ratio) * 100  # 0% complete = +100, 100% complete = 0
+
+            # Factor 4: Time since last scheduled (staleness bonus)
+            # Datasets that haven't been touched recently get a small boost
+            # This is already handled by should_schedule_dataset, but we add a tiebreaker
+
+            scored.append((score, dataset))
+
+        # Sort by score descending (highest priority first)
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        return [dataset for _score, dataset in scored]
 
 
 def build_follow_up_items_from_discovery(parent: WorkItem, records: list[dict[str, Any]]) -> list[WorkItem]:

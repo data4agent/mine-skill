@@ -350,11 +350,12 @@ If crawler output indicates `AUTH_REQUIRED`:
 
 ### Occupancy / dedup fallback
 
-If the occupancy check endpoint is unavailable:
+If the occupancy check endpoint is unavailable or returns 404:
 
 - do not crash the session
-- treat it as a compatibility fallback when safe
-- keep the user informed only if it becomes operationally important
+- treat the URL as available and proceed with crawling (optimistic fallback)
+- log the fallback internally but do not alarm the user unless it affects >10% of URLs in a batch
+- this is expected behavior during platform upgrades or when the endpoint is not yet deployed
 
 ---
 
@@ -369,3 +370,82 @@ Preferred local checks:
 - `python scripts/smoke_test.py --json`
 
 If the user needs environment setup help, guide them toward bootstrapping the local Python runtime and awp-wallet rather than any plugin packaging flow.
+
+---
+
+## FAQ
+
+### Gas fees
+
+**Q: Does submitting data require gas fees?**
+
+A: No. Data submissions to the Platform Service are off-chain API calls. You do not need ETH in your wallet to submit crawled data.
+
+**Q: Does claiming $aMine rewards require gas?**
+
+A: Reward claiming may require on-chain transactions depending on the platform's settlement mechanism. Check the platform documentation for current settlement details. During testnet, rewards are tracked off-chain.
+
+**Q: Do I need ETH in my wallet to mine?**
+
+A: No ETH is required for the mining workflow itself. The wallet is used only for EIP-712 request signing (off-chain). Gas is only needed if you later bridge rewards or perform on-chain operations.
+
+### Wallet address and Miner ID
+
+**Q: What is the relationship between my wallet address and Miner ID?**
+
+A: They are separate identifiers:
+
+- **Wallet address** (`0x...`) — Your cryptographic identity for request signing. Derived from your private key via awp-wallet. Used to authenticate API requests.
+- **Miner ID** — A human-readable identifier for your mining client (e.g., `my-miner-001`). Used by the platform to track your submissions, credit score, and rewards.
+
+**Q: Can one wallet address run multiple miners?**
+
+A: Yes. You can run multiple mining clients with different Miner IDs, all signing with the same wallet address. Each Miner ID maintains its own credit score and submission history.
+
+**Q: Can I switch wallet addresses while keeping my Miner ID?**
+
+A: This depends on platform policy. Generally, Miner IDs are associated with wallet addresses at registration. Contact platform support if you need to migrate a Miner ID to a new wallet.
+
+**Q: Why do I need both?**
+
+A: The wallet address provides cryptographic authentication (proving you control the private key). The Miner ID provides operational flexibility (naming, tracking, multi-client setups).
+
+### PoW challenges
+
+**Q: What types of PoW challenges are supported?**
+
+A: The current solver supports:
+
+| Type | Description | Implementation |
+|------|-------------|----------------|
+| `content_understanding` | LLM-answerable questions | Requires Mine Gateway LLM |
+| `structured_extraction` | Schema-based extraction | Requires Mine Gateway LLM |
+| `math` / `arithmetic` | Basic math expressions | Local evaluation |
+| `sha256_nonce` / `hashcash` | Hash prefix mining | Local computation |
+
+**Q: What happens if a challenge type is unsupported?**
+
+A: The item is skipped with status `challenge_received_but_unsolved`. It will not block other work.
+
+**Q: How do LLM-based challenges work?**
+
+A: They route through the Mine Gateway (`OPENCLAW_GATEWAY_BASE_URL`). If the gateway is not configured, LLM challenges will fail. Configure the gateway in your environment or `mine.json` for full PoW support.
+
+**Q: What is the roadmap for PoW?**
+
+A: Current implementation handles the most common challenge types. Additional types may be added as the platform evolves. The solver is designed to be extensible — new challenge handlers can be added to `pow_solver.py`.
+
+### Network selection
+
+**Q: How do I choose between testnet and mainnet?**
+
+A: Set `PLATFORM_BASE_URL` explicitly:
+
+- **Testnet:** `http://101.47.73.95`
+- **Mainnet:** TBD (will be announced when available)
+
+The install script no longer defaults to testnet. You must explicitly choose your network.
+
+**Q: What happens if I forget to set the URL?**
+
+A: The worker will fail with a clear error asking you to set `PLATFORM_BASE_URL`. This prevents accidental connections to the wrong network.

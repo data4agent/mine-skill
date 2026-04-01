@@ -482,6 +482,22 @@ class AgentWorker:
         current_batch = self.state_store.get_current_batch()
         if not isinstance(current_batch, dict) or not current_batch:
             current_batch = dict(session.get("current_batch") or {}) if isinstance(session.get("current_batch"), dict) else {}
+
+        # Calculate estimated completion time
+        estimated_completion = self._estimate_completion_time(session, session_totals, epoch_remaining)
+
+        # Build earnings summary for easy consumption
+        earnings_summary = {
+            "epoch_id": session.get("epoch_id"),
+            "submitted": epoch_submitted,
+            "target": epoch_target,
+            "progress_percent": epoch_completion_percent,
+            "remaining": epoch_remaining,
+            "credit_score": session.get("credit_score"),
+            "credit_tier": session.get("credit_tier"),
+            "estimated_completion": estimated_completion,
+        }
+
         return {
             "mining_state": session.get("mining_state", "idle"),
             "credit_score": session.get("credit_score"),
@@ -509,14 +525,53 @@ class AgentWorker:
             "cooldowns": self.state_store.active_dataset_cooldowns(),
             "last_summary": dict(session.get("last_summary") or {}),
             "session_totals": session_totals,
+            "earnings_summary": earnings_summary,
             "progress": {
                 "epoch_completion_percent": epoch_completion_percent,
                 "epoch_remaining": epoch_remaining,
+                "estimated_completion": estimated_completion,
                 "session_processed_items": int(session_totals.get("processed_items") or 0),
                 "session_submitted_items": int(session_totals.get("submitted_items") or 0),
                 "session_failed_items": int(session_totals.get("failed_items") or 0),
             },
         }
+
+    def _estimate_completion_time(
+        self,
+        session: dict[str, Any],
+        session_totals: dict[str, Any],
+        epoch_remaining: int,
+    ) -> str | None:
+        """Estimate time to reach epoch target based on current submission rate."""
+        if epoch_remaining <= 0:
+            return "complete"
+
+        run_started_at = session.get("run_started_at")
+        if not isinstance(run_started_at, int):
+            return None
+
+        submitted_in_session = int(session_totals.get("submitted_items") or 0)
+        if submitted_in_session <= 0:
+            return None
+
+        elapsed_seconds = max(1, int(time.time()) - run_started_at)
+        rate_per_second = submitted_in_session / elapsed_seconds
+
+        if rate_per_second <= 0:
+            return None
+
+        remaining_seconds = int(epoch_remaining / rate_per_second)
+
+        # Format as human-readable duration
+        if remaining_seconds < 60:
+            return f"{remaining_seconds}s"
+        elif remaining_seconds < 3600:
+            minutes = remaining_seconds // 60
+            return f"{minutes}m"
+        else:
+            hours = remaining_seconds // 3600
+            minutes = (remaining_seconds % 3600) // 60
+            return f"{hours}h {minutes}m"
 
     def process_task_payload(self, task_type: str, payload: dict[str, Any]) -> str:
         item = self._work_item_from_payload(task_type, payload)
