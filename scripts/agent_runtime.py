@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1306,7 +1307,8 @@ def build_worker_from_env() -> AgentWorker:
     from signer import WalletSigner
 
     output_root = Path(os.environ.get("CRAWLER_OUTPUT_ROOT", str(CRAWLER_ROOT / "output" / "agent-runs"))).resolve()
-    python_bin = os.environ.get("PYTHON_BIN") or os.environ.get("PLUGIN_PYTHON_BIN") or "python"
+    # 默认用当前解释器，避免 Windows 上子进程的 `python` 指向非 venv、缺 httpx 等依赖
+    python_bin = os.environ.get("PYTHON_BIN") or os.environ.get("PLUGIN_PYTHON_BIN") or sys.executable
     state_root = Path(os.environ.get("WORKER_STATE_ROOT", str(output_root / "_worker_state"))).resolve()
     gateway_model_config = resolve_mine_gateway_model_config()
     config = WorkerConfig(
