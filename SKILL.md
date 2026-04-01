@@ -94,7 +94,10 @@ python scripts/run_tool.py agent-status  # Returns JSON with next_action
 Required:
 
 ```bash
+# Test environment (open access):
 export PLATFORM_BASE_URL=http://101.47.73.95
+# Production (requires wallet whitelisting):
+# export PLATFORM_BASE_URL=https://sd76fip34meovmfu5ftlg.apigateway-ap-southeast-1.volceapi.com
 
 # EIP-712 Signature (CRITICAL!)
 export EIP712_DOMAIN_NAME=aDATA
@@ -104,7 +107,8 @@ export EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000
 
 **Note**: Miner identification is automatic via your wallet address. No MINER_ID needed!
 
-See [WORKING_CONFIG.md](./WORKING_CONFIG.md) for working configuration.
+See [WORKING_CONFIG.md](./WORKING_CONFIG.md) for working configuration.  
+See [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) for production environment setup.
 
 ## Security
 
