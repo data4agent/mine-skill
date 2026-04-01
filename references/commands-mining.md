@@ -1,8 +1,66 @@
 # Mining Commands Reference
 
-All runtime commands go through `scripts/run_tool.py`. This is the only public CLI surface.
+All public runtime commands go through `scripts/run_tool.py`.
 
-## Primary Commands
+## Setup and readiness
+
+### `setup`
+
+```bash
+python scripts/run_tool.py setup
+```
+
+Runs the JSON-oriented setup wizard in `scripts/mine_setup.py`.
+
+### `setup-status`
+
+```bash
+python scripts/run_tool.py setup-status
+```
+
+Shows setup progress from the setup wizard state file.
+
+### `setup-fix`
+
+```bash
+python scripts/run_tool.py setup-fix
+```
+
+Attempts automatic setup remediation.
+
+### `doctor`
+
+```bash
+python scripts/run_tool.py doctor
+```
+
+Returns structured readiness checks and concrete fix commands.
+
+### `check-env`
+
+```bash
+python scripts/run_tool.py check-env
+```
+
+Prints the current environment-variable view used by the helper layer.
+
+### `agent-status`
+
+```bash
+python scripts/run_tool.py agent-status
+```
+
+Returns a compact JSON readiness summary for host integrations.
+
+### `diagnose`
+
+```bash
+python scripts/run_tool.py diagnose
+```
+
+Runs the deeper diagnosis flow, including connectivity and heartbeat checks.
+
+## Guided UX commands
 
 ### `first-load`
 
@@ -10,7 +68,7 @@ All runtime commands go through `scripts/run_tool.py`. This is the only public C
 python scripts/run_tool.py first-load
 ```
 
-Renders the welcome experience: welcome message, dependency check results, and quick-start actions. Also used on first skill load by any agent.
+Renders the welcome and dependency-check experience.
 
 ### `check-again`
 
@@ -18,15 +76,16 @@ Renders the welcome experience: welcome message, dependency check results, and q
 python scripts/run_tool.py check-again
 ```
 
-Alias for `first-load`. Re-runs the dependency check after the user has fixed something.
+Alias for `first-load`.
 
 ### `start-working`
 
 ```bash
-python scripts/run_tool.py start-working [dataset_id1,dataset_id2,...]
+python scripts/run_tool.py start-working
+python scripts/run_tool.py start-working datasetA,datasetB
 ```
 
-Begins autonomous mining. Optionally accepts a comma-separated list of dataset IDs to constrain work. Without arguments, uses all eligible datasets. On first run, the agent should confirm the dataset selection with the user.
+Prepares a mining session, performs heartbeat, loads datasets, and may ask for dataset selection.
 
 ### `check-status`
 
@@ -34,7 +93,7 @@ Begins autonomous mining. Optionally accepts a comma-separated list of dataset I
 python scripts/run_tool.py check-status
 ```
 
-Renders a human-readable status summary: mining state, credit score/tier, epoch progress, active datasets, and recent activity.
+Human-readable session and epoch summary.
 
 ### `status-json`
 
@@ -42,7 +101,7 @@ Renders a human-readable status summary: mining state, credit score/tier, epoch 
 python scripts/run_tool.py status-json
 ```
 
-Returns structured JSON status for programmatic consumption.
+Machine-readable session status.
 
 ### `list-datasets`
 
@@ -50,15 +109,26 @@ Returns structured JSON status for programmatic consumption.
 python scripts/run_tool.py list-datasets
 ```
 
-Lists active datasets with their IDs, names, and current epoch metadata.
+Lists currently available datasets from the platform.
+
+## Worker loop and task execution
 
 ### `run-worker`
 
 ```bash
-python scripts/run_tool.py run-worker
+python scripts/run_tool.py run-worker [intervalSeconds] [maxIterations]
 ```
 
-Starts the full autonomous worker loop. This is the primary long-running mining command. Handles heartbeat, batch work, epoch monitoring, and stop conditions internally.
+Examples:
+
+```bash
+python scripts/run_tool.py run-worker 60 1
+python scripts/run_tool.py run-worker 60 0
+```
+
+- default interval: `60`
+- default iterations: `1`
+- `0` means keep running until stopped
 
 ### `run-once`
 
@@ -66,15 +136,15 @@ Starts the full autonomous worker loop. This is the primary long-running mining 
 python scripts/run_tool.py run-once
 ```
 
-Single-pass execution. Runs one batch of work and exits. Useful for debugging or validating a single cycle.
+Runs one worker cycle with the fully initialized worker object.
 
 ### `run-loop`
 
 ```bash
-python scripts/run_tool.py run-loop
+python scripts/run_tool.py run-loop [intervalSeconds] [maxIterations]
 ```
 
-Repeated loop execution. Use only when explicitly requested.
+Low-level repeated loop runner. Prefer `run-worker` unless you explicitly need this surface.
 
 ### `heartbeat`
 
@@ -82,35 +152,7 @@ Repeated loop execution. Use only when explicitly requested.
 python scripts/run_tool.py heartbeat
 ```
 
-Sends a single heartbeat to the platform and reports the result. Useful for verifying connectivity and registration state.
-
-## Control Commands
-
-### `pause`
-
-```bash
-python scripts/run_tool.py pause
-```
-
-Signals the runtime to pause after the current batch completes. Sets `mining_state = paused`. Does not interrupt in-progress work.
-
-### `resume`
-
-```bash
-python scripts/run_tool.py resume
-```
-
-Resumes a paused session. Sets `mining_state = running` and continues from the next batch.
-
-### `stop`
-
-```bash
-python scripts/run_tool.py stop
-```
-
-Signals the runtime to stop after the current batch completes. The agent should confirm this action with the user before executing. On stop, a final session summary is printed.
-
-## Payload Commands
+Sends a single heartbeat.
 
 ### `process-task-file`
 
@@ -118,7 +160,7 @@ Signals the runtime to stop after the current batch completes. The agent should 
 python scripts/run_tool.py process-task-file <taskType> <taskJsonPath>
 ```
 
-Processes a local task JSON file. Useful for offline execution or when a task payload is already available outside the normal claim flow. `taskType` is one of `repeat-crawl` or `refresh`.
+Processes a local task payload.
 
 ### `export-core-submissions`
 
@@ -126,25 +168,64 @@ Processes a local task JSON file. Useful for offline execution or when a task pa
 python scripts/run_tool.py export-core-submissions <inputPath> <outputPath> <datasetId>
 ```
 
-Converts crawler output records into platform-ready submission payloads. Reads from `inputPath` (typically `records.jsonl`), writes to `outputPath`, tagged with `datasetId`.
+Transforms crawler records into submission payloads.
 
-## Verification Commands
-
-These are not part of `run_tool.py` but are used for environment validation:
+### `agent-run`
 
 ```bash
-python scripts/verify_env.py --profile minimal --json
-python scripts/host_diagnostics.py --json
-python scripts/smoke_test.py --json
+python scripts/run_tool.py agent-run [maxIterations]
 ```
 
-## Command Priority
+Agent-oriented JSON event stream wrapper around a simplified loop.
 
-When the user's intent is ambiguous, prefer commands in this order:
+## Session control
 
-1. `run-worker` — primary autonomous worker
-2. `run-once` — debug or single-pass
-3. `process-task-file` — local payload available
-4. `heartbeat` — connectivity check only
-5. `run-loop` — only when explicitly requested
-6. `export-core-submissions` — conversion/export only
+### `pause`
+
+```bash
+python scripts/run_tool.py pause
+```
+
+Pause after the current batch is finished.
+
+### `resume`
+
+```bash
+python scripts/run_tool.py resume
+```
+
+Resume a paused session.
+
+### `stop`
+
+```bash
+python scripts/run_tool.py stop
+```
+
+Stop after the current batch and print a session summary.
+
+## Intent router helpers
+
+### `route-intent`
+
+```bash
+python scripts/run_tool.py route-intent "<user text>"
+```
+
+Routes natural-language input to a runtime action.
+
+### `classify-intent`
+
+```bash
+python scripts/run_tool.py classify-intent "<user text>"
+```
+
+Returns structured intent classification only.
+
+### `intent-help`
+
+```bash
+python scripts/run_tool.py intent-help
+```
+
+Prints the supported natural-language command set.

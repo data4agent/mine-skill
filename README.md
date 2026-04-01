@@ -1,116 +1,96 @@
 # Mine
 
-Agent-first skill project for autonomous data-mining workflows powered by the built-in `mine` runtime.
+Mine is an agent-first mining runtime for signed platform work, crawler execution, and submission export.
 
-## What this project is
+## What lives here
 
-`mine` is the primary **skill + Python runtime** project. It provides:
+- `SKILL.md`: the root skill contract for agent hosts
+- `scripts/run_tool.py`: the only public CLI entrypoint
+- `crawler/`: the crawler, extraction, enrichment, and output pipeline
+- `scripts/`: setup, runtime orchestration, verification, and support utilities
+- `references/`: stable agent reference material for commands, protocol, API, security, and recovery
+- `docs/`: concise setup and environment guidance for agents
 
-- an internal Python crawler/enrichment runtime under `crawler/`
-- a first-load / dataset-listing / status-summary runtime for guided Mine UX
-- a single CLI entrypoint via `scripts/run_tool.py`
-- bootstrap and verification scripts for one-repo setup
-- references, runtime helpers, and schema support files
-- a root skill contract that can be reused across agent hosts
+## Quick start
 
-The crawler engine now lives inside this repository. `mine` owns the runtime, schemas, references, and skill workflow.
-
-## Primary entrypoint
-
-Use `scripts/run_tool.py` as the only public command surface:
-
-```bash
-python scripts/run_tool.py first-load
-python scripts/run_tool.py start-working
-python scripts/run_tool.py check-status
-python scripts/run_tool.py list-datasets
-python scripts/run_tool.py run-worker
-python scripts/run_tool.py run-once
-python scripts/run_tool.py process-task-file <taskType> <taskJsonPath>
-python scripts/run_tool.py export-core-submissions <inputPath> <outputPath> <datasetId>
-```
-
-## Bootstrap and verification
-
-### Unix-like
+Unix-like:
 
 ```bash
 ./scripts/bootstrap.sh
-python scripts/verify_env.py --profile minimal --json
-python scripts/host_diagnostics.py --json
-python scripts/smoke_test.py --json
+awp-wallet init
+awp-wallet unlock --duration 3600
+python scripts/run_tool.py doctor
+python scripts/run_tool.py start-working
 ```
 
-### Windows
+Windows:
 
 ```powershell
 ./scripts/bootstrap.ps1
-./scripts/bootstrap.cmd
-python scripts/verify_env.py --profile minimal --json
-python scripts/host_diagnostics.py --json
-python scripts/smoke_test.py --json
+awp-wallet init
+awp-wallet unlock --duration 3600
+python scripts/run_tool.py doctor
+python scripts/run_tool.py start-working
 ```
 
-The bootstrap flow creates or reuses a virtualenv, installs layered requirements, runs host diagnostics, verifies the environment, and finishes with a smoke test.
+If you want the worker loop directly instead of the guided start flow:
 
-## Runtime environment
+```bash
+python scripts/run_tool.py run-worker 60 0
+```
 
-Required:
+`0` means "run until stopped".
+
+## Environment summary
+
+Required in practice:
 
 - `PLATFORM_BASE_URL`
 - `MINER_ID`
 
-Important optional variables:
+Required for authenticated mining:
 
-- `SOCIAL_CRAWLER_ROOT`
-- `PYTHON_BIN`
-- `PLATFORM_TOKEN`
-- `CRAWLER_OUTPUT_ROOT`
-- `MINE_CONFIG_PATH`
-- `MINE_GATEWAY_TOKEN`
-- `MINE_GATEWAY_BASE_URL`
-- `MINE_ENRICH_MODEL`
-- `MINE_UPSTREAM_MODEL`
-- `AWP_WALLET_BIN`
-- `AWP_WALLET_TOKEN`
-- `AWP_WALLET_TOKEN_SECRET_REF`
-- `WORKER_STATE_ROOT`
-- `WORKER_MAX_PARALLEL`
+- `AWP_WALLET_TOKEN` or `AWP_WALLET_TOKEN_SECRET_REF`
 
-`SOCIAL_CRAWLER_ROOT` defaults to the current `mine` project root, so most agents can run without extra path configuration. `MINE_CONFIG_PATH` defaults to `~/.mine/mine.json`.
+Usually required for the known aDATA platform:
 
-## Generic payload compatibility
+- `EIP712_DOMAIN_NAME=aDATA`
+- `EIP712_CHAIN_ID=8453`
+- `EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000`
 
-Mine can process compatibility inputs like `generic/page` and `generic` task payloads when a local task file or platform item uses a generic web extraction flow.
+Important nuance: low-level platform status calls derive the miner identity from the wallet address, but the current helper scripts and readiness commands still require `MINER_ID` to be set. Keep it as a stable non-empty value until the runtime is simplified.
 
-## Why skill-only
-
-- one runtime entrypoint for all agents
-- no host-specific install wrapper layer
-- easier portability across Cursor, Codex, Claude, OpenAI-style agents, and plain shell execution
-- clearer separation: `SKILL.md` explains behavior, `scripts/run_tool.py` executes it
-
-## awp-wallet
-
-Mine uses `awp-wallet` for time-limited signing sessions. A typical recovery command is:
+## Main commands
 
 ```bash
-awp-wallet unlock --duration 3600
+python scripts/run_tool.py first-load
+python scripts/run_tool.py doctor
+python scripts/run_tool.py agent-status
+python scripts/run_tool.py start-working
+python scripts/run_tool.py check-status
+python scripts/run_tool.py list-datasets
+python scripts/run_tool.py run-worker 60 0
+python scripts/run_tool.py process-task-file <taskType> <taskJsonPath>
+python scripts/run_tool.py export-core-submissions <inputPath> <outputPath> <datasetId>
 ```
 
-Do not store seed phrases or private keys in repository files, config dumps, or logs.
+## Documentation
 
-## Local verification
+- [`docs/AGENT_GUIDE.md`](./docs/AGENT_GUIDE.md): setup, verification, and daily operator workflow
+- [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md): environment variables, auth, known platform values, and production notes
+- [`references/commands-mining.md`](./references/commands-mining.md): command reference
+- [`references/api-platform.md`](./references/api-platform.md): platform API behavior and endpoint reference
+- [`references/protocol-miner.md`](./references/protocol-miner.md): worker session persistence model
+- [`references/security-model.md`](./references/security-model.md): wallet and token handling rules
+- [`references/error-recovery.md`](./references/error-recovery.md): recovery behavior and operator actions
+
+## Verification
 
 ```bash
-python -m pytest tests -q
-python -m pytest crawler/tests/test_bootstrap_assets.py -q
 python scripts/run_tool.py --help
+python scripts/run_tool.py doctor
+python scripts/verify_env.py --profile minimal --json
+python scripts/host_diagnostics.py --json
+python scripts/smoke_test.py --json
+python -m pytest tests -q
 ```
-
-## CI and release automation
-
-Repository automation now includes:
-
-- `.github/workflows/ci.yml` for minimal dependency verification, smoke testing, and the Mine test suite
-- `.github/workflows/release.yml` for building a portable `mine-runtime.tar.gz` release artifact on tags or manual dispatch

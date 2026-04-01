@@ -1,0 +1,154 @@
+# Agent Guide
+
+This guide is the shortest reliable path for an agent to install, verify, and run Mine.
+
+## 1. Host prerequisites
+
+- Python 3.11 or newer
+- Node.js 20 or newer
+- Git
+- `uv` is optional but preferred for faster virtualenv creation
+
+Quick checks:
+
+```bash
+python --version
+node --version
+git --version
+```
+
+## 2. Bootstrap the runtime
+
+Unix-like:
+
+```bash
+./scripts/bootstrap.sh
+```
+
+Windows:
+
+```powershell
+./scripts/bootstrap.ps1
+```
+
+What bootstrap does:
+
+- creates or reuses `.venv`
+- installs Python requirements
+- installs `awp-wallet` from the GitHub repo if it is missing
+- runs host diagnostics, environment verification, smoke tests, and post-install checks
+
+## 3. Initialize and unlock the wallet
+
+Initialize once if the wallet does not exist yet:
+
+```bash
+awp-wallet init
+```
+
+Unlock for one hour:
+
+```bash
+awp-wallet unlock --duration 3600
+```
+
+Mine signs requests through `awp-wallet`. Do not store seed phrases or private keys in repo files.
+
+## 4. Configure the environment
+
+Use `.env.example` as the starting point and set at least:
+
+```bash
+PLATFORM_BASE_URL=http://101.47.73.95
+MINER_ID=mine-agent
+AWP_WALLET_BIN=awp-wallet
+AWP_WALLET_TOKEN=<token from awp-wallet unlock>
+EIP712_DOMAIN_NAME=aDATA
+EIP712_CHAIN_ID=8453
+EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000
+```
+
+Why `MINER_ID` is still listed:
+
+- the lower-level client fetches miner status with the wallet address
+- but `doctor`, `agent-status`, `agent-run`, and setup helpers still require `MINER_ID`
+- use a stable placeholder until that helper-layer requirement is removed in code
+
+For a fuller variable reference, see [`ENVIRONMENT.md`](./ENVIRONMENT.md).
+
+## 5. Verify readiness
+
+Recommended checks:
+
+```bash
+python scripts/run_tool.py doctor
+python scripts/run_tool.py agent-status
+python scripts/run_tool.py first-load
+```
+
+Interpretation:
+
+- `doctor` returns structured checks and exact fix commands
+- `agent-status` is the fastest readiness probe for host integrations
+- `first-load` renders the guided startup experience
+
+## 6. Start mining
+
+Guided start:
+
+```bash
+python scripts/run_tool.py start-working
+```
+
+This prepares the session, sends heartbeat, fetches datasets, and may ask for dataset selection.
+
+Direct worker loop:
+
+```bash
+python scripts/run_tool.py run-worker 60 0
+```
+
+- first argument: polling interval in seconds
+- second argument: max iterations
+- use `0` for a long-running loop
+
+Single-pass run:
+
+```bash
+python scripts/run_tool.py run-worker 60 1
+```
+
+## 7. Common operator commands
+
+```bash
+python scripts/run_tool.py check-status
+python scripts/run_tool.py list-datasets
+python scripts/run_tool.py pause
+python scripts/run_tool.py resume
+python scripts/run_tool.py stop
+python scripts/run_tool.py diagnose
+```
+
+## 8. When setup fails
+
+Prefer this order:
+
+1. Re-run bootstrap.
+2. Run `python scripts/run_tool.py doctor`.
+3. Manually install `awp-wallet` from GitHub if bootstrap could not do it.
+
+Manual `awp-wallet` install:
+
+```bash
+git clone https://github.com/awp-core/awp-wallet.git
+cd awp-wallet
+npm install
+npm install -g .
+awp-wallet --version
+```
+
+Do not rely on `npm install -g @aspect/awp-wallet`. This repository currently installs `awp-wallet` from the upstream GitHub source instead.
+
+## 9. Production note
+
+The production platform URL currently requires wallet allow-listing. If you see `401` with `UNTRUSTED_HOST`, the wallet must be approved before mining will work there.

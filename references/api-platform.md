@@ -1,153 +1,107 @@
 # Platform API Reference
 
-Mine communicates with the AWP Platform Service through signed HTTP requests. All mutable endpoints require EIP-712 signatures via `awp-wallet`.
+Mine talks to the platform through signed HTTP requests built by `lib/platform_client.py` and `scripts/signer.py`.
 
 ## Base URL
 
-Set via `PLATFORM_BASE_URL`. The testnet default is `http://101.47.73.95`.
+Configured through `PLATFORM_BASE_URL`.
 
-## Authentication
+Known values in current project docs:
 
-Every request carries these headers when a `WalletSigner` is configured:
+- test: `http://101.47.73.95`
+- production: `https://sd76fip34meovmfu5ftlg.apigateway-ap-southeast-1.volceapi.com`
+
+## Authentication model
+
+When a wallet signer is available, requests include:
 
 | Header | Purpose |
 |---|---|
-| `X-Signer` | Wallet address |
+| `Content-Type` | Request body type |
+| `X-Request-ID` | Request correlation ID |
+| `X-Signer` | Wallet address from `awp-wallet receive` |
 | `X-Signature` | EIP-712 signature |
-| `X-Nonce` | Random 52-bit integer |
-| `X-Issued-At` | Unix timestamp (seconds) |
-| `X-Expires-At` | `issuedAt + 60` |
-| `X-Chain-Id` | Chain ID (default `1`) |
-| `X-Signed-Headers` | `content-type,x-request-id` |
-| `Authorization` | `Bearer <PLATFORM_TOKEN>` when available |
+| `X-Nonce` | Per-request nonce |
+| `X-Issued-At` | Signature issue timestamp |
+| `X-Expires-At` | Signature expiry timestamp |
+| `X-Chain-Id` | EIP-712 chain ID |
+| `X-Signed-Headers` | Currently `content-type,x-request-id` |
+| `Authorization` | Optional bearer token from `PLATFORM_TOKEN` |
 
-The signed message type is `APIRequest` with domain `Platform Service` version `1`.
+The signature domain is configurable:
 
-## Endpoints
+- code defaults: `Platform Service`, chain ID `1`, zero-address verifying contract
+- recommended for the known aDATA platform: `aDATA`, chain ID `8453`, zero-address verifying contract
+
+## Endpoint summary
 
 ### Heartbeat
 
-```
+```text
 POST /api/mining/v1/heartbeat
-Body: { "client": "<client_name>", "ip_address": "" }
-```
-
-Unified heartbeat. Returns miner registration state, credit score, epoch info.
-
-```
 POST /api/mining/v1/miners/heartbeat
-Body: { "client": "<client_name>" }
 ```
 
-Miner-specific heartbeat.
+Used to confirm registration state, credit score, and epoch status.
 
-### Datasets
+### Dataset listing
 
-```
+```text
 GET /api/core/v1/datasets
-```
-
-Returns `{ "data": [ ... ] }` or `{ "data": { "items": [ ... ] } }`. Each item has `id`, `name`, `schema`, and epoch metadata.
-
-```
 GET /api/core/v1/datasets/{datasetId}
 ```
 
-Single dataset detail.
+### Task claim and report
 
-### Preflight
-
-```
-POST /api/mining/v1/miners/preflight
-Body: { "dataset_id": "<id>", "epoch_id": "<id>" }
-```
-
-Pre-submission check. Returns a PoW challenge when required.
-
-### PoW Challenge
-
-```
-POST /api/mining/v1/pow-challenges/{challengeId}/answer
-Body: { "answer": "<answer>" }
+```text
+POST /api/mining/v1/repeat-crawl-tasks/claim
+POST /api/mining/v1/refresh-tasks/claim
+POST /api/mining/v1/repeat-crawl-tasks/{taskId}/report
+POST /api/mining/v1/refresh-tasks/{taskId}/report
 ```
 
-Submit the PoW answer. Must be solved before submission is accepted.
+### Occupancy and submission
 
-### Occupancy / Dedup
-
-```
+```text
 GET /api/core/v1/url-occupancies/check?dataset_id={id}&url={encodedUrl}
-```
-
-Returns occupancy state. **404 is treated as compatibility fallback** (URL is assumed unoccupied).
-
-### Submission
-
-```
 POST /api/core/v1/submissions
-Body: { "dataset_id": "...", "entries": [ ... ] }
-```
-
-Submit structured records. Each entry must include `dedup_key`, `canonical_url`, and all required schema fields.
-
-```
 GET /api/core/v1/submissions/{submissionId}
 ```
 
-Fetch a single submission result.
+### Preflight and PoW
 
-### Task Claims
-
-```
-POST /api/mining/v1/repeat-crawl-tasks/claim
-POST /api/mining/v1/refresh-tasks/claim
+```text
+POST /api/mining/v1/miners/preflight
+POST /api/mining/v1/pow-challenges/{challengeId}/answer
 ```
 
-Claim a pending task. Returns `null` (via 404) when no tasks are available.
+### Wallet-derived miner status
 
-```
-POST /api/mining/v1/repeat-crawl-tasks/{taskId}/report
-POST /api/mining/v1/refresh-tasks/{taskId}/report
-Body: { ... task result payload ... }
-```
+These calls use the signer wallet address, not the `MINER_ID` environment variable:
 
-Report task completion.
-
-### Miner Status
-
-```
-GET /api/mining/v1/miners/{minerId}/status
+```text
+GET /api/mining/v1/miners/{walletAddress}/status
+GET /api/mining/v1/miners/{walletAddress}/settlement
+GET /api/mining/v1/miners/{walletAddress}/reward-summary
 ```
 
-Returns credit score, tier, registration state. **404 degrades gracefully** to empty dict.
+## Runtime behavior by status code
 
-### Settlement
-
-```
-GET /api/mining/v1/miners/{minerId}/settlement
-```
-
-Returns settlement state for recent submissions. **404 degrades gracefully**.
-
-### Reward Summary
-
-```
-GET /api/mining/v1/miners/{minerId}/reward-summary
-```
-
-Returns accumulated reward data. **404 degrades gracefully**.
-
-## Error Handling
-
-| Status | Meaning | Runtime Behavior |
+| Status | Meaning | Runtime behavior |
 |---|---|---|
-| `401` + `MISSING_HEADERS` | Wallet signature not configured | Fatal — surface setup instructions |
-| `401` + expired token | Session token expired | Auto-renew via `awp-wallet unlock`, retry |
-| `403` | Access denied | Stop affected action, surface message |
-| `404` (dataset) | Dataset archived or missing | Skip dataset |
-| `404` (occupancy) | Endpoint not implemented | Compatibility fallback, treat as unoccupied |
-| `404` (status/settlement/reward) | Endpoint not available | Return empty, degrade gracefully |
-| `409` | Duplicate submission | Skip URL silently |
-| `429` | Rate limited | Cooldown affected dataset, rotate to next |
-| `500+` | Server error | Exponential backoff, retry up to 3 times |
-| Timeout | Network issue | Exponential backoff, retry up to 3 times |
+| `401` + `MISSING_HEADERS` | Signed headers missing | Fail fast with setup guidance |
+| `401` + `UNAUTHORIZED` / `TOKEN_EXPIRED` / `SESSION_EXPIRED` | Wallet session expired | Renew wallet session once, then retry |
+| `401` + `UNTRUSTED_HOST` | Wallet not allowed on current host/platform | Surface to operator; no auto-fix |
+| `403` | Access denied | Surface and stop the affected action |
+| `404` on occupancy | Endpoint absent | Graceful fallback to empty occupancy |
+| `404` on miner status / settlement / reward summary | Endpoint absent | Return empty dict |
+| `404` on claim | No task available | Return `None` |
+| `409` | Duplicate submission | Skip item |
+| `429` | Rate limited | Cool down the dataset and retry later |
+| `500+` or timeout | Transient platform issue | Retry with backoff up to three times |
+
+## Implementation pointers
+
+- signer: `scripts/signer.py`
+- client: `lib/platform_client.py`
+- worker construction: `scripts/agent_runtime.py`
