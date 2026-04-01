@@ -227,10 +227,10 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
         payload = worker.start_working(selected_dataset_ids=selected_dataset_ids)
     except Exception as exc:
         return (
-            "Unable to start mining yet.\n"
-            f"- Start-up check failed: {exc}\n"
-            "- If this is a signing/session issue, run: awp-wallet unlock --duration 3600\n"
-            "- Then say check status or start working again."
+            f"{SYM_CROSS} Unable to start mining yet.\n"
+            f"  {SYM_BULLET} Start-up check failed: {exc}\n"
+            f"  {SYM_BULLET} If this is a signing/session issue, run: awp-wallet unlock --duration 3600\n"
+            f"  {SYM_BULLET} Then say 'check status' or 'start working' again."
         )
     heartbeat = payload.get("heartbeat") or {}
     status = payload.get("status") or {}
@@ -238,20 +238,27 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
 
     lines = []
     if heartbeat.get("unified_ok") or heartbeat.get("miner_ok"):
-        lines.append("Heartbeat sent 鈥?miner registered")
+        lines.append(f"{SYM_CHECK} Heartbeat sent {SYM_DASH} miner registered")
     for error in heartbeat.get("errors") or []:
-        lines.append(f"Heartbeat warning: {error}")
-    if status.get("credit_score") is not None:
-        lines.append(f"Credit score: {status.get('credit_score')}")
-    if status.get("credit_tier"):
-        lines.append(f"Credit tier: {status.get('credit_tier')}")
-    if status.get("epoch_id"):
-        lines.append(f"Current epoch: {status.get('epoch_id')}")
+        lines.append(f"{SYM_WARN} Heartbeat warning: {error}")
+
+    credit_score = status.get("credit_score")
+    credit_tier = status.get("credit_tier")
+    if credit_score is not None:
+        tier_tag = f" [{credit_tier}]" if credit_tier else ""
+        lines.append(f"{SYM_CHECK} Credit score: {credit_score}{tier_tag}")
+
+    epoch_id = status.get("epoch_id")
+    epoch_remaining = status.get("epoch_remaining")
+    if epoch_id:
+        remaining_text = f" ({epoch_remaining} remaining)" if epoch_remaining else ""
+        lines.append(f"{SYM_CHECK} Current epoch: {epoch_id}{remaining_text}")
+
     if status.get("epoch_target"):
         lines.append(f"Target: {status.get('epoch_target')} submissions this epoch.")
 
     if payload.get("selection_required"):
-        lines.extend(["", f"Found {len(datasets)} active DataSets:"])
+        lines.extend(["", f"Found {len(datasets)} active DataSets:", ""])
         for index, dataset in enumerate(datasets, start=1):
             dataset_id = str(dataset.get("id") or f"dataset-{index}")
             domains = dataset.get("source_domains")
@@ -259,60 +266,103 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
                 domain_text = ", ".join(str(item) for item in domains[:2])
             else:
                 domain_text = str(domains or "no source domains")
-            lines.append(f"- {index}. {dataset_id} 鈥?{domain_text}")
-        lines.extend(["", "Which DataSet(s) to mine? Enter dataset ids or a comma-separated list."])
+            miner_count = dataset.get("miner_count")
+            miner_text = f" {SYM_BULLET} {miner_count} miners" if miner_count else ""
+            lines.append(f"  {index}. {dataset_id} {SYM_DASH} {domain_text}{miner_text}")
+        lines.extend(["", "Which DataSet(s) to mine? Enter numbers (e.g. 1 or 1,2 for both)."])
         return "\n".join(lines)
 
     selected = payload.get("selected_dataset_ids") or []
+    strategy = payload.get("strategy") or "round-robin batches of 5 URLs each"
     if selected:
-        lines.extend(["", f"Mining {', '.join(selected)}.", "Say pause or stop anytime."])
+        lines.extend([
+            "",
+            f"Mining {' + '.join(selected)}.",
+            f"Strategy: {strategy}.",
+            "",
+            f"Starting batch 1... say 'pause' or 'stop' anytime.",
+        ])
     else:
         lines.append("Mining session is ready.")
     return "\n".join(lines)
 
 
 def render_control_response(payload: dict[str, Any]) -> str:
+    action = payload.get("last_control_action") or payload.get("action")
+    mining_state = payload.get("mining_state")
+
+    # Use specialized renderers for pause/resume/stop
+    if action == "pause" and mining_state == "paused":
+        session_totals = payload.get("session_totals") or {}
+        return render_pause_response(
+            batch_remaining=int(payload.get("batch_remaining") or 0),
+            session_submitted=int(session_totals.get("submitted_items") or 0),
+            session_ok=int(session_totals.get("submitted_items") or 0) - int(session_totals.get("failed_items") or 0),
+            session_failed=int(session_totals.get("failed_items") or 0),
+            epoch_submitted=int(payload.get("epoch_submitted") or 0),
+            epoch_target=int(payload.get("epoch_target") or 80),
+        )
+
+    if action == "resume" and mining_state == "running":
+        return render_resume_response(
+            credit_score=payload.get("credit_score"),
+            epoch_id=payload.get("epoch_id"),
+            epoch_submitted=int(payload.get("epoch_submitted") or 0),
+            epoch_target=int(payload.get("epoch_target") or 80),
+            remaining_time=payload.get("epoch_remaining"),
+            batch_num=int(payload.get("last_batch_num") or 1) + 1,
+            dataset_ids=payload.get("selected_dataset_ids"),
+        )
+
+    if action == "stop" and mining_state == "stopped":
+        session_totals = payload.get("session_totals") or {}
+        duration = payload.get("session_duration") or "unknown"
+        return render_session_summary(
+            duration=str(duration),
+            submitted=int(session_totals.get("submitted_items") or 0),
+            accepted=int(session_totals.get("submitted_items") or 0) - int(session_totals.get("failed_items") or 0),
+            failed=int(session_totals.get("failed_items") or 0),
+            crawled=int(session_totals.get("processed_items") or 0),
+            dataset_count=len(payload.get("selected_dataset_ids") or []) or 1,
+            epoch_submitted=int(payload.get("epoch_submitted") or 0),
+            epoch_target=int(payload.get("epoch_target") or 80),
+            target_reached=int(payload.get("epoch_submitted") or 0) >= int(payload.get("epoch_target") or 80),
+        )
+
+    # Generic control response
     lines = [str(payload.get("message") or "State updated.")]
-    lines.append(f"Mining state: {payload.get('mining_state')}")
+    lines.append(f"{SYM_BULLET} Mining state: {mining_state}")
     if payload.get("selected_dataset_ids"):
-        lines.append(f"Selected datasets: {', '.join(payload.get('selected_dataset_ids') or [])}")
+        lines.append(f"{SYM_BULLET} Selected datasets: {', '.join(payload.get('selected_dataset_ids') or [])}")
     queues = payload.get("queues") or {}
     if queues:
         lines.append(
-            "Queues 鈥?backlog: {backlog}, auth pending: {auth}, submit pending: {submit}".format(
-                backlog=queues.get("backlog", 0),
-                auth=queues.get("auth_pending", 0),
-                submit=queues.get("submit_pending", 0),
-            )
+            f"{SYM_BULLET} Queues {SYM_DASH} backlog: {queues.get('backlog', 0)}, "
+            f"auth pending: {queues.get('auth_pending', 0)}, "
+            f"submit pending: {queues.get('submit_pending', 0)}"
         )
-    if payload.get("epoch_target") is not None:
-        lines.append(f"Epoch progress: {payload.get('epoch_submitted')} / {payload.get('epoch_target')}")
+    epoch_target = payload.get("epoch_target")
+    epoch_submitted = payload.get("epoch_submitted")
+    if epoch_target is not None:
+        bar = text_progress_bar(int(epoch_submitted or 0), int(epoch_target), width=16)
+        lines.append(f"{SYM_BULLET} Epoch progress: {bar} {epoch_submitted} / {epoch_target}")
     progress = payload.get("progress")
     if isinstance(progress, dict):
-        if progress.get("epoch_completion_percent") is not None:
-            lines.append(f"Epoch completion: {progress.get('epoch_completion_percent')}%")
         if progress.get("epoch_remaining") is not None:
-            lines.append(f"Remaining this epoch: {progress.get('epoch_remaining')}")
-    if payload.get("last_control_action"):
-        lines.append(f"Last control action: {payload.get('last_control_action')}")
+            lines.append(f"{SYM_BULLET} Remaining this epoch: {progress.get('epoch_remaining')}")
     phase = payload.get("phase")
     if isinstance(phase, dict) and phase.get("label"):
-        lines.append(f"Phase: {phase.get('label')}")
+        lines.append(f"{SYM_BULLET} Phase: {phase.get('label')}")
     current_batch = payload.get("current_batch")
     if isinstance(current_batch, dict) and current_batch.get("size") is not None:
         lines.append(
-            "Current batch: {state}, {size} item(s)".format(
-                state=current_batch.get("state") or "idle",
-                size=current_batch.get("size"),
-            )
+            f"{SYM_BULLET} Current batch: {current_batch.get('state') or 'idle'}, {current_batch.get('size')} item(s)"
         )
     reward = payload.get("reward")
     if isinstance(reward, dict) and reward.get("pending") is not None:
-        lines.append(f"Pending rewards: {reward.get('pending')}")
-    settlement = payload.get("settlement")
-    if isinstance(settlement, dict) and settlement.get("pending_rewards") is not None:
-        lines.append(f"Settlement pending rewards: {settlement.get('pending_rewards')}")
-    lines.append("Current batch control: pause / resume / stop")
+        lines.append(f"{SYM_BULLET} Pending rewards: {reward.get('pending')}")
+    lines.append("")
+    lines.append(f"Say 'pause', 'resume', or 'stop' to control mining.")
     return "\n".join(lines)
 
 
@@ -966,59 +1016,91 @@ def render_status_summary(worker: Any) -> str:
     except Exception:
         datasets = []
 
+    mining_state = status.get("mining_state", "idle")
+    credit_score = status.get("credit_score")
+    credit_tier = status.get("credit_tier")
+    epoch_submitted = int(status.get("epoch_submitted") or 0)
+    epoch_target = int(status.get("epoch_target") or 80)
+
+    # Header
     lines = [
-        "Mine status",
-        f"- Miner ID: {worker.config.miner_id}",
-        f"- Platform Service: {worker.config.base_url}",
-        f"- Mining state: {status.get('mining_state')}",
-        f"- Known active datasets: {len(datasets)}",
-        f"- Backlog: {status['queues']['backlog']}",
-        f"- Auth pending: {status['queues']['auth_pending']}",
-        f"- Submit pending: {status['queues']['submit_pending']}",
-        f"- Epoch progress: {status.get('epoch_submitted')} / {status.get('epoch_target')}",
-        "- Current batch control: pause / resume / stop",
+        "Mine Status",
+        f"{SYM_DASH * 40}",
     ]
-    if status.get("selected_dataset_ids"):
-        lines.append(f"- Selected datasets: {', '.join(status.get('selected_dataset_ids') or [])}")
+
+    # Miner info
+    lines.append(f"{SYM_BULLET} Miner ID: {worker.config.miner_id}")
+    lines.append(f"{SYM_BULLET} Platform: {worker.config.base_url}")
+
+    # Mining state with icon
+    state_icon = SYM_CHECK if mining_state == "running" else SYM_WARN if mining_state == "paused" else SYM_BULLET
+    lines.append(f"{state_icon} Mining state: {mining_state}")
+
+    # Credit score with tier
+    if credit_score is not None:
+        tier_text = f" [{credit_tier}]" if credit_tier else ""
+        lines.append(f"{SYM_BULLET} Credit score: {credit_score}{tier_text}")
+
+    # Epoch progress with bar
+    lines.append("")
+    epoch_id = status.get("epoch_id")
+    epoch_remaining = status.get("progress", {}).get("epoch_remaining")
+    if epoch_id:
+        remaining_text = f" ({epoch_remaining} remaining)" if epoch_remaining else ""
+        lines.append(f"Epoch {epoch_id}{remaining_text}")
+    bar = text_progress_bar(epoch_submitted, epoch_target, width=20)
+    lines.append(f"{bar} {epoch_submitted} / {epoch_target}")
+
+    # Selected datasets
+    selected = status.get("selected_dataset_ids") or []
+    if selected:
+        lines.append("")
+        lines.append(f"Mining: {' + '.join(selected)}")
+
+    # Session totals
     progress = status.get("progress")
     if isinstance(progress, dict):
-        if progress.get("epoch_completion_percent") is not None:
-            lines.append(f"- Epoch completion: {progress.get('epoch_completion_percent')}%")
-        if progress.get("epoch_remaining") is not None:
-            lines.append(f"- Remaining this epoch: {progress.get('epoch_remaining')}")
-        lines.append(
-            "- Current session totals: processed {processed}, submitted {submitted}, failed {failed}".format(
-                processed=progress.get("session_processed_items", 0),
-                submitted=progress.get("session_submitted_items", 0),
-                failed=progress.get("session_failed_items", 0),
-            )
-        )
-    if status.get("last_control_action"):
-        lines.append(f"- Last control action: {status.get('last_control_action')}")
-    phase = status.get("phase")
-    if isinstance(phase, dict) and phase.get("label"):
-        lines.append(f"- Phase: {phase.get('label')}")
-    current_batch = status.get("current_batch")
-    if isinstance(current_batch, dict) and current_batch.get("size") is not None:
-        lines.append(
-            "- Current batch: {state}, {size} item(s)".format(
-                state=current_batch.get("state") or "idle",
-                size=current_batch.get("size"),
-            )
-        )
+        processed = int(progress.get("session_processed_items") or 0)
+        submitted = int(progress.get("session_submitted_items") or 0)
+        failed = int(progress.get("session_failed_items") or 0)
+        if processed > 0 or submitted > 0:
+            lines.append("")
+            lines.append("Session totals:")
+            lines.append(f"  {SYM_BULLET} Processed: {processed}")
+            lines.append(f"  {SYM_BULLET} Submitted: {submitted} ({submitted - failed} ok / {failed} failed)")
+
+    # Queues
+    queues = status.get("queues") or {}
+    backlog = int(queues.get("backlog") or 0)
+    auth_pending = int(queues.get("auth_pending") or 0)
+    submit_pending = int(queues.get("submit_pending") or 0)
+    if backlog > 0 or auth_pending > 0 or submit_pending > 0:
+        lines.append("")
+        lines.append(f"Queues: backlog {backlog}, auth pending {auth_pending}, submit pending {submit_pending}")
+
+    # Rewards
     reward = status.get("reward")
     if isinstance(reward, dict) and reward.get("pending") is not None:
-        lines.append(f"- Pending rewards: {reward.get('pending')}")
+        lines.append("")
+        lines.append(f"Pending rewards: {reward.get('pending')}")
+
+    # Settlement
     settlement = status.get("settlement")
-    if isinstance(settlement, dict) and settlement.get("pending_rewards") is not None:
-        lines.append(f"- Settlement pending rewards: {settlement.get('pending_rewards')}")
-    credit = status.get("credit")
-    if isinstance(credit, dict) and credit.get("score_delta") is not None:
-        lines.append(f"- Credit delta: {credit.get('score_delta')}")
-    if status.get("credit_score") is not None:
-        lines.append(f"- Credit score: {status.get('credit_score')}")
-    if status.get("credit_tier"):
-        lines.append(f"- Credit tier: {status.get('credit_tier')}")
-    if status.get("settlement"):
-        lines.append(f"- Settlement state: {status.get('settlement')}")
+    if isinstance(settlement, dict):
+        confirmed = settlement.get("confirmed")
+        rejected = settlement.get("rejected")
+        if confirmed is not None or rejected is not None:
+            lines.append("")
+            lines.append("Last settlement:")
+            if confirmed is not None:
+                lines.append(f"  {SYM_CHECK} Confirmed: {confirmed}")
+            if rejected is not None:
+                lines.append(f"  {SYM_CROSS} Rejected: {rejected}")
+            if settlement.get("reward"):
+                lines.append(f"  {SYM_BULLET} Reward: {settlement.get('reward')}")
+
+    # Control hint
+    lines.append("")
+    lines.append(f"Control: 'pause' | 'resume' | 'stop'")
+
     return "\n".join(lines)
