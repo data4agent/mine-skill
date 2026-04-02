@@ -45,10 +45,10 @@ python scripts/run_tool.py run-worker 60 0
 
 ## Environment summary
 
-Required in practice:
+Defaults now cover the normal OpenClaw happy path:
 
-- `PLATFORM_BASE_URL`
-- `MINER_ID`
+- `PLATFORM_BASE_URL` defaults to testnet
+- `MINER_ID` defaults to `mine-agent` for helper compatibility
 
 Required for authenticated mining:
 
@@ -60,7 +60,7 @@ Usually required for the known aDATA platform:
 - `EIP712_CHAIN_ID=8453`
 - `EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000`
 
-Important nuance: low-level platform status calls derive the miner identity from the wallet address, but the current helper scripts and readiness commands still require `MINER_ID` to be set. Keep it as a stable non-empty value until the runtime is simplified.
+Important nuance: low-level platform status calls derive the miner identity from the wallet address. `MINER_ID` is now just a helper-layer compatibility default and does not need to be configured manually in the common case.
 
 ## Main commands
 
@@ -109,4 +109,21 @@ python scripts/verify_env.py --profile minimal --json
 python scripts/host_diagnostics.py --json
 python scripts/smoke_test.py --json
 python -m pytest tests -q
+```
+
+## Windows LinkedIn auto-login
+
+On Windows, LinkedIn `--auto-login` now uses a local visible Chrome/Edge window instead of the Linux-only `Xvfb/x11vnc/noVNC` stack.
+
+- first run may install or verify `agent-browser`
+- system Chrome/Edge is preferred; pinned browser fallback is still supported
+- the crawler opens the LinkedIn login page in a local browser window and waits for a valid browser session before exporting cookies
+- common failures still include LinkedIn CAPTCHA, missing Chrome/Edge, or a busy CDP port such as `9222`
+
+Recommended preflight on Windows:
+
+```powershell
+python auto-browser/scripts/vrd.py check
+python auto-browser/scripts/vrd.py start
+python auto-browser/scripts/vrd.py status
 ```

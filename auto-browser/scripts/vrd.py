@@ -46,6 +46,10 @@ PIDFILE    = WORKDIR / "state.json"
 LOGDIR     = WORKDIR / "logs"
 SSHOT_DIR  = WORKDIR / "screenshots"
 
+
+def _is_windows() -> bool:
+    return sys.platform.startswith("win")
+
 # ── 设备预设 ──
 _UA = {
     "mobile":         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
@@ -89,6 +93,14 @@ def _env(name: str, default: str = "") -> str:
 def _alive(pid) -> bool:
     try:
         p = int(pid)
+        if _is_windows():
+            res = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {p}"],
+                capture_output=True,
+                text=True,
+            )
+            out = (res.stdout or "") + (res.stderr or "")
+            return str(p) in out and "No tasks are running" not in out
         os.kill(p, 0)
         status_path = f"/proc/{p}/status"
         if os.path.isfile(status_path):
@@ -103,7 +115,11 @@ def _alive(pid) -> bool:
 def _kill(pid) -> None:
     if not pid: return
     try:
-        p = int(pid); os.kill(p, signal.SIGTERM); time.sleep(0.3)
+        p = int(pid)
+        if _is_windows():
+            subprocess.run(["taskkill", "/PID", str(p), "/T", "/F"], capture_output=True, text=True)
+            return
+        os.kill(p, signal.SIGTERM); time.sleep(0.3)
         try: os.kill(p, signal.SIGKILL)
         except ProcessLookupError: pass
     except Exception: pass
@@ -117,6 +133,12 @@ def _run(cmd: list, **kw) -> subprocess.CompletedProcess:
 def _cmd_ok(name: str) -> bool:
     return shutil.which(name) is not None
 
+
+def _resolve_cmd(name: str) -> str:
+    if _is_windows():
+        return shutil.which(name) or shutil.which(f"{name}.cmd") or shutil.which(f"{name}.exe") or name
+    return shutil.which(name) or name
+
 def _need(name: str) -> None:
     if not _cmd_ok(name):
         _die(f"缺少依赖: {name}")
@@ -128,7 +150,12 @@ def _info(msg: str)  -> None: print(f"[INFO] {msg}")
 def _warn(msg: str)  -> None: print(f"[WARN] {msg}")
 
 def _pkill(pattern: str) -> None:
-    subprocess.run(["pkill", "-f", pattern], capture_output=True)
+    if _is_windows():
+        return
+    try:
+        subprocess.run(["pkill", "-f", pattern], capture_output=True)
+    except FileNotFoundError:
+        return
 
 # ════════════════════════════════════════════════════════════════════════
 #  State 文件
@@ -244,6 +271,22 @@ def _install_cloudflared() -> bool:
 #  Chrome 发现 & Profile
 # ════════════════════════════════════════════════════════════════════════
 def _resolve_system_chrome() -> str:
+    if _is_windows():
+        candidates = [
+            os.environ.get("CHROME_BIN", ""),
+            shutil.which("chrome") or "",
+            shutil.which("msedge") or "",
+            str(Path(os.environ.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe"),
+            str(Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe"),
+            str(Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe"),
+            str(Path(os.environ.get("PROGRAMFILES", "")) / "Microsoft/Edge/Application/msedge.exe"),
+            str(Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Microsoft/Edge/Application/msedge.exe"),
+            str(Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/Edge/Application/msedge.exe"),
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).is_file():
+                return str(Path(candidate))
+        return ""
     for name in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium"):
         p = shutil.which(name)
         if p: return p
@@ -251,7 +294,10 @@ def _resolve_system_chrome() -> str:
 
 def _resolve_pinned_chrome(pin_dir: str = "chromium-1208") -> str:
     root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", Path.home() / ".cache/ms-playwright"))
-    for suffix in ("chrome-linux64/chrome", "chrome-linux/chrome"):
+    suffixes = ["chrome-linux64/chrome", "chrome-linux/chrome"]
+    if _is_windows():
+        suffixes.insert(0, "chrome-win/chrome.exe")
+    for suffix in suffixes:
         c = root / pin_dir / suffix
         if c.is_file() and os.access(c, os.X_OK): return str(c)
     return ""
@@ -278,14 +324,16 @@ def _prepare_profile(profile: str, workdir: str) -> None:
     _info("准备 Chrome profile...")
     _pkill(f"--user-data-dir={profile}")
     time.sleep(1)
-    subprocess.run(["pkill", "-9", "-f", f"--user-data-dir={profile}"], capture_output=True)
+    if not _is_windows():
+        subprocess.run(["pkill", "-9", "-f", f"--user-data-dir={profile}"], capture_output=True)
     time.sleep(0.5)
     pp = Path(profile)
     if pp.exists():
         for sl in pp.glob("Singleton*"):
             sl.unlink(missing_ok=True)
-        for tmp in Path("/tmp").glob(".org.chromium.Chromium.*"):
-            shutil.rmtree(tmp, ignore_errors=True)
+        if not _is_windows():
+            for tmp in Path("/tmp").glob(".org.chromium.Chromium.*"):
+                shutil.rmtree(tmp, ignore_errors=True)
     if _profile_has_login(profile):
         _info(f"复用已有 profile: {profile}"); return
     _warn(f"profile 无登录数据: {profile}")
@@ -301,6 +349,45 @@ def _prepare_profile(profile: str, workdir: str) -> None:
                 sl.unlink(missing_ok=True)
             return
     _info("无可用备份，使用新 profile")
+
+
+def _focus_windows_window(pid: int) -> bool:
+    if not _is_windows():
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        hwnds: list[int] = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def _enum(hwnd, _lparam):
+            proc_id = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value == pid and user32.IsWindowVisible(hwnd):
+                hwnds.append(hwnd)
+            return True
+
+        for _ in range(20):
+            hwnds.clear()
+            user32.EnumWindows(WNDENUMPROC(_enum), 0)
+            if hwnds:
+                hwnd = hwnds[0]
+                SW_RESTORE = 9
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                try:
+                    user32.AllowSetForegroundWindow(kernel32.GetCurrentProcessId())
+                except Exception:
+                    pass
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+                return True
+            time.sleep(0.25)
+    except Exception:
+        return False
+    return False
     pp.mkdir(parents=True, exist_ok=True)
 
 def _backup_profile(profile: str, workdir: str, max_keep: int = 3) -> None:
@@ -614,6 +701,13 @@ def list_files(cat: str = "downloads") -> list:
 def check_health() -> dict:
     env = _load()
     if not env: return {"ok": False, "errors": ["no state file"], "recovered": []}
+    if env.get("RUNTIME_PLATFORM") == "windows-local":
+        errors = []
+        for k, label in [("MODE_SWITCH_PID", "serve"), ("CHROME_PID", "Chrome")]:
+            pid = env.get(k, "")
+            if pid and not _alive(pid):
+                errors.append(f"{label} dead (pid={pid})")
+        return {"ok": not errors, "errors": errors, "recovered": [], "ts": int(time.time())}
     errors, recovered = [], []
     dn = env.get("DISPLAY_NUM", "55")
 
@@ -667,6 +761,33 @@ def _symlink_to_path(cmd_name: str) -> bool:
 
 def cmd_check() -> None:
     _info("检查 VRD 依赖...")
+    if _is_windows():
+        for c in ("python", "curl"):
+            _need(c)
+        if not _cmd_ok("node") or not _cmd_ok("npm"):
+            _die("Windows 本地浏览器模式需要 Node.js 与 npm")
+        npm_bin = _resolve_cmd("npm")
+        agent_browser_bin = _resolve_cmd("agent-browser")
+        if not _cmd_ok("agent-browser"):
+            _info("安装 agent-browser...")
+            subprocess.call([npm_bin, "i", "-g", "agent-browser"])
+        if not _cmd_ok("agent-browser"):
+            _die("agent-browser 安装失败")
+        pin = _env("CHROME_PIN_DIR", "chromium-1208")
+        sys_c = _resolve_system_chrome()
+        if sys_c:
+            _info(f"系统 Chrome: {sys_c}")
+        else:
+            pin_c = _resolve_pinned_chrome(pin)
+            if not pin_c:
+                _info(f"安装 pinned Chrome ({pin})...")
+                subprocess.call([agent_browser_bin, "install"])
+                pin_c = _resolve_pinned_chrome(pin)
+            if not pin_c:
+                _die("无可用 Chrome/Edge，请安装系统浏览器或执行 agent-browser install")
+            _info(f"pinned Chrome: {pin_c}")
+        _info("所有依赖就绪 ✓")
+        return
     for c in ("python3", "Xvfb", "x11vnc", "websockify", "curl"):
         _need(c)
     if _env("ENABLE_WM", "1") == "1":
@@ -696,10 +817,95 @@ def cmd_check() -> None:
         _info(f"pinned Chrome: {pin_c}")
     _info("所有依赖就绪 ✓")
 
+
+def _start_windows_local_mode() -> None:
+    bind = _env("KASM_BIND", "127.0.0.1")
+    cdp_port = _env("CDP_PORT", "9222")
+    sw_port = _env("MODE_SWITCH_PORT", "6090")
+    auto_chr = _env("AUTO_LAUNCH_CHROME", "1") == "1"
+    auto_url = _env("AUTO_LAUNCH_URL", "")
+    profile = _env("CHROME_PROFILE_DIR", str(WORKDIR / "chrome-profile"))
+    pin_dir = _env("CHROME_PIN_DIR", "chromium-1208")
+    strategy = _env("CHROME_BROWSER_STRATEGY", "system-first")
+
+    cmd_check()
+    if PIDFILE.exists():
+        cmd_stop(quiet=True)
+        time.sleep(1)
+
+    for d in (WORKDIR, LOGDIR, Path(profile)):
+        Path(d).mkdir(parents=True, exist_ok=True)
+
+    chrome_bin = _pick_chrome(strategy, pin_dir) if auto_chr else ""
+    chrome_pid = ""
+    if auto_chr:
+        if not chrome_bin:
+            _die("无可用 Chrome/Edge")
+        _prepare_profile(profile, str(WORKDIR))
+        args = [
+            chrome_bin,
+            "--new-window",
+            "--no-first-run",
+            "--hide-crash-restore-bubble",
+            f"--remote-debugging-port={cdp_port}",
+            "--remote-debugging-address=127.0.0.1",
+            "--remote-allow-origins=*",
+            f"--user-data-dir={profile}",
+            "--profile-directory=Default",
+            auto_url if auto_url else "about:blank",
+        ]
+        proc = subprocess.Popen(
+            args,
+            stdout=open(LOGDIR / "chrome.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        chrome_pid = str(proc.pid)
+        _focus_windows_window(proc.pid)
+
+    serve_proc = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "serve", "--port", sw_port],
+        stdout=open(LOGDIR / "serve.log", "a"),
+        stderr=subprocess.STDOUT,
+        env=dict(os.environ, WORKDIR=str(WORKDIR)),
+        start_new_session=True,
+    )
+    time.sleep(1)
+    if serve_proc.poll() is not None:
+        _die("HTTP 控制面启动失败")
+
+    state = {
+        "WORKDIR": str(WORKDIR),
+        "LOGDIR": str(LOGDIR),
+        "KASM_BIND": bind,
+        "AUTO_LAUNCH_URL": auto_url,
+        "CHROME_BIN": chrome_bin,
+        "CHROME_PROFILE_DIR": profile,
+        "CHROME_PID": chrome_pid,
+        "CDP_PORT": cdp_port,
+        "MODE_SWITCH_PID": str(serve_proc.pid),
+        "MODE_SWITCH_PORT": sw_port,
+        "MODE": "desktop-local",
+        "RUNTIME_PLATFORM": "windows-local",
+        "VNC_EXPORT_MODE": "local-browser",
+        "BROWSER_ONLY_VNC": "0",
+        "SWITCH_TOKEN": secrets.token_urlsafe(24),
+        "PUBLIC_URL": "",
+        "LOCAL_URL": f"http://127.0.0.1:{sw_port}",
+    }
+    _save(state)
+    print("Started local browser mode.")
+    print(f"Chrome: {chrome_bin}")
+    print(f"CDP: {cdp_port}")
+    print(f"Control: {state['LOCAL_URL']}")
+
 # ════════════════════════════════════════════════════════════════════════
 #  CLI: start
 # ════════════════════════════════════════════════════════════════════════
 def cmd_start() -> None:
+    if _is_windows():
+        _start_windows_local_mode()
+        return
     # ── 配置 ──
     dn       = _env("DISPLAY_NUM",  "55")
     geom     = _env("GEOM",         "1280x720")
@@ -886,6 +1092,17 @@ def cmd_start() -> None:
 # ════════════════════════════════════════════════════════════════════════
 def cmd_stop(quiet: bool = False) -> None:
     env = _load()
+    if env.get("RUNTIME_PLATFORM") == "windows-local":
+        if env:
+            _graceful_stop_chrome(env.get("CHROME_PID", ""), env.get("CHROME_PROFILE_DIR", ""))
+            _backup_profile(env.get("CHROME_PROFILE_DIR", ""), str(WORKDIR))
+            for k in ("MODE_SWITCH_PID", "CHROME_PID"):
+                _kill(env.get(k, ""))
+            PIDFILE.unlink(missing_ok=True)
+        else:
+            if not quiet: _warn(f"状态文件不存在: {PIDFILE}")
+        if not quiet: print("Stopped.")
+        return
     dn       = env.get("DISPLAY_NUM", "55")
     vnc_port = env.get("NOVNC_PORT",  "6080")
     sw_port  = env.get("MODE_SWITCH_PORT", "6090")
@@ -918,6 +1135,21 @@ def cmd_status() -> None:
         return f"up ({pid})" if pid and _alive(pid) else "down"
     cookie = Path(env.get("CHROME_PROFILE_DIR", "")) / "Default" / "Cookies"
     login  = "present" if cookie.is_file() else "missing"
+    if env.get("RUNTIME_PLATFORM") == "windows-local":
+        lines = [
+            "status:",
+            "  platform:   windows-local",
+            f"  serve:      {tag('MODE_SWITCH_PID')}",
+            f"  chrome:     {tag('CHROME_PID')}",
+            f"  mode:       {env.get('MODE', 'desktop-local')}",
+            f"  export:     {env.get('VNC_EXPORT_MODE', 'local-browser')}",
+            f"  chrome_bin: {env.get('CHROME_BIN', '')}",
+            f"  cdp:        {env.get('CDP_PORT', '')}",
+            f"  cookies:    {login}",
+            f"  local_url:  {env.get('LOCAL_URL', 'none')}",
+        ]
+        print("\n".join(lines))
+        return
     lines = [
         "status:",
         f"  xvfb:       {tag('XVFB_PID')}",

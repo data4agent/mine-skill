@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from .http_backend import _decode_response_text, _resolve_text_encoding
 from .backend_router import resolve_backend
 from .browser_pool import BrowserPool
 from .circuit_breaker import CircuitBreaker
@@ -193,6 +194,7 @@ class FetchEngine:
         nav_ms = _now_ms() - nav_start
         headers = dict(response.headers)
         content_type = headers.get("content-type", "")
+        encoding = _resolve_text_encoding(response)
         json_data = None
         if "json" in content_type:
             try:
@@ -207,7 +209,7 @@ class FetchEngine:
             fetch_time=datetime.now(UTC),
             content_type=content_type,
             status_code=response.status_code,
-            html=response.text,
+            html=_decode_response_text(response, encoding),
             json_data=json_data,
             content_bytes=response.content,
             headers=headers,

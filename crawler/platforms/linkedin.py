@@ -160,8 +160,29 @@ def _build_linkedin_endpoint(record: dict) -> str:
     raise ValueError(f"linkedin api fetch not supported for {record['resource_type']}")
 
 
+def _enrich_linkedin_record_from_url(record: dict[str, Any], canonical_url: str) -> dict[str, Any]:
+    enriched = dict(record)
+    patterns = (
+        (r"^https://www\.linkedin\.com/in/([^/]+)/?$", "profile", "public_identifier"),
+        (r"^https://www\.linkedin\.com/company/([^/]+)/?$", "company", "company_slug"),
+        (r"^https://www\.linkedin\.com/jobs/view/(\d+)/?$", "job", "job_id"),
+        (r"^https://www\.linkedin\.com/feed/update/([^/]+)/?$", "post", "activity_urn"),
+    )
+    for pattern, resource_type, key in patterns:
+        if enriched.get("resource_type") != resource_type:
+            continue
+        if enriched.get(key):
+            return enriched
+        match = re.match(pattern, canonical_url)
+        if match:
+            enriched[key] = match.group(1)
+            return enriched
+    return enriched
+
+
 def _fetch_linkedin_api(record: dict, discovered: dict, storage_state_path: str | None) -> dict:
     canonical_url = discovered["canonical_url"]
+    record = _enrich_linkedin_record_from_url(record, canonical_url)
     resource_type = record["resource_type"]
     if resource_type == "search":
         return fetch_api_get(

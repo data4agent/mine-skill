@@ -14,9 +14,6 @@ requires:
     - python
     - python3
     - py
-  env:
-    - PLATFORM_BASE_URL
-    - MINER_ID
 ---
 
 # Mine
@@ -56,6 +53,12 @@ Windows:
 
 Bootstrap installs Python dependencies, verifies the host, and installs `awp-wallet` from GitHub if it is missing.
 
+Windows note:
+
+- LinkedIn `--auto-login` uses a local visible Chrome/Edge window
+- `python auto-browser/scripts/vrd.py check` verifies the native Windows browser path
+- if LinkedIn blocks login with CAPTCHA or browser risk checks, the crawler should now return an `AUTH_*` diagnostic instead of a Python runtime exception
+
 ## Wallet flow
 
 Initialize once if needed:
@@ -74,7 +77,9 @@ Mine uses `awp-wallet` for all request signing. Never store seed phrases or priv
 
 ## Environment
 
-Set at least:
+Mine now has safe built-in defaults and does not require a `.env` file. If you do set environment variables, they override the defaults.
+
+Common overrides:
 
 ```bash
 PLATFORM_BASE_URL=http://101.47.73.95
@@ -88,8 +93,9 @@ EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000
 
 Important nuance:
 
-- helper commands still require `MINER_ID`
-- lower-level platform identity is derived from the wallet signer address
+- `PLATFORM_BASE_URL` now defaults to testnet
+- `MINER_ID` now defaults to `mine-agent` for helper-layer compatibility
+- lower-level platform identity is still derived from the wallet signer address
 
 For full details, see [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md).
 
@@ -110,6 +116,14 @@ Use:
 python scripts/run_tool.py doctor
 python scripts/run_tool.py diagnose
 python scripts/run_tool.py agent-status
+```
+
+Windows LinkedIn preflight:
+
+```powershell
+python auto-browser/scripts/vrd.py check
+python auto-browser/scripts/vrd.py start
+python auto-browser/scripts/vrd.py status
 ```
 
 If `awp-wallet` is missing and bootstrap did not install it, install it from GitHub:

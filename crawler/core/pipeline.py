@@ -68,6 +68,7 @@ async def _run_discovery_crawl_pipeline_async(config: CrawlerConfig) -> tuple[li
     async with FetchEngine(session_root) as fetch_engine:
         async def fetch_fn(target: DiscoveryCandidate | str) -> dict[str, Any]:
             candidate_fields: dict[str, Any] = {}
+            storage_state_path: str | None = None
             if isinstance(target, DiscoveryCandidate):
                 url = target.canonical_url or ""
                 platform = target.platform
@@ -152,6 +153,7 @@ async def _run_discovery_crawl_pipeline_async(config: CrawlerConfig) -> tuple[li
                     )
                     if refreshed_storage_state_path is None:
                         raise
+                    storage_state_path = refreshed_storage_state_path
                     continue
             raise last_exc or RuntimeError(f"discover fetch failed for {url}")
 
@@ -286,6 +288,7 @@ async def _run_new_pipeline_async(config: CrawlerConfig) -> tuple[list[dict], li
         """Process a single record. Returns (result, error)."""
         platform = record.get("platform", "unknown")
         resource_type = record.get("resource_type", "unknown")
+        storage_state_path: str | None = None
 
         try:
             # Step 1: URL Discovery

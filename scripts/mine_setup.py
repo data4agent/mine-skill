@@ -26,13 +26,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from common import (
+    DEFAULT_MINER_ID,
+    DEFAULT_PLATFORM_BASE_URL,
+    format_wallet_bin_display,
+    resolve_wallet_bin,
+)
 from install_guidance import awp_wallet_install_steps
 from post_install_check import attempt_install_awp_wallet
 
 # Configuration
 MIN_PYTHON_VERSION = (3, 11)
 MIN_NODE_VERSION = 20
-TESTNET_URL = "http://101.47.73.95"
+TESTNET_URL = DEFAULT_PLATFORM_BASE_URL
 STATE_FILE = Path(__file__).parent.parent / ".mine-setup.json"
 
 # Output helpers - ALL outputs go through these for consistency
@@ -164,7 +170,7 @@ def step3_setup_venv() -> tuple[bool, str]:
         venv_python = venv_python.with_suffix(".exe")
 
     if venv_dir.exists() and venv_python.exists():
-        return True, f"Virtualenv ready at {venv_dir}"
+        return True, "Virtualenv ready at .venv"
 
     # Create venv
     try:
@@ -173,7 +179,7 @@ def step3_setup_venv() -> tuple[bool, str]:
         else:
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True, capture_output=True)
 
-        return True, f"Virtualenv created at {venv_dir}"
+        return True, "Virtualenv created at .venv"
     except subprocess.CalledProcessError as e:
         return False, f"Failed to create virtualenv: {e.stderr if e.stderr else e}"
 
@@ -217,18 +223,18 @@ def step4_install_deps() -> tuple[bool, str]:
 
 def step5_setup_wallet() -> tuple[bool, str, dict[str, Any]]:
     """Step 5: Setup awp-wallet and get session token."""
-    wallet_bin = shutil.which("awp-wallet")
+    wallet_bin = resolve_wallet_bin()
     extra: dict[str, Any] = {}
 
     # Check if awp-wallet is installed
-    if not wallet_bin:
+    if not (shutil.which(wallet_bin) or Path(wallet_bin).exists()):
         # Try to find it via npm
         npm_bin = shutil.which("npm")
         if npm_bin:
             extra["fix_command"] = " && ".join(awp_wallet_install_steps())
         return False, "awp-wallet not found. Install it first.", extra
 
-    extra["wallet_bin"] = wallet_bin
+    extra["wallet_bin"] = format_wallet_bin_display(wallet_bin)
 
     # Check if wallet is initialized
     env = os.environ.copy()
@@ -305,7 +311,7 @@ def step6_configure_env(state: SetupState) -> tuple[bool, str, dict[str, Any]]:
 
     # Check what's already set
     platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip() or state.platform_url
-    miner_id = os.environ.get("MINER_ID", "").strip() or state.miner_id
+    miner_id = os.environ.get("MINER_ID", "").strip() or state.miner_id or DEFAULT_MINER_ID
     wallet_token = os.environ.get("AWP_WALLET_TOKEN", "").strip() or state.wallet_token
 
     missing = []
@@ -317,13 +323,8 @@ def step6_configure_env(state: SetupState) -> tuple[bool, str, dict[str, Any]]:
         env_vars["PLATFORM_BASE_URL"] = TESTNET_URL
         platform_url = TESTNET_URL
 
-    if not miner_id:
-        missing.append("MINER_ID")
-        # Generate a default miner ID
-        import hashlib
-        default_id = f"miner-{hashlib.md5(str(time.time()).encode()).hexdigest()[:8]}"
-        env_vars["MINER_ID"] = default_id
-        miner_id = default_id
+    if not os.environ.get("MINER_ID") and not state.miner_id:
+        env_vars["MINER_ID"] = DEFAULT_MINER_ID
 
     if not wallet_token and state.wallet_token:
         wallet_token = state.wallet_token
@@ -463,16 +464,21 @@ def check_status() -> dict[str, Any]:
 
     venv_dir = Path(__file__).parent.parent / ".venv"
     venv_ok = venv_dir.exists()
-    checks.append({"name": "Virtualenv", "ok": venv_ok, "message": str(venv_dir) if venv_ok else "Not created"})
+    checks.append({"name": "Virtualenv", "ok": venv_ok, "message": ".venv" if venv_ok else "Not created"})
 
-    wallet_bin = shutil.which("awp-wallet")
-    checks.append({"name": "awp-wallet", "ok": bool(wallet_bin), "message": wallet_bin or "Not found"})
+    wallet_bin = resolve_wallet_bin()
+    wallet_ok = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
+    checks.append({
+        "name": "awp-wallet",
+        "ok": wallet_ok,
+        "message": format_wallet_bin_display(wallet_bin) if wallet_ok else "Not found",
+    })
 
     platform_url = os.environ.get("PLATFORM_BASE_URL", "")
     miner_id = os.environ.get("MINER_ID", "")
     wallet_token = os.environ.get("AWP_WALLET_TOKEN", "")
 
-    env_ok = bool(platform_url and miner_id)
+    env_ok = bool(platform_url)
     env_items = []
     if platform_url:
         env_items.append(f"PLATFORM_BASE_URL={platform_url}")
@@ -537,10 +543,8 @@ def auto_fix() -> dict[str, Any]:
         env_fixed.append(f"PLATFORM_BASE_URL={TESTNET_URL}")
 
     if not os.environ.get("MINER_ID"):
-        import hashlib
-        default_id = f"miner-{hashlib.md5(str(time.time()).encode()).hexdigest()[:8]}"
-        os.environ["MINER_ID"] = default_id
-        env_fixed.append(f"MINER_ID={default_id}")
+        os.environ["MINER_ID"] = DEFAULT_MINER_ID
+        env_fixed.append(f"MINER_ID={DEFAULT_MINER_ID}")
 
     if env_fixed:
         fixes_applied.append(f"Set env vars: {', '.join(env_fixed)}")

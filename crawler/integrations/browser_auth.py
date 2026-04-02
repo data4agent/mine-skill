@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,6 +36,34 @@ def get_platform_login_guide_text(platform: str) -> str:
     if platform == "linkedin":
         platform_name = "LinkedIn"
     return f"请在远程浏览器中完成 {platform_name} 登录，完成后点击“已完成，继续”"
+
+
+def _is_local_browser_mode(state: dict[str, Any]) -> bool:
+    runtime_platform = str(state.get("RUNTIME_PLATFORM", "")).strip().lower()
+    mode = str(state.get("MODE", "")).strip().lower()
+    return runtime_platform == "windows-local" or mode.endswith("-local")
+
+
+def _load_storage_state_payload(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict) and isinstance(payload.get("storage_state"), dict):
+        return payload["storage_state"]
+    return payload if isinstance(payload, dict) else {}
+
+
+def _session_has_login_cookie(platform: str, session_path: Path) -> bool:
+    if not session_path.exists():
+        return False
+    payload = _load_storage_state_payload(session_path)
+    cookies = payload.get("cookies", []) if isinstance(payload, dict) else []
+    cookie_names = {
+        str(item.get("name"))
+        for item in cookies
+        if isinstance(item, dict) and item.get("name")
+    }
+    if platform == "linkedin":
+        return "li_at" in cookie_names
+    return bool(cookie_names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,15 +123,27 @@ class AutoBrowserAuthBridge:
                 login_url=resolved_login_url,
             ) from exc
         state = self._wait_for_state()
+        local_browser_mode = _is_local_browser_mode(state)
         public_url = str(state.get("PUBLIC_URL", "")).strip()
         switch_token = str(state.get("SWITCH_TOKEN", "")).strip()
-        if not public_url or not switch_token:
+        if not switch_token or (not public_url and not local_browser_mode):
             raise AutoBrowserAuthError(
                 "auto-browser 已启动，但未拿到 PUBLIC_URL 或 SWITCH_TOKEN",
                 error_code="AUTH_AUTO_LOGIN_FAILED",
                 agent_hint="inspect_auto_browser_state",
                 retryable=False,
                 login_url=resolved_login_url,
+            )
+
+        session_path = output_dir / ".sessions" / f"{platform}.auto-browser.json"
+        if self._try_export_existing_session(platform, session_path):
+            return AutoBrowserSession(
+                platform=platform,
+                session_path=session_path,
+                public_url=public_url,
+                switch_token=switch_token,
+                login_url=resolved_login_url,
+                requires_user_action=False,
             )
 
         prompt = guide_text or get_platform_login_guide_text(platform)
@@ -112,10 +153,14 @@ class AutoBrowserAuthBridge:
             guide_text=prompt,
             platform=platform,
             login_url=resolved_login_url,
+            session_path=session_path,
         )
-        session_path = output_dir / ".sessions" / f"{platform}.auto-browser.json"
         try:
+            if local_browser_mode:
+                self._wait_for_local_login(platform=platform, session_path=session_path, login_url=resolved_login_url)
             self._export_session(platform, session_path)
+        except AutoBrowserAuthError:
+            raise
         except Exception as exc:
             raise AutoBrowserAuthError(
                 str(exc),
@@ -131,7 +176,7 @@ class AutoBrowserAuthBridge:
             public_url=public_url,
             switch_token=switch_token,
             login_url=resolved_login_url,
-            requires_user_action=True,
+            requires_user_action=not self._session_has_login_cookie_or_none(platform, session_path),
         )
 
     def _ensure_script_exists(self) -> None:
@@ -158,8 +203,9 @@ class AutoBrowserAuthBridge:
         )
 
     def _run_agent_browser(self, *args: str) -> subprocess.CompletedProcess[str]:
+        agent_browser_bin = shutil.which("agent-browser") or shutil.which("agent-browser.cmd") or "agent-browser"
         return subprocess.run(
-            ["agent-browser", "--cdp", "9222", "--session", "vrd", *args],
+            [agent_browser_bin, "--cdp", "9222", "--session", "vrd", *args],
             capture_output=True,
             text=True,
             env=self._base_env(),
@@ -236,7 +282,26 @@ class AutoBrowserAuthBridge:
                 retryable=False,
                 login_url=login_url,
             )
-        self._run_agent_browser("wait", "--load", "networkidle")
+        # LinkedIn 登录页在某些环境下可能长时间无法进入 networkidle，这里只做尽力等待。
+        try:
+            subprocess.run(
+                [
+                    shutil.which("agent-browser") or shutil.which("agent-browser.cmd") or "agent-browser",
+                    "--cdp",
+                    "9222",
+                    "--session",
+                    "vrd",
+                    "wait",
+                    "--load",
+                    "networkidle",
+                ],
+                capture_output=True,
+                text=True,
+                env=self._base_env(),
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            pass
 
     def _show_login_guide(
         self,
@@ -246,6 +311,7 @@ class AutoBrowserAuthBridge:
         *,
         platform: str,
         login_url: str,
+        session_path: Path,
     ) -> None:
         self._request_json(
             "/guide",
@@ -254,27 +320,74 @@ class AutoBrowserAuthBridge:
             body={"text": guide_text, "kind": "action"},
         )
         print(f"[AUTH] {guide_text}")
-        print("[AUTH] 请打开以下地址继续：")
-        print(public_url)
+        if public_url:
+            print("[AUTH] 请打开以下地址继续：")
+            print(public_url)
+        else:
+            print("[AUTH] 已打开本地浏览器，请完成登录。")
         try:
-            self._poll_continue_signal(
-                switch_token,
-                public_url=public_url,
-                login_url=login_url,
-            )
+            if public_url:
+                self._poll_continue_signal(
+                    switch_token,
+                    platform=platform,
+                    session_path=session_path,
+                    public_url=public_url,
+                    login_url=login_url,
+                )
         finally:
             self._request_json("/guide", token=switch_token, method="DELETE")
+
+    def _try_export_existing_session(self, platform: str, session_path: Path) -> bool:
+        probe_path = session_path.with_suffix(".probe.json")
+        try:
+            self._export_session(platform, probe_path)
+            if _session_has_login_cookie(platform, probe_path):
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                probe_path.replace(session_path)
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _session_has_login_cookie_or_none(self, platform: str, session_path: Path) -> bool:
+        try:
+            return _session_has_login_cookie(platform, session_path)
+        except Exception:
+            return False
+
+    def _wait_for_local_login(self, *, platform: str, session_path: Path, login_url: str) -> None:
+        deadline = time.time() + self.wait_timeout_seconds
+        probe_path = session_path.with_suffix(".probe.json")
+        while time.time() < deadline:
+            try:
+                self._export_session(platform, probe_path)
+                if _session_has_login_cookie(platform, probe_path):
+                    return
+            except Exception:
+                pass
+            time.sleep(2)
+        raise AutoBrowserAuthError(
+            "等待本地浏览器完成登录超时",
+            error_code="AUTH_INTERACTIVE_TIMEOUT",
+            agent_hint="open_local_browser_and_complete_login",
+            retryable=True,
+            login_url=login_url,
+        )
 
     def _poll_continue_signal(
         self,
         switch_token: str,
         *,
+        platform: str,
+        session_path: Path,
         public_url: str,
         login_url: str,
     ) -> None:
         after = 0.0
         deadline = time.time() + self.wait_timeout_seconds
         while time.time() < deadline:
+            if self._try_export_existing_session(platform, session_path):
+                return
             payload = self._request_json(
                 f"/continue/poll?after={after}&timeout=5",
                 token=switch_token,
@@ -283,6 +396,7 @@ class AutoBrowserAuthBridge:
             )
             after = float(payload.get("ts", after) or after)
             if payload.get("signaled") is True:
+                self._try_export_existing_session(platform, session_path)
                 return
         raise AutoBrowserAuthError(
             "等待用户完成登录超时",

@@ -1241,3 +1241,44 @@ def test_pipeline_empty_html() -> None:
     doc = pipeline.extract(fetch_result, "test", "page")
     assert doc.total_chunks == 0
     assert doc.full_text == ""
+
+
+def test_pipeline_arxiv_xml_falls_back_when_pdf_extractor_missing(monkeypatch) -> None:
+    fetch_result = {
+        "url": "https://arxiv.org/abs/1706.03762",
+        "text": """
+        <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+          <entry>
+            <id>http://arxiv.org/abs/1706.03762v1</id>
+            <title>Attention Is All You Need</title>
+            <summary>Transformer paper abstract.</summary>
+            <author><name>Ashish Vaswani</name></author>
+            <author><name>Noam Shazeer</name></author>
+            <link title="pdf" href="https://arxiv.org/pdf/1706.03762.pdf" rel="related" type="application/pdf" />
+          </entry>
+        </feed>
+        """,
+        "content_type": "application/atom+xml",
+    }
+
+    monkeypatch.setattr(
+        "crawler.extract.pipeline.fetch_binary_content",
+        lambda url: b"%PDF-1.4 fake",
+    )
+
+    def fail_pdf_extract(_path: str, title: str | None = None) -> dict:
+        raise RuntimeError("PyMuPDF4LLM is required for arXiv PDF extraction. Install core dependencies including pymupdf4llm.")
+
+    monkeypatch.setattr(
+        "crawler.extract.pipeline.extract_pdf_with_pymupdf4llm",
+        fail_pdf_extract,
+    )
+
+    pipeline = ExtractPipeline()
+    doc = pipeline.extract(fetch_result, "arxiv", "paper")
+
+    assert doc.structured.title == "Attention Is All You Need"
+    assert "Attention Is All You Need" in doc.full_text
+    assert "Transformer paper abstract." in doc.full_text
+    assert doc.structured.platform_fields["pdf_url"] == "https://arxiv.org/pdf/1706.03762.pdf"
+    assert doc.structured.platform_fields["pdf_extractor"] is None

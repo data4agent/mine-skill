@@ -2,14 +2,14 @@
 
 This document describes the current Mine runtime environment contract as implemented in the codebase.
 
-## Required variables
+## Defaulted variables
 
-These are effectively required for the current helper-layer commands:
+These values now have safe built-in defaults for the normal OpenClaw path:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `PLATFORM_BASE_URL` | Yes | Platform API base URL |
-| `MINER_ID` | Yes | Still required by helper commands such as `doctor`, `agent-status`, `agent-run`, and setup scripts |
+| `PLATFORM_BASE_URL` | No | Defaults to the testnet Platform API base URL |
+| `MINER_ID` | No | Defaults to `mine-agent` for helper compatibility |
 
 These are required for authenticated mining requests:
 
@@ -90,10 +90,10 @@ The provider configuration is loaded from `MINE_CONFIG_PATH` or, if absent, `OPE
 
 The current codebase has two layers with different behavior:
 
-- helper scripts and readiness flows still require `MINER_ID`
+- helper scripts and readiness flows still carry a `MINER_ID` field
 - low-level API status, settlement, and reward calls derive the miner key from the wallet signer address
 
-Until those layers are unified, set `MINER_ID` to a stable non-empty string and do not treat old "MINER_ID removed" notes as authoritative.
+Until those layers are unified, Mine auto-fills a stable helper value. You do not need to configure `MINER_ID` manually unless your environment depends on a custom one.
 
 ## Recommended `.env` template
 

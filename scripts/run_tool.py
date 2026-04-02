@@ -4,10 +4,19 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 
+from common import (
+    DEFAULT_MINER_ID,
+    DEFAULT_PLATFORM_BASE_URL,
+    resolve_local_venv_python,
+    resolve_miner_id,
+    resolve_platform_base_url,
+    resolve_wallet_bin,
+)
 from install_guidance import awp_wallet_install_steps
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -25,35 +34,52 @@ def inject_skill_root() -> Path:
 inject_skill_root()
 
 
+def _ensure_local_venv_python() -> None:
+    if os.environ.get("MINE_SKIP_VENV_REEXEC") == "1":
+        return
+    local_venv_python = resolve_local_venv_python(SKILL_ROOT)
+    if local_venv_python is None:
+        return
+    current = Path(sys.executable).resolve()
+    target = local_venv_python.resolve()
+    if current == target:
+        return
+    env = os.environ.copy()
+    env["MINE_SKIP_VENV_REEXEC"] = "1"
+    argv = [str(target), __file__, *sys.argv[1:]]
+    if os.name == "nt":
+        result = subprocess.run(argv, env=env)
+        raise SystemExit(result.returncode)
+    os.execve(str(target), argv, env)
+
+
+_ensure_local_venv_python()
+
+
 def render_env_check() -> str:
     """Check and display all environment variables needed by Mine."""
     lines = ["Environment Variable Check", "=" * 40, ""]
 
-    required = [
-        ("PLATFORM_BASE_URL", "Platform service URL (testnet: http://101.47.73.95)"),
-        ("MINER_ID", "Your miner identifier"),
+    auto_defaults = [
+        ("PLATFORM_BASE_URL", resolve_platform_base_url(), f"default: {DEFAULT_PLATFORM_BASE_URL}"),
+        ("MINER_ID", resolve_miner_id(), f"default: {DEFAULT_MINER_ID}"),
     ]
 
     optional = [
         ("AWP_WALLET_TOKEN", "Session token from awp-wallet unlock"),
-        ("AWP_WALLET_BIN", "Path to awp-wallet binary (default: awp-wallet)"),
+        ("AWP_WALLET_BIN", f"Resolved awp-wallet binary (current: {resolve_wallet_bin()})"),
         ("SOCIAL_CRAWLER_ROOT", "Mine runtime root (default: auto-detected)"),
         ("OPENCLAW_GATEWAY_BASE_URL", "LLM gateway for PoW challenges"),
         ("WORKER_MAX_PARALLEL", "Concurrent crawl workers (default: 3)"),
         ("DATASET_REFRESH_SECONDS", "Dataset refresh interval (default: 900)"),
     ]
 
-    lines.append("Required:")
-    all_required_set = True
-    for name, desc in required:
-        value = os.environ.get(name, "").strip()
-        if value:
-            display = value if len(value) < 50 else value[:47] + "..."
-            lines.append(f"  ✓ {name} = {display}")
-        else:
-            lines.append(f"  ✗ {name} — NOT SET")
-            lines.append(f"      {desc}")
-            all_required_set = False
+    lines.append("Auto defaults:")
+    for name, value, desc in auto_defaults:
+        display = value if len(value) < 50 else value[:47] + "..."
+        source = "env" if os.environ.get(name, "").strip() else "default"
+        lines.append(f"  ✓ {name} = {display} ({source})")
+        lines.append(f"      {desc}")
 
     lines.append("")
     lines.append("Optional:")
@@ -69,10 +95,7 @@ def render_env_check() -> str:
             lines.append(f"  · {name} — not set (optional)")
 
     lines.append("")
-    if all_required_set:
-        lines.append("✓ All required variables are set.")
-    else:
-        lines.append("✗ Some required variables are missing. Set them before running Mine.")
+    lines.append("✓ Mine can run without a .env file. Environment variables only override defaults.")
 
     return "\n".join(lines)
 
@@ -141,17 +164,21 @@ def run_diagnosis() -> str:
     # 2. Check awp-wallet
     lines.append("2. AWP Wallet Status")
     lines.append("-" * 30)
-    wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip()
+    from common import format_wallet_bin_display, resolve_wallet_bin
+
+    configured_wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip() or "awp-wallet"
+    wallet_bin = resolve_wallet_bin()
+    wallet_label = format_wallet_bin_display(configured_wallet_bin)
     wallet_found = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
 
     if not wallet_found:
-        lines.append(f"  ✗ awp-wallet not found at: {wallet_bin}")
+        lines.append(f"  ✗ awp-wallet not found: {wallet_label}")
         lines.append("    Fix:")
         for step in awp_wallet_install_steps():
             lines.append(f"      {step}")
         return "\n".join(lines)
 
-    lines.append(f"  ✓ awp-wallet found: {shutil.which(wallet_bin) or wallet_bin}")
+    lines.append(f"  ✓ awp-wallet found: {wallet_label}")
 
     # Try to get wallet address
     import subprocess
@@ -325,38 +352,32 @@ def run_doctor() -> str:
         result["fix_commands"].append("# Install Node.js 20+ from https://nodejs.org")
 
     # Check 3: awp-wallet
+    from common import format_wallet_bin_display, resolve_wallet_bin
+
     configured_wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip() or "awp-wallet"
-    resolved_wallet_bin = shutil.which(configured_wallet_bin) or (configured_wallet_bin if Path(configured_wallet_bin).exists() else "")
-    wallet_ok = bool(resolved_wallet_bin)
+    resolved_wallet_bin = resolve_wallet_bin()
+    wallet_ok = bool(shutil.which(resolved_wallet_bin) or Path(resolved_wallet_bin).exists())
     result["checks"].append({
         "name": "awp-wallet",
         "ok": wallet_ok,
-        "value": resolved_wallet_bin or configured_wallet_bin or "not found",
+        "value": format_wallet_bin_display(configured_wallet_bin if wallet_ok else "awp-wallet"),
     })
     if not wallet_ok:
         result["status"] = "error"
         result["fix_commands"].extend(awp_wallet_install_steps())
 
     # Check 4: Environment variables
-    platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip()
-    miner_id = os.environ.get("MINER_ID", "").strip()
+    platform_url = resolve_platform_base_url()
+    miner_id = resolve_miner_id()
     wallet_token = os.environ.get("AWP_WALLET_TOKEN", "").strip()
 
-    env_ok = bool(platform_url and miner_id)
     result["checks"].append({
         "name": "env_vars",
-        "ok": env_ok,
-        "PLATFORM_BASE_URL": platform_url or "(not set)",
-        "MINER_ID": miner_id or "(not set)",
+        "ok": True,
+        "PLATFORM_BASE_URL": platform_url,
+        "MINER_ID": miner_id,
         "AWP_WALLET_TOKEN": (wallet_token[:8] + "...") if wallet_token else "(not set)",
     })
-
-    if not platform_url:
-        result["status"] = "error"
-        result["fix_commands"].append("export PLATFORM_BASE_URL=http://101.47.73.95")
-    if not miner_id:
-        result["status"] = "error"
-        result["fix_commands"].append("export MINER_ID=my-miner-001")
     if not wallet_token and wallet_ok:
         result["fix_commands"].append("awp-wallet unlock --duration 3600")
 
@@ -436,9 +457,9 @@ def render_agent_status() -> str:
     import shutil
 
     # Check prerequisites
-    platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip()
-    miner_id = os.environ.get("MINER_ID", "").strip()
-    wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip()
+    platform_url = resolve_platform_base_url()
+    miner_id = resolve_miner_id()
+    wallet_bin = resolve_wallet_bin()
     wallet_found = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
     background = _background_session_snapshot()
 
@@ -451,26 +472,6 @@ def render_agent_status() -> str:
             "next_action": "Run bootstrap",
             "next_command": _bootstrap_command(),
             "actions": [_bootstrap_command()],
-        }, ensure_ascii=False, indent=2)
-
-    if not platform_url:
-        return json.dumps({
-            "ready": False,
-            "state": "missing_config",
-            "message": "PLATFORM_BASE_URL not set",
-            "next_action": "Set PLATFORM_BASE_URL",
-            "next_command": "export PLATFORM_BASE_URL=http://your-platform-url",
-            "actions": ["export PLATFORM_BASE_URL=http://your-platform-url"],
-        }, ensure_ascii=False, indent=2)
-
-    if not miner_id:
-        return json.dumps({
-            "ready": False,
-            "state": "missing_config",
-            "message": "MINER_ID not set",
-            "next_action": "Set MINER_ID",
-            "next_command": "export MINER_ID=your-miner-id",
-            "actions": ["export MINER_ID=your-miner-id"],
         }, ensure_ascii=False, indent=2)
 
     if background.get("running"):
@@ -498,6 +499,11 @@ def render_agent_status() -> str:
             "python scripts/run_tool.py agent-start",
             "python scripts/run_tool.py agent-control status",
         ],
+        "defaults": {
+            "platform_base_url": platform_url,
+            "miner_id": miner_id,
+            "wallet_bin": wallet_bin,
+        },
     }, ensure_ascii=False, indent=2)
 
 
@@ -654,16 +660,16 @@ def run_agent_loop(max_iterations: int = 1) -> str:
     results = []
 
     # Step 1: Check prerequisites
-    platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip()
-    miner_id = os.environ.get("MINER_ID", "").strip()
+    platform_url = resolve_platform_base_url()
+    miner_id = resolve_miner_id()
     wallet_token = os.environ.get("AWP_WALLET_TOKEN", "").strip()
-    wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip()
+    wallet_bin = resolve_wallet_bin()
 
-    if not platform_url or not miner_id:
+    if not platform_url:
         return json.dumps({
             "success": False,
             "error": "missing_config",
-            "message": "Set PLATFORM_BASE_URL and MINER_ID first",
+            "message": "PLATFORM_BASE_URL could not be resolved",
             "events": []
         })
 

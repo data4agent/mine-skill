@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 from auth_orchestrator import AUTH_ERROR_CODES, AuthOrchestrator
 from canonicalize import normalize_url
-from common import inject_crawler_root, resolve_wallet_config
+from common import inject_crawler_root, resolve_miner_id, resolve_platform_base_url, resolve_wallet_config
 from crawl_mode_planner import CrawlModePlanner
 from lib.platform_client import PlatformClient as ExtractedPlatformClient
 from mine_gateway import resolve_mine_gateway_model_config, write_model_config
@@ -1312,9 +1312,9 @@ def build_worker_from_env() -> AgentWorker:
     state_root = Path(os.environ.get("WORKER_STATE_ROOT", str(output_root / "_worker_state"))).resolve()
     gateway_model_config = resolve_mine_gateway_model_config()
     config = WorkerConfig(
-        base_url=os.environ["PLATFORM_BASE_URL"],
+        base_url=resolve_platform_base_url(),
         token=os.environ.get("PLATFORM_TOKEN", ""),
-        miner_id=os.environ["MINER_ID"],
+        miner_id=resolve_miner_id(),
         output_root=output_root,
         crawler_root=CRAWLER_ROOT,
         python_bin=python_bin,

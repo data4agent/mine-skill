@@ -2044,6 +2044,149 @@ def test_discover_crawl_keeps_other_candidates_running_when_auth_is_required(mon
     assert errors[0]["canonical_url"] == "https://www.linkedin.com/in/protected/"
 
 
+def test_discover_crawl_auto_login_refresh_updates_storage_state_path_for_api_fetch(monkeypatch, workspace_tmp_path: Path) -> None:
+    input_path = workspace_tmp_path / "input.jsonl"
+    output_dir = workspace_tmp_path / "out"
+    input_path.write_text(
+        json.dumps({"platform": "linkedin", "resource_type": "profile", "url": "https://www.linkedin.com/in/john-doe/"}) + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeDiscoveryAdapter:
+        async def crawl(self, candidate, context: dict[str, object]) -> dict[str, object]:
+            fetched = await context["fetch_fn"](candidate)
+            return {"fetched": fetched, "spawned_candidates": []}
+
+    class FakePlatformAdapter:
+        requires_auth = True
+        default_backend = "api"
+        fallback_backends = ("playwright",)
+
+        def fetch_record(self, record: dict, discovered: dict, backend: str, storage_state_path: str | None = None) -> dict:
+            captured_paths.append(storage_state_path)
+            return {
+                "url": discovered["canonical_url"],
+                "content_type": "application/json",
+                "status_code": 200,
+                "headers": {},
+                "json_data": {"included": []},
+            }
+
+    captured_paths: list[str | None] = []
+    attempts = {"count": 0}
+
+    async def fake_fetch(
+        self,
+        url: str,
+        platform: str,
+        resource_type: str | None = None,
+        *,
+        requires_auth: bool = False,
+        override_backend: str | None = None,
+        api_fetcher=None,
+        api_kwargs=None,
+        preferred_backend: str | None = None,
+        fallback_chain=None,
+    ):
+        from datetime import datetime, timezone
+
+        from crawler.fetch.error_classifier import FetchError
+        from crawler.fetch.models import FetchTiming, RawFetchResult
+
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            err = RuntimeError("auth expired")
+            err.fetch_error = FetchError("AUTH_EXPIRED", "refresh_session", "expired", True)  # type: ignore[attr-defined]
+            raise err
+
+        payload = api_fetcher(url)
+        return RawFetchResult(
+            url=url,
+            final_url=payload["url"],
+            backend="api",
+            fetch_time=datetime.now(timezone.utc),
+            content_type=payload["content_type"],
+            status_code=payload["status_code"],
+            json_data=payload["json_data"],
+            headers=payload["headers"],
+            timing=FetchTiming(start_ms=0, navigation_ms=1, wait_strategy_ms=0, total_ms=1),
+        )
+
+    def fake_resolve_storage_state_path(*, config, platform, requires_auth, session_store):
+        return str(session_store.root / "linkedin-initial.json")
+
+    def fake_refresh_storage_state_path(*, config, platform, requires_auth, session_store):
+        return str(session_store.root / "linkedin-refreshed.json")
+
+    monkeypatch.setattr("crawler.discovery.adapters.registry.get_discovery_adapter", lambda platform: FakeDiscoveryAdapter())
+    monkeypatch.setattr("crawler.platforms.registry.get_platform_adapter", lambda platform: FakePlatformAdapter())
+    monkeypatch.setattr("crawler.fetch.engine.FetchEngine.fetch", fake_fetch)
+    monkeypatch.setattr("crawler.core.pipeline.resolve_storage_state_path", fake_resolve_storage_state_path)
+    monkeypatch.setattr("crawler.core.pipeline.refresh_storage_state_path", fake_refresh_storage_state_path)
+
+    config = CrawlerConfig.from_mapping({
+        "command": "discover-crawl",
+        "input_path": str(input_path),
+        "output_dir": str(output_dir),
+        "max_depth": 0,
+        "max_pages": 1,
+        "auto_login": True,
+    })
+    records, errors = run_command(config)
+
+    assert errors == []
+    assert len(records) == 1
+    assert captured_paths == [str(output_dir / ".sessions" / "linkedin-refreshed.json")]
+
+
+def test_new_pipeline_auto_login_preserves_root_auth_error_when_resolve_storage_state_fails(monkeypatch, workspace_tmp_path: Path) -> None:
+    input_path = workspace_tmp_path / "input.jsonl"
+    output_dir = workspace_tmp_path / "out"
+    input_path.write_text(
+        json.dumps({"platform": "linkedin", "resource_type": "profile", "public_identifier": "john-doe"}) + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeAdapter:
+        requires_auth = True
+
+        def resolve_backend(self, record: dict, override_backend: str | None = None, retry_count: int = 0) -> str:
+            return "api"
+
+    def fail_resolve_storage_state_path(*, config, platform, requires_auth, session_store):
+        from crawler.integrations.browser_auth import AutoBrowserAuthError
+
+        raise AutoBrowserAuthError(
+            "auto-browser 启动失败: 缺少依赖",
+            error_code="AUTH_AUTO_LOGIN_FAILED",
+            agent_hint="inspect_auto_browser_setup",
+            retryable=False,
+            login_url="https://www.linkedin.com/login",
+        )
+
+    monkeypatch.setattr("crawler.platforms.registry.get_platform_adapter", lambda platform: FakeAdapter())
+    monkeypatch.setattr("crawler.core.pipeline.resolve_storage_state_path", fail_resolve_storage_state_path)
+
+    config = parse_args(["crawl", "--input", str(input_path), "--output", str(output_dir), "--auto-login"])
+    records, errors = run_command(config)
+
+    assert records == []
+    assert errors == [
+        {
+            "platform": "linkedin",
+            "resource_type": "profile",
+            "stage": "new_pipeline",
+            "status": "failed",
+            "error_code": "AUTH_AUTO_LOGIN_FAILED",
+            "retryable": False,
+            "next_action": "inspect auto-browser setup",
+            "message": "auto-browser 启动失败: 缺少依赖",
+            "login_url": "https://www.linkedin.com/login",
+            "canonical_url": None,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("platform", "resource_type", "seed_url", "expected_canonical_url"),
     [

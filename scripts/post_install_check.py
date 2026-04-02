@@ -13,6 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from common import format_wallet_bin_display, resolve_wallet_bin
 from install_guidance import awp_wallet_install_steps
 
 
@@ -54,28 +55,15 @@ def check_npm_installed() -> tuple[bool, str]:
 
 def check_awp_wallet_installed() -> tuple[bool, str]:
     """Check if awp-wallet is installed."""
-    # Try common paths
-    wallet_bin = shutil.which("awp-wallet")
+    wallet_bin = resolve_wallet_bin()
 
-    # Windows: check AppData and nvm paths
-    if not wallet_bin and sys.platform == "win32":
-        possible_paths = [
-            os.path.expanduser("~/AppData/Roaming/npm/awp-wallet.cmd"),
-            "C:/nvm4w/nodejs/awp-wallet.cmd",
-            os.path.expandvars("%APPDATA%/npm/awp-wallet.cmd"),
-        ]
-        for path in possible_paths:
-            if os.path.exists(path):
-                wallet_bin = path
-                break
-
-    if not wallet_bin:
+    if not (shutil.which(wallet_bin) or Path(wallet_bin).exists()):
         return False, "awp-wallet not found"
 
     try:
         result = subprocess.run([wallet_bin, "--version"], capture_output=True, text=True, timeout=5)
         version = result.stdout.strip()
-        return True, f"awp-wallet {version} at {wallet_bin}"
+        return True, f"{format_wallet_bin_display(wallet_bin)} {version}"
     except Exception as e:
         return False, f"awp-wallet check failed: {e}"
 

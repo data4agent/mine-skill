@@ -72,6 +72,10 @@ if ($InstallProfile -eq "browser" -or $InstallProfile -eq "full") {
 if ($InstallProfile -eq "full") {
     Invoke-CheckedExternal $VenvPython @("-m", "pip", "install", "-r", "requirements-dev.txt")
 }
+if (($InstallProfile -eq "browser" -or $InstallProfile -eq "full") -and $IsWindows) {
+    Write-Host "Checking Windows local browser mode..."
+    Invoke-CheckedExternal $VenvPython @("auto-browser/scripts/vrd.py", "check")
+}
 Invoke-CheckedExternal $VenvPython @("scripts/verify_env.py", "--profile", $InstallProfile)
 Invoke-CheckedExternal $VenvPython @("scripts/smoke_test.py")
 

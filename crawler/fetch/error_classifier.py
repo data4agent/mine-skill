@@ -60,7 +60,11 @@ def classify_content(html: str | None, final_url: str) -> FetchError | None:
         return FetchError("CAPTCHA", "complete_auto_login",
                           "Captcha or robot check detected", False)
 
-    if _looks_like_amazon_product_shell(lower, final_url) or _looks_like_amazon_incomplete_twister_page(lower, final_url):
+    if (
+        _looks_like_amazon_product_shell(lower, final_url)
+        or _looks_like_amazon_incomplete_twister_page(lower, final_url)
+        or _looks_like_amazon_signed_out_recommendation_shell(lower, final_url)
+    ):
         return FetchError("CONTENT_PARTIAL", "retry_with_browser",
                           "Amazon product page returned a shell page without product details", True)
 
@@ -123,6 +127,35 @@ def _looks_like_amazon_incomplete_twister_page(lower_html: str, final_url: str) 
     )
     has_full_variant_state = '"dimensiontoasinmap"' in lower_html or '"colortoasin":{"' in lower_html
     return has_product_markers and has_twister_marker and has_empty_variant_state and not has_full_variant_state
+
+
+def _looks_like_amazon_signed_out_recommendation_shell(lower_html: str, final_url: str) -> bool:
+    lower_url = final_url.lower()
+    if "amazon." not in lower_url:
+        return False
+    if "/dp/" not in lower_url and "/gp/product/" not in lower_url:
+        return False
+
+    has_core_product_markers = any(
+        marker in lower_html
+        for marker in (
+            'id="producttitle"',
+            'id="feature-bullets"',
+            'id="bylineinfo"',
+            'id="coreprice',
+            'id="acrpopover"',
+            'id="add-to-cart-button"',
+        )
+    )
+    if has_core_product_markers:
+        return False
+
+    has_recommendation_shell = (
+        "after viewing product detail pages" in lower_html
+        or "your recently viewed items and featured recommendations" in lower_html
+    )
+    has_signin_wall = "/ap/signin" in lower_html or "nav-action-signin-button" in lower_html
+    return has_recommendation_shell and has_signin_wall
 
 
 def classify(

@@ -383,12 +383,15 @@ class ExtractPipeline:
                 tmp_path = Path(tmp.name)
             try:
                 pdf_result = extract_pdf_with_pymupdf4llm(str(tmp_path), title=title)
+            except RuntimeError as exc:
+                pdf_result = {}
+                parser_metadata = {"pdf_extraction_error": str(exc)}
             finally:
                 tmp_path.unlink(missing_ok=True)
             pdf_markdown = str(pdf_result.get("markdown") or "")
             pdf_text = str(pdf_result.get("plain_text") or "")
             pdf_document_blocks = list(pdf_result.get("document_blocks") or [])
-            parser_metadata = dict(pdf_result.get("parser_metadata") or {})
+            parser_metadata.update(dict(pdf_result.get("parser_metadata") or {}))
             page_count = pdf_result.get("page_count")
         full_text = pdf_text or summary or ""
         preamble = f"# {title}\n\n## Abstract\n\n{summary}".strip() if title or summary else ""

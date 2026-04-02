@@ -13,6 +13,7 @@ from crawler.fetch.camoufox_backend import fetch_with_camoufox
 from crawler.fetch.http_backend import fetch_http
 from crawler.fetch.playwright_backend import fetch_with_playwright
 from crawler.fetch.backend_router import resolve_backend
+from crawler.fetch.error_classifier import classify_content
 from crawler.fetch.unified import unified_fetch
 
 
@@ -40,6 +41,34 @@ def test_choose_playwright_for_first_pass_amazon_browser_page() -> None:
     assert initial == "http"
     assert "playwright" in fallbacks
     assert "camoufox" in fallbacks
+
+
+def test_amazon_adapter_requires_auth() -> None:
+    from crawler.platforms.amazon import ADAPTER
+
+    assert ADAPTER.requires_auth is True
+
+
+def test_classify_content_detects_amazon_signed_out_recommendation_shell() -> None:
+    html = """
+    <html>
+      <head>
+        <title>Amazon Echo Dot (3rd Gen)</title>
+        <meta name="description" content="Smart speaker with Alexa - Charcoal">
+      </head>
+      <body>
+        <a href="https://www.amazon.com/ap/signin">Sign in</a>
+        <div id="rhf-error">
+          After viewing product detail pages, look here to find an easy way to navigate back to pages you are interested in.
+        </div>
+      </body>
+    </html>
+    """
+
+    error = classify_content(html, "https://www.amazon.com/dp/B07FZ8S74R")
+
+    assert error is not None
+    assert error.error_code == "CONTENT_PARTIAL"
 
 
 # =============================================================================
@@ -84,6 +113,41 @@ def test_fetch_http_normalizes_response_payload(monkeypatch) -> None:
     assert result["content_type"] == "text/html; charset=utf-8"
     assert result["text"] == "<html><body>Hello</body></html>"
     assert result["content_bytes"] == b"<html><body>Hello</body></html>"
+
+
+def test_fetch_http_prefers_html_meta_charset_over_bad_guess(monkeypatch) -> None:
+    body = '<html><head><meta charset="utf-8"></head><body>Python’s tutorial ¶</body></html>'.encode("utf-8")
+
+    class FakeResponse:
+        status_code = 200
+        url = httpx.URL("https://example.com/final")
+        headers = {"content-type": "text/html", "x-test": "ok"}
+        encoding = "windows-1252"
+        text = body.decode("windows-1252", errors="replace")
+        content = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, *, timeout: float, follow_redirects: bool) -> None:
+            self.timeout = timeout
+            self.follow_redirects = follow_redirects
+
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def get(self, url: str, headers: dict | None = None) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr("crawler.fetch.http_backend.httpx.Client", FakeClient)
+
+    result = fetch_http("https://example.com")
+
+    assert "Python’s tutorial ¶" in result["text"]
 
 
 def test_fetch_with_backend_uses_backend_selection(monkeypatch) -> None:

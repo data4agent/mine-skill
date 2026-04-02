@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from common import resolve_wallet_config
+from common import resolve_platform_base_url, resolve_wallet_config
 
 
 # Network URLs (user must explicitly choose)
@@ -151,20 +151,12 @@ def _crawler_ready() -> tuple[bool, str, list[str]]:
 
 def _platform_line() -> tuple[bool, str, list[str]]:
     """Check platform URL. Returns (ok, status_line, fix_commands)."""
-    configured = os.environ.get("PLATFORM_BASE_URL", "").strip()
+    configured = resolve_platform_base_url()
     if configured:
         # Detect network from URL
         network = "testnet" if "101.47.73.95" in configured else "configured"
         return True, f"{SYM_CHECK} Platform Service {SYM_DASH} {configured} ({network})", []
-    # Require explicit network selection
-    return False, f"{SYM_CROSS} Platform Service {SYM_DASH} not configured (network selection required)", [
-        "# Choose your network:",
-        f"# Testnet: export PLATFORM_BASE_URL={TESTNET_PLATFORM_URL}",
-        "# Mainnet: (URL will be announced when available)",
-        "",
-        "# For testnet, run:",
-        f"export PLATFORM_BASE_URL={TESTNET_PLATFORM_URL}",
-    ]
+    return False, f"{SYM_CROSS} Platform Service {SYM_DASH} could not be resolved", []
 
 
 def _version_lines() -> list[str]:

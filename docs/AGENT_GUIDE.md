@@ -56,7 +56,7 @@ Mine signs requests through `awp-wallet`. Do not store seed phrases or private k
 
 ## 4. Configure the environment
 
-Use `.env.example` as the starting point and set at least:
+You do not need a `.env` file for the normal path. Mine defaults to testnet and a helper-safe `MINER_ID`. Only set overrides when you need something custom:
 
 ```bash
 PLATFORM_BASE_URL=http://101.47.73.95
@@ -71,8 +71,8 @@ EIP712_VERIFYING_CONTRACT=0x0000000000000000000000000000000000000000
 Why `MINER_ID` is still listed:
 
 - the lower-level client fetches miner status with the wallet address
-- but `doctor`, `agent-status`, `agent-run`, and setup helpers still require `MINER_ID`
-- use a stable placeholder until that helper-layer requirement is removed in code
+- Mine now auto-fills `MINER_ID=mine-agent` for helper-layer compatibility
+- only override it if your deployment truly needs a different value
 
 For a fuller variable reference, see [`ENVIRONMENT.md`](./ENVIRONMENT.md).
 
@@ -166,7 +166,33 @@ awp-wallet --version
 
 Do not rely on `npm install -g @aspect/awp-wallet`. This repository currently installs `awp-wallet` from the upstream GitHub source instead.
 
-## 9. OpenClaw alias mapping
+## 9. Windows LinkedIn auto-login
+
+Windows no longer depends on the Linux VRD stack for LinkedIn login. The crawler now opens a local visible Chrome/Edge window, waits for a valid browser session, and then exports the session back into the crawler flow.
+
+Recommended preflight:
+
+```powershell
+python auto-browser/scripts/vrd.py check
+python auto-browser/scripts/vrd.py start
+python auto-browser/scripts/vrd.py status
+```
+
+Expected flow:
+
+1. run `crawl --auto-login`
+2. a local browser window opens to the LinkedIn login page
+3. complete login in that browser window
+4. the crawler exports the session and continues automatically
+
+Typical failure causes:
+
+- LinkedIn CAPTCHA or risk challenge
+- Chrome/Edge is not installed and pinned browser install failed
+- CDP port `9222` is already occupied
+- stale browser profile or a dead local control process
+
+## 10. OpenClaw alias mapping
 
 If the host surface wants slash commands, map them to the canonical command layer:
 
@@ -178,6 +204,6 @@ If the host surface wants slash commands, map them to the canonical command laye
 /mine-stop   -> python scripts/run_tool.py agent-control stop
 ```
 
-## 10. Production note
+## 11. Production note
 
 The production platform URL currently requires wallet allow-listing. If you see `401` with `UNTRUSTED_HOST`, the wallet must be approved before mining will work there.
