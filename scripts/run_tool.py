@@ -472,6 +472,11 @@ def render_agent_status() -> str:
     """Ultra-concise status for AI agents. Single JSON with state + next action.
 
     Uses the unified readiness contract from common.resolve_runtime_readiness().
+
+    Output includes:
+    - user_message: Natural language summary for end users (no commands)
+    - user_actions: Natural language action options for end users
+    - next_command: Internal command for host agent (not shown to users)
     """
     from common import resolve_runtime_readiness
 
@@ -485,11 +490,6 @@ def render_agent_status() -> str:
         "can_start": readiness["can_start"],
         "can_mine": readiness["can_mine"],
         "warnings": readiness.get("warnings", []),
-        "defaults": {
-            "platform_base_url": readiness["platform_base_url"],
-            "miner_id": readiness["miner_id"],
-            "wallet_bin": readiness["wallet_bin"],
-        },
     }
 
     # State: agent_not_initialized
@@ -498,9 +498,10 @@ def render_agent_status() -> str:
             **base,
             "ready": False,
             "message": "Agent identity not initialized",
+            "user_message": "Mining environment not initialized. Setup required.",
+            "user_actions": ["Initialize"],
             "next_action": "Run bootstrap",
             "next_command": _bootstrap_command(),
-            "actions": [_bootstrap_command()],
         }, ensure_ascii=False, indent=2)
 
     # State: auth_required (session missing or expired)
@@ -509,43 +510,39 @@ def render_agent_status() -> str:
             **base,
             "ready": False,
             "message": "Wallet session unavailable or expired",
+            "user_message": "Wallet session expired or unavailable. Re-initialization needed.",
+            "user_actions": ["Re-initialize", "Check status"],
             "next_action": "Run bootstrap or unlock wallet",
             "next_command": _bootstrap_command(),
-            "actions": [
-                _bootstrap_command(),
-                "awp-wallet unlock --duration 3600",
-                "python scripts/run_tool.py doctor",
-            ],
         }, ensure_ascii=False, indent=2)
 
     # State: running (background session active)
     if background.get("running"):
+        session_id = background.get("session_id", "")
         return json.dumps({
             **base,
             "ready": True,
             "message": "Background mining session is active",
+            "user_message": f"Mining is running in the background (session: {session_id}).",
+            "user_actions": ["Check status", "Pause mining", "Stop mining"],
             "next_action": "Check or control mining",
             "next_command": "python scripts/run_tool.py agent-control status",
-            "actions": [
-                "python scripts/run_tool.py agent-control status",
-                "python scripts/run_tool.py agent-control pause",
-                "python scripts/run_tool.py agent-control stop",
-            ],
             "background_session": background,
         }, ensure_ascii=False, indent=2)
 
     # State: ready or registration_required
-    message = "Mine is ready" if readiness["can_mine"] else "Mine is ready (registration will be attempted on start)"
+    if readiness["can_mine"]:
+        user_msg = "Mining environment is ready. You can start mining now."
+    else:
+        user_msg = "Mining environment is ready. Registration will complete automatically on start."
     return json.dumps({
         **base,
         "ready": readiness["can_start"],
-        "message": message,
+        "message": "Mine is ready",
+        "user_message": user_msg,
+        "user_actions": ["Start mining", "Check status"],
         "next_action": "Start background mining",
         "next_command": "python scripts/run_tool.py agent-start",
-        "actions": [
-            "python scripts/run_tool.py agent-start",
-            "python scripts/run_tool.py agent-control status",
-        ],
     }, ensure_ascii=False, indent=2)
 
 
@@ -556,17 +553,19 @@ def run_agent_start(dataset_arg: str = "") -> str:
 
     readiness = json.loads(render_agent_status())
     if not readiness.get("ready"):
-        readiness["message"] = f"{readiness.get('message')}. Run the next command before starting mining."
+        readiness["user_message"] = readiness.get("user_message", "Environment not ready. Please initialize first.")
         return json.dumps(readiness, ensure_ascii=False, indent=2)
 
     store = WorkerStateStore(_default_state_root())
     existing = _background_session_snapshot()
     if existing.get("running"):
+        session_id = existing.get("session_id", "")
         return json.dumps({
             "state": "running",
             "message": "Background mining session already active",
-            "session_id": existing.get("session_id"),
-            "next_action": "Check or control mining",
+            "user_message": f"Mining is already running in the background (session: {session_id}).",
+            "user_actions": ["Check status", "Pause mining", "Stop mining"],
+            "session_id": session_id,
             "next_command": "python scripts/run_tool.py agent-control status",
             "background_session": existing,
         }, ensure_ascii=False, indent=2)
@@ -580,12 +579,9 @@ def run_agent_start(dataset_arg: str = "") -> str:
             "state": "error",
             "error": "registration_required",
             "message": str(exc),
-            "next_action": "先执行 doctor；若需要，再刷新钱包会话并重试",
-            "fix_actions": [
-                "python scripts/run_tool.py doctor",
-                "awp-wallet unlock --duration 3600",
-                "重新执行 python scripts/run_tool.py agent-start",
-            ],
+            "user_message": "Registration failed. Please check your network and try again.",
+            "user_actions": ["Check status", "Retry"],
+            "next_command": "python scripts/run_tool.py doctor",
         }, ensure_ascii=False, indent=2)
     selected_dataset_ids = [item.strip() for item in dataset_arg.split(",") if item.strip()] if dataset_arg else None
 
@@ -598,27 +594,24 @@ def run_agent_start(dataset_arg: str = "") -> str:
             return json.dumps({
                 "state": "error",
                 "error": "unauthorized",
-                "message": "平台返回 401：自动托管的钱包会话失效，或服务器拒绝当前钱包身份。",
-                "next_action": "先执行 doctor；若需要，再手动刷新钱包会话",
-                "fix_actions": [
-                    "python scripts/run_tool.py doctor",
-                    "awp-wallet unlock --duration 3600",
-                    "重新执行 python scripts/run_tool.py agent-start",
-                ],
+                "message": "Platform returned 401",
+                "user_message": "Authentication failed. Wallet session may have expired. Please re-initialize.",
+                "user_actions": ["Re-initialize", "Check status"],
+                "next_command": "python scripts/run_tool.py doctor",
                 "http_status": 401,
-                "url": str(exc.request.url),
             }, ensure_ascii=False, indent=2)
         raise
 
     if payload.get("selection_required"):
         datasets = payload.get("datasets") or []
-        dataset_ids = [str(item.get("id") or "").strip() for item in datasets if str(item.get("id") or "").strip()]
+        dataset_names = [str(item.get("name") or item.get("id") or "").strip() for item in datasets[:5]]
         return json.dumps({
             "state": "selection_required",
             "message": "Dataset selection is required before mining can start",
+            "user_message": f"Please select a dataset to start mining. Available: {', '.join(dataset_names)}",
+            "user_actions": [f"Select {name}" for name in dataset_names[:3]],
             "datasets": datasets,
-            "next_action": "Re-run agent-start with dataset ids",
-            "next_command": f"python scripts/run_tool.py agent-start {','.join(dataset_ids[:2])}" if dataset_ids else None,
+            "next_command": "python scripts/run_tool.py agent-start",
         }, ensure_ascii=False, indent=2)
 
     background = start_background_worker(
@@ -629,26 +622,16 @@ def run_agent_start(dataset_arg: str = "") -> str:
     store.save_background_session({
         **background,
         "selected_dataset_ids": payload.get("selected_dataset_ids") or [],
-        "status_command": "python scripts/run_tool.py agent-control status",
-        "control_commands": {
-            "status": "python scripts/run_tool.py agent-control status",
-            "pause": "python scripts/run_tool.py agent-control pause",
-            "resume": "python scripts/run_tool.py agent-control resume",
-            "stop": "python scripts/run_tool.py agent-control stop",
-        },
     })
+    session_id = background["session_id"]
     return json.dumps({
         "state": "running",
         "message": "Mining started in the background",
-        "session_id": background["session_id"],
+        "user_message": f"Mining started (session: {session_id}). Running in background.",
+        "user_actions": ["Check status", "Pause mining", "Stop mining"],
+        "session_id": session_id,
         "selected_dataset_ids": payload.get("selected_dataset_ids") or [],
-        "next_action": "Check mining status",
         "next_command": "python scripts/run_tool.py agent-control status",
-        "actions": [
-            "python scripts/run_tool.py agent-control status",
-            "python scripts/run_tool.py agent-control pause",
-            "python scripts/run_tool.py agent-control stop",
-        ],
         "background_session": store.load_background_session(),
     }, ensure_ascii=False, indent=2)
 
@@ -667,14 +650,25 @@ def run_agent_control(action: str = "status") -> str:
             return json.dumps({
                 "state": "idle",
                 "message": "No background mining session found",
-                "next_action": "Start mining",
+                "user_message": "No mining session is currently active.",
+                "user_actions": ["Start mining"],
                 "next_command": "python scripts/run_tool.py agent-start",
             }, ensure_ascii=False, indent=2)
         worker = build_worker_from_env()
         status = worker.check_status()
+        is_running = background.get("running")
+        session_id = background.get("session_id", "")
+        if is_running:
+            user_msg = f"Mining is active (session: {session_id})."
+            user_acts = ["Pause mining", "Stop mining"]
+        else:
+            user_msg = f"Mining session {session_id} has stopped."
+            user_acts = ["Start mining"]
         return json.dumps({
-            "state": "running" if background.get("running") else "stopped",
+            "state": "running" if is_running else "stopped",
             "message": "Background mining session status",
+            "user_message": user_msg,
+            "user_actions": user_acts,
             "background_session": background,
             "status": status,
         }, ensure_ascii=False, indent=2)
@@ -683,6 +677,8 @@ def run_agent_control(action: str = "status") -> str:
         return json.dumps({
             "state": "error",
             "message": f"Unsupported agent-control action: {normalized}",
+            "user_message": f"Unknown action: {normalized}",
+            "user_actions": ["Check status"],
             "next_command": "python scripts/run_tool.py agent-control status",
         }, ensure_ascii=False, indent=2)
 
@@ -690,15 +686,20 @@ def run_agent_control(action: str = "status") -> str:
         return json.dumps({
             "state": "idle",
             "message": "No background mining session found",
-            "next_action": "Start mining",
+            "user_message": "No mining session is currently active.",
+            "user_actions": ["Start mining"],
             "next_command": "python scripts/run_tool.py agent-start",
         }, ensure_ascii=False, indent=2)
 
     worker = build_worker_from_env()
     if normalized == "pause":
         payload = worker.pause()
+        user_msg = "Mining paused."
+        user_acts = ["Resume mining", "Stop mining"]
     elif normalized == "resume":
         payload = worker.resume()
+        user_msg = "Mining resumed."
+        user_acts = ["Pause mining", "Stop mining"]
     else:
         payload = worker.stop()
         pid = int(background.get("pid") or 0)
@@ -710,6 +711,8 @@ def run_agent_control(action: str = "status") -> str:
                     break
                 time.sleep(0.1)
         store.save_background_session({"last_stop_requested_at": int(payload.get("last_state_change_at") or 0)})
+        user_msg = "Mining stopped."
+        user_acts = ["Start mining"]
 
     refreshed = _background_session_snapshot()
     if normalized == "stop" and refreshed and not refreshed.get("running"):
@@ -719,6 +722,8 @@ def run_agent_control(action: str = "status") -> str:
     return json.dumps({
         "state": payload.get("mining_state"),
         "message": payload.get("message"),
+        "user_message": user_msg,
+        "user_actions": user_acts,
         "background_session": refreshed,
         "status": payload,
     }, ensure_ascii=False, indent=2)
