@@ -460,6 +460,15 @@ def resolve_awp_registration(*, auto_register: bool = False) -> dict[str, Any]:
 
 
 def resolve_runtime_readiness() -> dict[str, Any]:
+    """Unified readiness contract for Mine skill.
+
+    Returns a dict with:
+    - state: "ready" | "registration_required" | "auth_required" | "degraded" | "agent_not_initialized"
+    - can_diagnose: bool - wallet found, can at least run diagnostics
+    - can_start: bool - wallet_found AND session_ready AND not expired
+    - can_mine: bool - can_start AND registered
+    - warnings: list[str] - actionable warnings (expiry, fallback config, etc.)
+    """
     wallet_bin = resolve_wallet_bin()
     wallet_found = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
     _wallet_bin, wallet_token = resolve_wallet_config()
@@ -476,13 +485,37 @@ def resolve_runtime_readiness() -> dict[str, Any]:
             "message": str(exc),
         }
 
+    # Session expiry check
+    warnings: list[str] = []
+    session_expiry_seconds: int | None = None
+    expires_at_raw = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
+    if expires_at_raw.isdigit():
+        session_expiry_seconds = int(expires_at_raw) - int(time.time())
+
     wallet_session_ready = bool(wallet_token.strip())
+
+    # Check expiry and add warnings
+    if session_expiry_seconds is not None:
+        if session_expiry_seconds <= 0:
+            warnings.append("wallet session expired")
+            wallet_session_ready = False
+        elif session_expiry_seconds < 300:
+            warnings.append(f"wallet session expires in {session_expiry_seconds}s")
+
+    # Signature config warning
+    if signature_origin == "fallback":
+        warnings.append("using fallback signature config (platform unreachable)")
+
     registration_required = bool(registration.get("registration_required"))
     registration_registered = bool(registration.get("registered"))
+
+    # Three-tier readiness
+    can_diagnose = wallet_found
     can_start = wallet_found and wallet_session_ready
     can_mine = can_start and registration_registered
     auto_registration_possible = can_start and registration_required
 
+    # State determination
     if not wallet_found:
         state = "agent_not_initialized"
     elif not wallet_session_ready:
@@ -496,17 +529,20 @@ def resolve_runtime_readiness() -> dict[str, Any]:
 
     return {
         "state": state,
+        "can_diagnose": can_diagnose,
+        "can_start": can_start,
+        "can_mine": can_mine,
+        "warnings": warnings,
         "wallet_found": wallet_found,
         "wallet_bin": wallet_bin,
         "wallet_session_ready": wallet_session_ready,
         "wallet_session": (wallet_token[:8] + "...") if wallet_token else "(auto-managed, not currently available)",
+        "session_expiry_seconds": session_expiry_seconds,
         "platform_base_url": resolve_platform_base_url(),
         "miner_id": resolve_miner_id(),
         "signature_config": signature_config,
         "signature_config_origin": signature_origin,
         "registration": registration,
-        "can_start": can_start,
-        "can_mine": can_mine,
         "auto_registration_possible": auto_registration_possible,
     }
 

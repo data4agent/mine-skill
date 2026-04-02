@@ -17,6 +17,7 @@ from common import (
     DEFAULT_PLATFORM_BASE_URL,
     format_wallet_bin_display,
     resolve_awp_registration,
+    resolve_runtime_readiness,
     resolve_signature_config,
     resolve_wallet_bin,
     resolve_wallet_config,
@@ -93,36 +94,66 @@ def check_venv_exists() -> tuple[bool, str]:
 
 
 def check_env_vars() -> tuple[bool, str, list[str]]:
-    """Check effective environment/runtime defaults."""
-    wallet_bin, wallet_token = resolve_wallet_config()
-    signature_config = resolve_signature_config(force_refresh=True)
-    registration = resolve_awp_registration(auto_register=False)
-    signature_origin = str(signature_config.get("origin") or signature_config.get("source") or "fallback")
+    """Check effective environment/runtime defaults using unified readiness contract.
+
+    Aligned with mine_setup semantics: success = can_start (registration can be deferred).
+    """
+    readiness = resolve_runtime_readiness()
+    signature_config = readiness.get("signature_config", {})
+    registration = readiness.get("registration", {})
+
     notes = [
-        f"PLATFORM_BASE_URL={os.environ.get('PLATFORM_BASE_URL', '').strip() or DEFAULT_PLATFORM_BASE_URL}",
-        f"MINER_ID={os.environ.get('MINER_ID', '').strip() or DEFAULT_MINER_ID}",
-        f"wallet_bin={format_wallet_bin_display(wallet_bin)}",
-        (
-            "signature_config="
-            f"{signature_origin}:{signature_config.get('domain_name')}/"
-            f"{signature_config.get('chain_id')}"
-        ),
+        f"state={readiness['state']}",
+        f"can_start={readiness['can_start']}",
+        f"can_mine={readiness['can_mine']}",
+        f"PLATFORM_BASE_URL={readiness['platform_base_url']}",
+        f"MINER_ID={readiness['miner_id']}",
+        f"wallet_bin={format_wallet_bin_display(readiness['wallet_bin'])}",
+        f"signature_config={readiness['signature_config_origin']}:{signature_config.get('domain_name')}/{signature_config.get('chain_id')}",
         f"registration={registration.get('status')}",
     ]
-    if wallet_token.strip():
-        if registration.get("registered"):
-            notes.append("wallet_session=ready")
-            return True, ", ".join(notes), []
-        notes.append("wallet_session=ready")
-        return False, ", ".join(notes), ["AWP_REGISTRATION"]
-    else:
-        notes.append("wallet_session=ready")
-    notes[-1] = "wallet_session=needs_unlock"
-    return False, ", ".join(notes), ["AWP_WALLET_SESSION"]
+
+    # Add warnings from unified readiness
+    if readiness.get("warnings"):
+        notes.extend(readiness["warnings"])
+
+    # Aligned with mine_setup: success = can_start (registration is deferred)
+    if readiness["can_start"]:
+        return True, ", ".join(notes), []
+
+    # Not ready - determine what's missing
+    missing = []
+    if not readiness["wallet_found"]:
+        missing.append("AWP_WALLET")
+    elif not readiness["wallet_session_ready"]:
+        missing.append("AWP_WALLET_SESSION")
+
+    return False, ", ".join(notes), missing
+
+
+def _resolve_awp_wallet_version(git_bin: str) -> str:
+    """Resolve awp-wallet version: env override > latest tag > main."""
+    version = os.environ.get("AWP_WALLET_VERSION", "").strip()
+    if version:
+        return version
+    try:
+        result = subprocess.run(
+            [git_bin, "ls-remote", "--tags", "--sort=-v:refname",
+             "https://github.com/awp-core/awp-wallet.git"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            import re
+            match = re.search(r"v\d+\.\d+\.\d+", result.stdout)
+            if match:
+                return match.group(0)
+    except Exception:
+        pass
+    return "main"
 
 
 def attempt_install_awp_wallet() -> tuple[bool, str]:
-    """Try to install awp-wallet from the supported GitHub source."""
+    """Try to install awp-wallet from the supported GitHub source with version pinning."""
     npm_bin = shutil.which("npm")
     git_bin = shutil.which("git")
     if not npm_bin:
@@ -131,10 +162,12 @@ def attempt_install_awp_wallet() -> tuple[bool, str]:
         return False, "git not available - cannot install awp-wallet"
 
     try:
-        print("  Installing awp-wallet from GitHub...")
+        version = _resolve_awp_wallet_version(git_bin)
+        print(f"  Installing awp-wallet {version} from GitHub...")
         with tempfile.TemporaryDirectory(prefix="awp-wallet-install-") as temp_dir:
             clone_result = subprocess.run(
-                [git_bin, "clone", "https://github.com/awp-core/awp-wallet.git", temp_dir],
+                [git_bin, "clone", "--branch", version, "--depth", "1",
+                 "https://github.com/awp-core/awp-wallet.git", temp_dir],
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -164,7 +197,7 @@ def attempt_install_awp_wallet() -> tuple[bool, str]:
 
         ok, msg = check_awp_wallet_installed()
         if ok:
-            return True, "awp-wallet installed successfully from GitHub"
+            return True, f"awp-wallet {version} installed successfully from GitHub"
         return False, f"Installation completed but verification failed: {msg}"
 
     except subprocess.TimeoutExpired:

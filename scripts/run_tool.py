@@ -239,7 +239,6 @@ def run_diagnosis() -> str:
 
     try:
         from agent_runtime import build_worker_from_env
-        from common import resolve_wallet_config
 
         worker = build_worker_from_env()
 
@@ -308,12 +307,26 @@ def run_diagnosis() -> str:
 
 
 def run_doctor() -> str:
-    """Run doctor command - simpler diagnosis with exact fix commands (JSON output)."""
+    """Run doctor command - simpler diagnosis with exact fix commands (JSON output).
+
+    Uses the unified readiness contract from common.resolve_runtime_readiness().
+    """
     import subprocess
-    import time
+
+    from common import format_wallet_bin_display, resolve_runtime_readiness
+
+    # Get unified readiness state
+    readiness = resolve_runtime_readiness()
 
     result = {
-        "status": "ok",
+        "status": "ok" if readiness["can_start"] else "error",
+        "readiness": {
+            "state": readiness["state"],
+            "can_diagnose": readiness["can_diagnose"],
+            "can_start": readiness["can_start"],
+            "can_mine": readiness["can_mine"],
+        },
+        "warnings": readiness.get("warnings", []),
         "checks": [],
         "fix_commands": [],
         "next_command": None,
@@ -354,86 +367,59 @@ def run_doctor() -> str:
         result["status"] = "error"
         result["fix_commands"].append("# Install Node.js 20+ from https://nodejs.org")
 
-    # Check 3: awp-wallet
-    from common import format_wallet_bin_display, resolve_wallet_bin
-
-    configured_wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip() or "awp-wallet"
-    resolved_wallet_bin = resolve_wallet_bin()
-    wallet_ok = bool(shutil.which(resolved_wallet_bin) or Path(resolved_wallet_bin).exists())
+    # Check 3: awp-wallet (from unified readiness)
     result["checks"].append({
         "name": "awp-wallet",
-        "ok": wallet_ok,
-        "value": format_wallet_bin_display(configured_wallet_bin if wallet_ok else "awp-wallet"),
+        "ok": readiness["wallet_found"],
+        "value": format_wallet_bin_display(readiness["wallet_bin"]),
     })
-    if not wallet_ok:
+    if not readiness["wallet_found"]:
         result["status"] = "error"
         result["fix_commands"].extend(awp_wallet_install_steps())
 
-    # Check 4: Runtime defaults and auth mode
-    platform_url = resolve_platform_base_url()
-    miner_id = resolve_miner_id()
-    _wallet_bin, wallet_token = resolve_wallet_config()
-    signature_config = resolve_signature_config()
-    try:
-        registration = resolve_awp_registration(auto_register=False)
-    except Exception as exc:
-        registration = {
-            "status": "unknown",
-            "registered": False,
-            "registration_required": False,
-            "wallet_address": "",
-            "message": str(exc),
-        }
-    signature_origin = str(signature_config.get("origin") or signature_config.get("source") or "fallback")
-
+    # Check 4: Runtime defaults (from unified readiness)
+    signature_config = readiness.get("signature_config", {})
+    registration = readiness.get("registration", {})
     result["checks"].append({
         "name": "runtime_defaults",
         "ok": True,
-        "PLATFORM_BASE_URL": platform_url,
-        "MINER_ID": miner_id,
+        "PLATFORM_BASE_URL": readiness["platform_base_url"],
+        "MINER_ID": readiness["miner_id"],
         "auth_mode": "auto-managed wallet session",
-        "wallet_session": (wallet_token[:8] + "...") if wallet_token else "(auto-managed, not currently available)",
-        "signature_config_source": signature_config.get("source"),
-        "signature_config_origin": signature_origin,
+        "wallet_session": readiness["wallet_session"],
+        "signature_config_origin": readiness["signature_config_origin"],
         "signature_config_status": signature_config.get("status"),
         "signature_domain_name": signature_config.get("domain_name"),
         "signature_chain_id": signature_config.get("chain_id"),
-        "signature_verifying_contract": signature_config.get("verifying_contract"),
         "registration_status": registration.get("status"),
         "registration_required": registration.get("registration_required"),
         "wallet_address": registration.get("wallet_address"),
     })
-    if not wallet_token and wallet_ok:
+
+    # Check 5: Wallet session (from unified readiness)
+    if not readiness["wallet_session_ready"] and readiness["wallet_found"]:
         result["checks"].append({
             "name": "wallet_session",
             "ok": False,
-            "message": "Auto-managed wallet session unavailable",
+            "message": "Wallet session unavailable or expired",
         })
         result["fix_commands"].append(_bootstrap_command())
+        result["fix_commands"].append("awp-wallet unlock --duration 3600")
 
-    # Check 5: Wallet session expiry
-    token_expires = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
-    if token_expires.isdigit():
-        expires_at = int(token_expires)
-        now = int(time.time())
-        if expires_at <= now:
-            result["checks"].append({
-                "name": "wallet_session_expiry",
-                "ok": False,
-                "message": "Wallet session expired",
-            })
-            result["status"] = "error"
-            result["fix_commands"].append("awp-wallet unlock --duration 3600")
-        elif expires_at - now < 300:
-            result["checks"].append({
-                "name": "wallet_session_expiry",
-                "ok": False,
-                "message": f"Wallet session expires in {expires_at - now}s",
-            })
+    # Add session expiry warning if present
+    expiry_seconds = readiness.get("session_expiry_seconds")
+    if expiry_seconds is not None and expiry_seconds < 300 and expiry_seconds > 0:
+        result["checks"].append({
+            "name": "wallet_session_expiry",
+            "ok": False,
+            "message": f"Wallet session expires in {expiry_seconds}s",
+        })
+        if "awp-wallet unlock --duration 3600" not in result["fix_commands"]:
             result["fix_commands"].append("awp-wallet unlock --duration 3600")
 
-    # Determine next command
-    if result["status"] == "ok":
+    # Determine next command based on unified readiness
+    if readiness["can_start"]:
+        result["status"] = "ok"
         result["next_command"] = "python scripts/run_tool.py agent-start"
     elif result["fix_commands"]:
         result["next_command"] = result["fix_commands"][0]
@@ -483,53 +469,60 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def render_agent_status() -> str:
-    """Ultra-concise status for AI agents. Single JSON with state + next action."""
-    import shutil
+    """Ultra-concise status for AI agents. Single JSON with state + next action.
 
-    # Check prerequisites
-    platform_url = resolve_platform_base_url()
-    miner_id = resolve_miner_id()
-    wallet_bin = resolve_wallet_bin()
-    wallet_found = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
+    Uses the unified readiness contract from common.resolve_runtime_readiness().
+    """
+    from common import resolve_runtime_readiness
+
+    readiness = resolve_runtime_readiness()
     background = _background_session_snapshot()
 
-    # Determine state and next action
-    if not wallet_found:
+    # Base response fields from unified contract
+    base = {
+        "state": readiness["state"],
+        "can_diagnose": readiness["can_diagnose"],
+        "can_start": readiness["can_start"],
+        "can_mine": readiness["can_mine"],
+        "warnings": readiness.get("warnings", []),
+        "defaults": {
+            "platform_base_url": readiness["platform_base_url"],
+            "miner_id": readiness["miner_id"],
+            "wallet_bin": readiness["wallet_bin"],
+        },
+    }
+
+    # State: agent_not_initialized
+    if not readiness["can_diagnose"]:
         return json.dumps({
+            **base,
             "ready": False,
-            "state": "agent_not_initialized",
             "message": "Agent identity not initialized",
             "next_action": "Run bootstrap",
             "next_command": _bootstrap_command(),
             "actions": [_bootstrap_command()],
         }, ensure_ascii=False, indent=2)
 
-    # 优先自动恢复本地钱包会话；只有自动托管失败时才提示人工介入
-    _, wallet_token = resolve_wallet_config()
-    platform_token = os.environ.get("PLATFORM_TOKEN", "").strip()
-    if not wallet_token.strip() and not platform_token:
+    # State: auth_required (session missing or expired)
+    if not readiness["can_start"]:
         return json.dumps({
+            **base,
             "ready": False,
-            "state": "auth_required",
-            "message": "Mine 无法自动恢复钱包会话，请先完成 bootstrap 或手动检查 awp-wallet 状态。",
-            "next_action": "重新运行 bootstrap；若仍失败，再手动执行 awp-wallet unlock",
+            "message": "Wallet session unavailable or expired",
+            "next_action": "Run bootstrap or unlock wallet",
             "next_command": _bootstrap_command(),
             "actions": [
                 _bootstrap_command(),
                 "awp-wallet unlock --duration 3600",
                 "python scripts/run_tool.py doctor",
             ],
-            "defaults": {
-                "platform_base_url": platform_url,
-                "miner_id": miner_id,
-                "wallet_bin": wallet_bin,
-            },
         }, ensure_ascii=False, indent=2)
 
+    # State: running (background session active)
     if background.get("running"):
         return json.dumps({
+            **base,
             "ready": True,
-            "state": "running",
             "message": "Background mining session is active",
             "next_action": "Check or control mining",
             "next_command": "python scripts/run_tool.py agent-control status",
@@ -541,21 +534,18 @@ def render_agent_status() -> str:
             "background_session": background,
         }, ensure_ascii=False, indent=2)
 
+    # State: ready or registration_required
+    message = "Mine is ready" if readiness["can_mine"] else "Mine is ready (registration will be attempted on start)"
     return json.dumps({
-        "ready": True,
-        "state": "ready",
-        "message": "Mine is ready",
+        **base,
+        "ready": readiness["can_start"],
+        "message": message,
         "next_action": "Start background mining",
         "next_command": "python scripts/run_tool.py agent-start",
         "actions": [
             "python scripts/run_tool.py agent-start",
             "python scripts/run_tool.py agent-control status",
         ],
-        "defaults": {
-            "platform_base_url": platform_url,
-            "miner_id": miner_id,
-            "wallet_bin": wallet_bin,
-        },
     }, ensure_ascii=False, indent=2)
 
 

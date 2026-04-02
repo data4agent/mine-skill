@@ -34,6 +34,7 @@ from common import (
     persist_wallet_session,
     resolve_miner_id,
     resolve_platform_base_url,
+    resolve_runtime_readiness,
     resolve_signature_config,
     resolve_wallet_bin,
     resolve_wallet_config,
@@ -320,37 +321,40 @@ def step5_setup_wallet() -> tuple[bool, str, dict[str, Any]]:
 
 
 def step6_configure_env(state: SetupState) -> tuple[bool, str, dict[str, Any]]:
-    """Step 6: Confirm effective runtime defaults."""
+    """Step 6: Confirm effective runtime defaults using unified readiness contract."""
     extra: dict[str, Any] = {}
 
-    platform_url = resolve_platform_base_url()
-    miner_id = resolve_miner_id()
-    wallet_token = resolve_wallet_config()[1] or state.wallet_token
-    signature_config = resolve_signature_config(force_refresh=True)
-    registration = resolve_awp_registration(auto_register=False)
-    signature_origin = str(signature_config.get("origin") or signature_config.get("source") or "fallback")
+    # Use unified readiness contract
+    readiness = resolve_runtime_readiness()
+    signature_config = readiness.get("signature_config", {})
+    registration = readiness.get("registration", {})
 
     extra["configured"] = {
-        "PLATFORM_BASE_URL": platform_url,
-        "MINER_ID": miner_id,
-        "wallet_session": wallet_token[:8] + "..." if wallet_token else "(auto-managed, not currently available)",
+        "state": readiness["state"],
+        "can_diagnose": readiness["can_diagnose"],
+        "can_start": readiness["can_start"],
+        "can_mine": readiness["can_mine"],
+        "warnings": readiness.get("warnings", []),
+        "PLATFORM_BASE_URL": readiness["platform_base_url"],
+        "MINER_ID": readiness["miner_id"],
+        "wallet_session": readiness["wallet_session"],
         "auth_mode": "auto-managed wallet session",
-        "signature_config_source": signature_origin,
+        "signature_config_origin": readiness["signature_config_origin"],
         "signature_domain_name": signature_config.get("domain_name"),
         "signature_chain_id": signature_config.get("chain_id"),
         "registration_status": registration.get("status"),
         "wallet_address": registration.get("wallet_address"),
     }
 
-    if not wallet_token:
+    # Success = can_start (registration can be deferred to agent-start)
+    if not readiness["can_start"]:
         extra["fix_command"] = "python scripts/run_tool.py doctor"
-        return False, "Runtime defaults are ready, but the wallet session is still unavailable.", extra
+        return False, f"Not ready: {readiness['state']}", extra
 
-    if not registration.get("registered"):
-        extra["fix_command"] = "python scripts/run_tool.py doctor"
-        return True, "Runtime defaults ready ✓ (wallet registration will be checked again at startup)", extra
+    if not readiness["can_mine"]:
+        return True, "Runtime ready ✓ (registration will be attempted on start)", extra
 
-    return True, "Runtime defaults ready ✓ (no manual env export required)", extra
+    return True, "Runtime ready ✓ (fully operational)", extra
 
 
 def run_full_setup() -> dict[str, Any]:

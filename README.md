@@ -114,7 +114,6 @@ python scripts/run_tool.py doctor
 python scripts/verify_env.py --profile minimal --json
 python scripts/host_diagnostics.py --json
 python scripts/smoke_test.py --json
-python -m pytest tests -q
 ```
 
 ## Windows LinkedIn auto-login

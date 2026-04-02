@@ -48,18 +48,31 @@ if (-not $AwpWallet) {
         throw "Node.js not found. Please install Node.js 20+ from https://nodejs.org"
     }
 
+    # Determine version to install (prefer latest tag, fallback to main)
+    $AwpVersion = $env:AWP_WALLET_VERSION
+    if (-not $AwpVersion) {
+        try {
+            $tags = git ls-remote --tags --sort=-v:refname https://github.com/awp-core/awp-wallet.git 2>$null
+            $AwpVersion = ($tags | Select-String -Pattern 'v\d+\.\d+\.\d+' -AllMatches).Matches.Value | Select-Object -First 1
+        } catch {
+            $AwpVersion = $null
+        }
+    }
+    if (-not $AwpVersion) { $AwpVersion = "main" }
+    Write-Host "  Target version: $AwpVersion"
+
     # Clone and install from GitHub
     $TempDir = Join-Path $env:TEMP "awp-wallet-install"
     if (Test-Path $TempDir) {
         Remove-Item $TempDir -Recurse -Force
     }
 
-    Invoke-CheckedExternal "git" @("clone", "https://github.com/awp-core/awp-wallet.git", $TempDir)
+    Invoke-CheckedExternal "git" @("clone", "--branch", $AwpVersion, "--depth", "1", "https://github.com/awp-core/awp-wallet.git", $TempDir)
     Push-Location $TempDir
     try {
         Invoke-CheckedExternal "npm" @("install")
         Invoke-CheckedExternal "npm" @("install", "-g", ".")
-        Write-Host "awp-wallet installed successfully from GitHub"
+        Write-Host "awp-wallet $AwpVersion installed successfully from GitHub"
     } finally {
         Pop-Location
         Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue

@@ -7,7 +7,3 @@ name = "mine-runtime"
 version = "0.1.0"
 description = "Mine runtime for crawling, enrichment, schema handling, and Data Mining WorkNet submissions"
 requires-python = ">=3.11"
-
-[tool.pytest.ini_options]
-testpaths = ["tests", "crawler/tests/test_bootstrap_assets.py"]
-python_files = ["test_*.py"]

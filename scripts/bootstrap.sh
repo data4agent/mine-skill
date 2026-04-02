@@ -98,17 +98,25 @@ if ! command -v awp-wallet >/dev/null 2>&1; then
     exit 1
   fi
 
+  # Determine version to install (prefer latest tag, fallback to main)
+  AWP_WALLET_VERSION="${AWP_WALLET_VERSION:-}"
+  if [ -z "$AWP_WALLET_VERSION" ]; then
+    AWP_WALLET_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/awp-core/awp-wallet.git 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  fi
+  AWP_WALLET_VERSION="${AWP_WALLET_VERSION:-main}"
+  echo "  Target version: $AWP_WALLET_VERSION"
+
   # Clone and install from GitHub
   TEMP_DIR=$(mktemp -d)
   trap "rm -rf $TEMP_DIR" EXIT
 
-  git clone https://github.com/awp-core/awp-wallet.git "$TEMP_DIR"
+  git clone --branch "$AWP_WALLET_VERSION" --depth 1 https://github.com/awp-core/awp-wallet.git "$TEMP_DIR"
   cd "$TEMP_DIR"
   npm install
   npm install -g .
   cd -
 
-  echo "awp-wallet installed successfully from GitHub ✓"
+  echo "awp-wallet $AWP_WALLET_VERSION installed successfully from GitHub ✓"
 else
   echo "awp-wallet already installed: $(command -v awp-wallet) ✓"
 fi
