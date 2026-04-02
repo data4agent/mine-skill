@@ -5,7 +5,10 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
+
+from install_guidance import awp_wallet_install_steps
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_DIR.parent
@@ -74,6 +77,38 @@ def render_env_check() -> str:
     return "\n".join(lines)
 
 
+def _bootstrap_command() -> str:
+    if os.name == "nt":
+        return "powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1"
+    return "./scripts/bootstrap.sh"
+
+
+def _project_root() -> Path:
+    return SCRIPT_DIR.parent
+
+
+def _default_output_root() -> Path:
+    return Path(os.environ.get("CRAWLER_OUTPUT_ROOT", str(_project_root() / "output" / "agent-runs"))).resolve()
+
+
+def _default_state_root() -> Path:
+    return Path(os.environ.get("WORKER_STATE_ROOT", str(_default_output_root() / "_worker_state"))).resolve()
+
+
+def _background_session_snapshot() -> dict[str, object]:
+    from background_worker import process_is_running
+    from worker_state import WorkerStateStore
+
+    store = WorkerStateStore(_default_state_root())
+    payload = store.load_background_session()
+    if not payload:
+        return {}
+    pid = int(payload.get("pid") or 0)
+    payload["pid"] = pid
+    payload["running"] = process_is_running(pid)
+    return payload
+
+
 def run_diagnosis() -> str:
     """Run comprehensive diagnosis for 401 and connectivity issues."""
     lines = ["Mine Diagnosis", "=" * 40, ""]
@@ -111,7 +146,9 @@ def run_diagnosis() -> str:
 
     if not wallet_found:
         lines.append(f"  ✗ awp-wallet not found at: {wallet_bin}")
-        lines.append("    Fix: npm install -g @aspect/awp-wallet")
+        lines.append("    Fix:")
+        for step in awp_wallet_install_steps():
+            lines.append(f"      {step}")
         return "\n".join(lines)
 
     lines.append(f"  ✓ awp-wallet found: {shutil.which(wallet_bin) or wallet_bin}")
@@ -288,16 +325,17 @@ def run_doctor() -> str:
         result["fix_commands"].append("# Install Node.js 20+ from https://nodejs.org")
 
     # Check 3: awp-wallet
-    wallet_bin = shutil.which("awp-wallet")
-    wallet_ok = bool(wallet_bin)
+    configured_wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip() or "awp-wallet"
+    resolved_wallet_bin = shutil.which(configured_wallet_bin) or (configured_wallet_bin if Path(configured_wallet_bin).exists() else "")
+    wallet_ok = bool(resolved_wallet_bin)
     result["checks"].append({
         "name": "awp-wallet",
         "ok": wallet_ok,
-        "value": wallet_bin or "not found",
+        "value": resolved_wallet_bin or configured_wallet_bin or "not found",
     })
     if not wallet_ok:
         result["status"] = "error"
-        result["fix_commands"].append("npm install -g @aspect/awp-wallet")
+        result["fix_commands"].extend(awp_wallet_install_steps())
 
     # Check 4: Environment variables
     platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip()
@@ -345,7 +383,7 @@ def run_doctor() -> str:
 
     # Determine next command
     if result["status"] == "ok":
-        result["next_command"] = "python scripts/run_tool.py start-working"
+        result["next_command"] = "python scripts/run_tool.py agent-start"
     elif result["fix_commands"]:
         result["next_command"] = result["fix_commands"][0]
 
@@ -384,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
             "diagnose",
             "check-env",
             "agent-status",
+            "agent-start",
+            "agent-control",
             "agent-run",
         ),
     )
@@ -398,9 +438,9 @@ def render_agent_status() -> str:
     # Check prerequisites
     platform_url = os.environ.get("PLATFORM_BASE_URL", "").strip()
     miner_id = os.environ.get("MINER_ID", "").strip()
-    wallet_token = os.environ.get("AWP_WALLET_TOKEN", "").strip()
     wallet_bin = os.environ.get("AWP_WALLET_BIN", "awp-wallet").strip()
     wallet_found = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
+    background = _background_session_snapshot()
 
     # Determine state and next action
     if not wallet_found:
@@ -408,38 +448,199 @@ def render_agent_status() -> str:
             "ready": False,
             "state": "agent_not_initialized",
             "message": "Agent identity not initialized",
-            "next_action": "./scripts/bootstrap.sh",
-            "next_command": None
-        })
+            "next_action": "Run bootstrap",
+            "next_command": _bootstrap_command(),
+            "actions": [_bootstrap_command()],
+        }, ensure_ascii=False, indent=2)
 
     if not platform_url:
         return json.dumps({
             "ready": False,
             "state": "missing_config",
             "message": "PLATFORM_BASE_URL not set",
-            "next_action": "export PLATFORM_BASE_URL=http://your-platform-url",
-            "next_command": None
-        })
+            "next_action": "Set PLATFORM_BASE_URL",
+            "next_command": "export PLATFORM_BASE_URL=http://your-platform-url",
+            "actions": ["export PLATFORM_BASE_URL=http://your-platform-url"],
+        }, ensure_ascii=False, indent=2)
 
     if not miner_id:
         return json.dumps({
             "ready": False,
             "state": "missing_config",
             "message": "MINER_ID not set",
-            "next_action": "export MINER_ID=your-miner-id",
-            "next_command": None
-        })
+            "next_action": "Set MINER_ID",
+            "next_command": "export MINER_ID=your-miner-id",
+            "actions": ["export MINER_ID=your-miner-id"],
+        }, ensure_ascii=False, indent=2)
 
-    # Token not set is OK - agent will auto-manage session
+    if background.get("running"):
+        return json.dumps({
+            "ready": True,
+            "state": "running",
+            "message": "Background mining session is active",
+            "next_action": "Check or control mining",
+            "next_command": "python scripts/run_tool.py agent-control status",
+            "actions": [
+                "python scripts/run_tool.py agent-control status",
+                "python scripts/run_tool.py agent-control pause",
+                "python scripts/run_tool.py agent-control stop",
+            ],
+            "background_session": background,
+        }, ensure_ascii=False, indent=2)
 
-    # All prerequisites met - ready to mine
     return json.dumps({
         "ready": True,
         "state": "ready",
-        "message": "Ready to mine",
-        "next_action": "Start mining",
-        "next_command": "python scripts/run_tool.py run-worker 60 1"
+        "message": "Mine is ready",
+        "next_action": "Start background mining",
+        "next_command": "python scripts/run_tool.py agent-start",
+        "actions": [
+            "python scripts/run_tool.py agent-start",
+            "python scripts/run_tool.py agent-control status",
+        ],
+    }, ensure_ascii=False, indent=2)
+
+
+def run_agent_start(dataset_arg: str = "") -> str:
+    from agent_runtime import build_worker_from_env
+    from background_worker import start_background_worker
+    from worker_state import WorkerStateStore
+
+    readiness = json.loads(render_agent_status())
+    if not readiness.get("ready"):
+        readiness["message"] = f"{readiness.get('message')}. Run the next command before starting mining."
+        return json.dumps(readiness, ensure_ascii=False, indent=2)
+
+    store = WorkerStateStore(_default_state_root())
+    existing = _background_session_snapshot()
+    if existing.get("running"):
+        return json.dumps({
+            "state": "running",
+            "message": "Background mining session already active",
+            "session_id": existing.get("session_id"),
+            "next_action": "Check or control mining",
+            "next_command": "python scripts/run_tool.py agent-control status",
+            "background_session": existing,
+        }, ensure_ascii=False, indent=2)
+    if existing:
+        store.clear_background_session()
+
+    worker = build_worker_from_env()
+    selected_dataset_ids = [item.strip() for item in dataset_arg.split(",") if item.strip()] if dataset_arg else None
+    payload = worker.start_working(selected_dataset_ids=selected_dataset_ids)
+
+    if payload.get("selection_required"):
+        datasets = payload.get("datasets") or []
+        dataset_ids = [str(item.get("id") or "").strip() for item in datasets if str(item.get("id") or "").strip()]
+        return json.dumps({
+            "state": "selection_required",
+            "message": "Dataset selection is required before mining can start",
+            "datasets": datasets,
+            "next_action": "Re-run agent-start with dataset ids",
+            "next_command": f"python scripts/run_tool.py agent-start {','.join(dataset_ids[:2])}" if dataset_ids else None,
+        }, ensure_ascii=False, indent=2)
+
+    background = start_background_worker(
+        project_root=_project_root(),
+        script_path=SCRIPT_DIR / "run_tool.py",
+        interval=60,
+    )
+    store.save_background_session({
+        **background,
+        "selected_dataset_ids": payload.get("selected_dataset_ids") or [],
+        "status_command": "python scripts/run_tool.py agent-control status",
+        "control_commands": {
+            "status": "python scripts/run_tool.py agent-control status",
+            "pause": "python scripts/run_tool.py agent-control pause",
+            "resume": "python scripts/run_tool.py agent-control resume",
+            "stop": "python scripts/run_tool.py agent-control stop",
+        },
     })
+    return json.dumps({
+        "state": "running",
+        "message": "Mining started in the background",
+        "session_id": background["session_id"],
+        "selected_dataset_ids": payload.get("selected_dataset_ids") or [],
+        "next_action": "Check mining status",
+        "next_command": "python scripts/run_tool.py agent-control status",
+        "actions": [
+            "python scripts/run_tool.py agent-control status",
+            "python scripts/run_tool.py agent-control pause",
+            "python scripts/run_tool.py agent-control stop",
+        ],
+        "background_session": store.load_background_session(),
+    }, ensure_ascii=False, indent=2)
+
+
+def run_agent_control(action: str = "status") -> str:
+    from agent_runtime import build_worker_from_env
+    from background_worker import terminate_process
+    from worker_state import WorkerStateStore
+
+    normalized = (action or "status").strip().lower()
+    store = WorkerStateStore(_default_state_root())
+    background = _background_session_snapshot()
+
+    if normalized == "status":
+        if not background:
+            return json.dumps({
+                "state": "idle",
+                "message": "No background mining session found",
+                "next_action": "Start mining",
+                "next_command": "python scripts/run_tool.py agent-start",
+            }, ensure_ascii=False, indent=2)
+        worker = build_worker_from_env()
+        status = worker.check_status()
+        return json.dumps({
+            "state": "running" if background.get("running") else "stopped",
+            "message": "Background mining session status",
+            "background_session": background,
+            "status": status,
+        }, ensure_ascii=False, indent=2)
+
+    if normalized not in {"pause", "resume", "stop"}:
+        return json.dumps({
+            "state": "error",
+            "message": f"Unsupported agent-control action: {normalized}",
+            "next_command": "python scripts/run_tool.py agent-control status",
+        }, ensure_ascii=False, indent=2)
+
+    if not background:
+        return json.dumps({
+            "state": "idle",
+            "message": "No background mining session found",
+            "next_action": "Start mining",
+            "next_command": "python scripts/run_tool.py agent-start",
+        }, ensure_ascii=False, indent=2)
+
+    worker = build_worker_from_env()
+    if normalized == "pause":
+        payload = worker.pause()
+    elif normalized == "resume":
+        payload = worker.resume()
+    else:
+        payload = worker.stop()
+        pid = int(background.get("pid") or 0)
+        if pid > 0:
+            terminate_process(pid)
+            for _ in range(20):
+                refreshed = _background_session_snapshot()
+                if not refreshed.get("running"):
+                    break
+                time.sleep(0.1)
+        store.save_background_session({"last_stop_requested_at": int(payload.get("last_state_change_at") or 0)})
+
+    refreshed = _background_session_snapshot()
+    if normalized == "stop" and refreshed and not refreshed.get("running"):
+        store.clear_background_session()
+        refreshed = {}
+
+    return json.dumps({
+        "state": payload.get("mining_state"),
+        "message": payload.get("message"),
+        "background_session": refreshed,
+        "status": payload,
+    }, ensure_ascii=False, indent=2)
 
 
 def run_agent_loop(max_iterations: int = 1) -> str:
@@ -590,6 +791,16 @@ def main() -> int:
 
     if namespace.command == "agent-status":
         print(render_agent_status())
+        return 0
+
+    if namespace.command == "agent-start":
+        dataset_arg = namespace.args[0] if namespace.args else ""
+        print(run_agent_start(dataset_arg))
+        return 0
+
+    if namespace.command == "agent-control":
+        action = namespace.args[0] if namespace.args else "status"
+        print(run_agent_control(action))
         return 0
 
     if namespace.command == "agent-run":

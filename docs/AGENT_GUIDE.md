@@ -81,9 +81,9 @@ For a fuller variable reference, see [`ENVIRONMENT.md`](./ENVIRONMENT.md).
 Recommended checks:
 
 ```bash
-python scripts/run_tool.py doctor
 python scripts/run_tool.py agent-status
 python scripts/run_tool.py first-load
+python scripts/run_tool.py doctor
 ```
 
 Interpretation:
@@ -93,6 +93,23 @@ Interpretation:
 - `first-load` renders the guided startup experience
 
 ## 6. Start mining
+
+Preferred host flow:
+
+```bash
+python scripts/run_tool.py agent-start
+```
+
+Then monitor or control it with:
+
+```bash
+python scripts/run_tool.py agent-control status
+python scripts/run_tool.py agent-control pause
+python scripts/run_tool.py agent-control resume
+python scripts/run_tool.py agent-control stop
+```
+
+The goal is that mining runs in the background while the host agent stays available for user interaction.
 
 Guided start:
 
@@ -149,6 +166,18 @@ awp-wallet --version
 
 Do not rely on `npm install -g @aspect/awp-wallet`. This repository currently installs `awp-wallet` from the upstream GitHub source instead.
 
-## 9. Production note
+## 9. OpenClaw alias mapping
+
+If the host surface wants slash commands, map them to the canonical command layer:
+
+```text
+/mine-start  -> python scripts/run_tool.py agent-start
+/mine-status -> python scripts/run_tool.py agent-control status
+/mine-pause  -> python scripts/run_tool.py agent-control pause
+/mine-resume -> python scripts/run_tool.py agent-control resume
+/mine-stop   -> python scripts/run_tool.py agent-control stop
+```
+
+## 10. Production note
 
 The production platform URL currently requires wallet allow-listing. If you see `401` with `UNTRUSTED_HOST`, the wallet must be approved before mining will work there.

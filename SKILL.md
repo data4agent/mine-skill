@@ -23,21 +23,20 @@ requires:
 
 Mine is the agent-facing entrypoint for the local mining runtime in this repository.
 
-## Public command surface
+## Canonical host command surface
 
-Always go through `scripts/run_tool.py`.
+OpenClaw and other host agents should prefer these commands:
 
 ```bash
-python scripts/run_tool.py first-load
-python scripts/run_tool.py doctor
 python scripts/run_tool.py agent-status
-python scripts/run_tool.py start-working
-python scripts/run_tool.py check-status
-python scripts/run_tool.py list-datasets
-python scripts/run_tool.py run-worker 60 0
-python scripts/run_tool.py process-task-file <taskType> <taskJsonPath>
-python scripts/run_tool.py export-core-submissions <inputPath> <outputPath> <datasetId>
+python scripts/run_tool.py agent-start
+python scripts/run_tool.py agent-control status
+python scripts/run_tool.py agent-control pause
+python scripts/run_tool.py agent-control resume
+python scripts/run_tool.py agent-control stop
 ```
+
+Advanced local/runtime commands still exist, but they are not the recommended host integration path.
 
 ## Setup
 
@@ -94,13 +93,14 @@ Important nuance:
 
 For full details, see [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md).
 
-## Recommended agent workflow
+## Recommended OpenClaw workflow
 
 1. Run bootstrap.
 2. Initialize or verify the wallet.
 3. Unlock the wallet and capture a session token.
-4. Run `python scripts/run_tool.py doctor`.
-5. Run `python scripts/run_tool.py start-working` for the guided flow, or `python scripts/run_tool.py run-worker 60 0` for the long-running loop.
+4. Run `python scripts/run_tool.py agent-status`.
+5. Run `python scripts/run_tool.py agent-start`.
+6. Use `python scripts/run_tool.py agent-control status` to inspect progress without blocking chat.
 
 ## Troubleshooting
 
@@ -122,6 +122,18 @@ npm install -g .
 ```
 
 Do not rely on `npm install -g @aspect/awp-wallet`.
+
+## Alias mapping
+
+If OpenClaw exposes slash aliases, they should map to the canonical commands instead of becoming the source of truth:
+
+```text
+/mine-start  -> python scripts/run_tool.py agent-start
+/mine-status -> python scripts/run_tool.py agent-control status
+/mine-pause  -> python scripts/run_tool.py agent-control pause
+/mine-resume -> python scripts/run_tool.py agent-control resume
+/mine-stop   -> python scripts/run_tool.py agent-control stop
+```
 
 ## Reference docs
 

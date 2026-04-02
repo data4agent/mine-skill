@@ -26,6 +26,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from install_guidance import awp_wallet_install_steps
+from post_install_check import attempt_install_awp_wallet
+
 # Configuration
 MIN_PYTHON_VERSION = (3, 11)
 MIN_NODE_VERSION = 20
@@ -222,7 +225,7 @@ def step5_setup_wallet() -> tuple[bool, str, dict[str, Any]]:
         # Try to find it via npm
         npm_bin = shutil.which("npm")
         if npm_bin:
-            extra["fix_command"] = "npm install -g @aspect/awp-wallet"
+            extra["fix_command"] = " && ".join(awp_wallet_install_steps())
         return False, "awp-wallet not found. Install it first.", extra
 
     extra["wallet_bin"] = wallet_bin
@@ -487,7 +490,7 @@ def check_status() -> dict[str, Any]:
     all_ok = all(c["ok"] for c in checks)
 
     if all_ok:
-        return output_success("All checks passed!", checks=checks, next_command="python scripts/run_tool.py start-working")
+        return output_success("All checks passed!", checks=checks, next_command="python scripts/run_tool.py agent-start")
     else:
         failed = [c for c in checks if not c["ok"]]
         return output_action_needed(
@@ -521,11 +524,11 @@ def auto_fix() -> dict[str, Any]:
 
     # Fix 3: Try to install awp-wallet if missing
     if not shutil.which("awp-wallet") and shutil.which("npm"):
-        try:
-            subprocess.run(["npm", "install", "-g", "@aspect/awp-wallet"], capture_output=True, check=True)
-            fixes_applied.append("Installed awp-wallet via npm")
-        except subprocess.CalledProcessError:
-            fixes_failed.append("awp-wallet: npm install failed")
+        ok, msg = attempt_install_awp_wallet()
+        if ok:
+            fixes_applied.append(msg)
+        else:
+            fixes_failed.append(f"awp-wallet: {msg}")
 
     # Fix 4: Set default env vars if missing
     env_fixed = []
@@ -556,7 +559,7 @@ def auto_fix() -> dict[str, Any]:
             next_command="python scripts/mine_setup.py --status",
         )
 
-    return output_success("Nothing to fix - everything looks good!", next_command="python scripts/run_tool.py start-working")
+    return output_success("Nothing to fix - everything looks good!", next_command="python scripts/run_tool.py agent-start")
 
 
 def main() -> int:

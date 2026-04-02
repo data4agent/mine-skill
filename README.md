@@ -20,7 +20,8 @@ Unix-like:
 awp-wallet init
 awp-wallet unlock --duration 3600
 python scripts/run_tool.py doctor
-python scripts/run_tool.py start-working
+python scripts/run_tool.py agent-status
+python scripts/run_tool.py agent-start
 ```
 
 Windows:
@@ -30,10 +31,11 @@ Windows:
 awp-wallet init
 awp-wallet unlock --duration 3600
 python scripts/run_tool.py doctor
-python scripts/run_tool.py start-working
+python scripts/run_tool.py agent-status
+python scripts/run_tool.py agent-start
 ```
 
-If you want the worker loop directly instead of the guided start flow:
+If you want the worker loop directly instead of the host-oriented background flow:
 
 ```bash
 python scripts/run_tool.py run-worker 60 0
@@ -63,16 +65,30 @@ Important nuance: low-level platform status calls derive the miner identity from
 ## Main commands
 
 ```bash
-python scripts/run_tool.py first-load
-python scripts/run_tool.py doctor
 python scripts/run_tool.py agent-status
-python scripts/run_tool.py start-working
-python scripts/run_tool.py check-status
-python scripts/run_tool.py list-datasets
+python scripts/run_tool.py agent-start
+python scripts/run_tool.py agent-control status
+python scripts/run_tool.py agent-control pause
+python scripts/run_tool.py agent-control resume
+python scripts/run_tool.py agent-control stop
+python scripts/run_tool.py doctor
+python scripts/run_tool.py first-load
 python scripts/run_tool.py run-worker 60 0
 python scripts/run_tool.py process-task-file <taskType> <taskJsonPath>
 python scripts/run_tool.py export-core-submissions <inputPath> <outputPath> <datasetId>
 ```
+
+## OpenClaw host flow
+
+For OpenClaw and similar agents, the expected happy path is:
+
+1. bootstrap the repo
+2. run `python scripts/run_tool.py agent-status`
+3. if ready, run `python scripts/run_tool.py agent-start`
+4. keep the chat interactive while mining continues in the background
+5. use `python scripts/run_tool.py agent-control status|pause|resume|stop` for follow-up actions
+
+Slash commands such as `/mine-start` should be treated as host aliases that map onto these canonical commands.
 
 ## Documentation
 

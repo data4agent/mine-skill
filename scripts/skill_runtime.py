@@ -118,7 +118,7 @@ def _wallet_ready() -> tuple[bool, str, list[str]]:
         # Agent identity not initialized - internal setup issue
         return False, f"{SYM_CROSS} Agent identity {SYM_DASH} not initialized", [
             "# Run bootstrap to initialize agent identity",
-            "./scripts/bootstrap.sh",
+            "powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1" if os.name == "nt" else "./scripts/bootstrap.sh",
         ]
     if wallet_token.strip():
         return True, f"{SYM_CHECK} Agent identity {SYM_DASH} ready", []
@@ -132,9 +132,8 @@ def _crawler_ready() -> tuple[bool, str, list[str]]:
     py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     if crawler_root is None:
         return False, f"{SYM_CROSS} Mine runtime {SYM_DASH} not ready (Python {py_ver})", [
-            "git clone https://github.com/aspect-build/social-data-crawler.git",
-            "cd social-data-crawler",
-            "bash scripts/bootstrap.sh",
+            "# Bootstrap the current Mine checkout",
+            "powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1" if os.name == "nt" else "./scripts/bootstrap.sh",
         ]
     if sys.version_info < (3, 11):
         return False, f"{SYM_CROSS} Mine runtime {SYM_DASH} found, but Mine needs Python 3.11+ (current: {py_ver})", [
@@ -169,17 +168,26 @@ def _platform_line() -> tuple[bool, str, list[str]]:
 
 
 def _version_lines() -> list[str]:
-    wallet_ok, _wallet_line, _fixes = _wallet_ready()
+    wallet_bin, wallet_token = resolve_wallet_config()
+    wallet_installed = bool(shutil.which(wallet_bin) or Path(wallet_bin).exists())
     runtime_ready = _resolve_crawler_root() is not None
     local_version = _read_local_version()
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     python_ready = sys.version_info >= (3, 11)
     version_status = f"v{local_version}" if local_version != "unknown" else "project checkout ready" if runtime_ready else "runtime not ready"
+    wallet_status = f"installed {SYM_CHECK}" if wallet_installed else "missing"
+    if wallet_token.strip():
+        wallet_session = f"ready {SYM_CHECK}"
+    elif wallet_installed:
+        wallet_session = f"auto-managed ({SYM_BULLET} refresh with awp-wallet unlock --duration 3600)"
+    else:
+        wallet_session = "not available"
     return [
         "Version check:",
         f"  {SYM_BULLET} Mine runtime version {SYM_DASH} {version_status}",
         f"  {SYM_BULLET} Python version {SYM_DASH} {python_version}{f' {SYM_CHECK}' if python_ready else ' (Mine needs Python 3.11+)'}",
-        f"  {SYM_BULLET} Agent identity {SYM_DASH} {'ready ' + SYM_CHECK if wallet_ok else 'initializing'}",
+        f"  {SYM_BULLET} AWP Wallet {SYM_DASH} {wallet_status}",
+        f"  {SYM_BULLET} Wallet session {SYM_DASH} {wallet_session}",
     ]
 
 
@@ -193,20 +201,11 @@ def render_first_load_experience() -> str:
     platform_ok, platform_line, platform_fixes = _platform_line()
 
     lines = [
-        f"Welcome to Mine {SYM_DASH} the data service WorkNet!",
+        "Mine for OpenClaw",
         "",
-        "Your agent mines the internet for structured data and earns $aMine.",
-        f"Crawl, clean, structure {SYM_DASH} fully autonomous, no human in the loop.",
+        "Mine runs signed data-mining work in the background while the conversation stays interactive.",
         "",
-        "Quick start:",
-        f"  start working {SYM_DASH} auto mining, I handle everything",
-        f"  check status  {SYM_DASH} credit score, epoch stats, earnings",
-        f"  list datasets {SYM_DASH} see what's available to mine",
-        "",
-        "Security: agent handles all signing automatically.",
-        "",
-        SYM_DIVIDER,
-        "Dependency check:",
+        "Status:",
         f"  {crawler_line}",
         f"  {wallet_line}",
         f"  {platform_line}",
@@ -215,25 +214,16 @@ def render_first_load_experience() -> str:
     if wallet_ok and crawler_ok and platform_ok:
         lines.extend([
             "",
-            f"{SYM_CHECK} All dependencies ready.",
+            f"{SYM_CHECK} Mine is ready.",
+            "Next action:",
+            "  python scripts/run_tool.py agent-start",
             "",
-            SYM_DIVIDER,
-            "Available Commands:",
+            "Available actions:",
+            "  python scripts/run_tool.py agent-start",
+            "  python scripts/run_tool.py agent-control status",
+            "  python scripts/run_tool.py agent-control stop",
             "",
-            "  Main Actions:",
-            "    /mine-start     — Begin autonomous mining (runs in background agent)",
-            "    /mine-pause     — Pause mining and save progress",
-            "    /mine-resume    — Resume from saved state",
-            "    /mine-stop      — Stop mining and show summary",
-            "",
-            "  Status & Info:",
-            "    /mine-status    — Check mining progress, credit score, epoch stats",
-            "    /mine-datasets  — List available datasets to mine",
-            "",
-            "  Diagnostics:",
-            "    /mine-doctor    — Diagnose issues and get fix commands",
-            "",
-            "Or just tell me what you'd like to do in natural language.",
+            "OpenClaw aliases can map these to /mine-start, /mine-status, and /mine-stop.",
         ])
         return "\n".join(lines)
 
@@ -249,16 +239,26 @@ def render_first_load_experience() -> str:
         if all_fixes:
             all_fixes.append("")
         all_fixes.extend(platform_fixes)
+    wallet_token = resolve_wallet_config()[1]
+    if not wallet_token.strip():
+        if all_fixes:
+            all_fixes.append("")
+        all_fixes.extend([
+            "# Refresh wallet session if mining asks for auth:",
+            "awp-wallet unlock --duration 3600",
+        ])
 
-    lines.extend(["", f"{SYM_CROSS} Missing dependencies. Run these commands to fix:", ""])
+    lines.extend(["", f"{SYM_CROSS} Mine needs one fix before it can start.", "", "Next action:"])
     for fix in all_fixes:
         lines.append(f"  {fix}")
 
     lines.extend([
         "",
-        f"Run these, then say 'check again' and I'll re-verify.",
+        "Then run:",
+        "  python scripts/run_tool.py agent-status",
         "",
-        "Command: /mine-doctor for detailed diagnostics"
+        "For deeper diagnostics:",
+        "  python scripts/run_tool.py doctor",
     ])
     return "\n".join(lines)
 
@@ -312,13 +312,20 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
             lines.extend([
                 "",
                 "This looks like an authentication issue. The agent will auto-recover.",
-                "  1. /mine-status to verify",
-                "  2. /mine-start to retry",
+                "  1. python scripts/run_tool.py agent-control status",
+                "  2. python scripts/run_tool.py agent-start",
+            ])
+        elif "wallet" in error_msg.lower() or "token" in error_msg.lower():
+            lines.extend([
+                "",
+                "This looks like a wallet session issue.",
+                f"  {SYM_BULLET} Run: awp-wallet unlock --duration 3600",
+                f"  {SYM_BULLET} Retry: python scripts/run_tool.py agent-start",
             ])
         else:
             lines.extend([
                 "",
-                f"  {SYM_BULLET} Run: /mine-doctor to diagnose",
+                f"  {SYM_BULLET} Run: python scripts/run_tool.py doctor",
             ])
         return "\n".join(lines)
 
@@ -386,16 +393,15 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
             SYM_DIVIDER,
             "Starting autonomous mining...",
             "",
-            f"{SYM_CHECK} Mining will run in a background process",
-            f"{SYM_CHECK} I'll update you on progress periodically",
-            f"{SYM_CHECK} You can still ask me questions anytime",
+            f"{SYM_CHECK} Use agent-start for real background execution in OpenClaw",
+            f"{SYM_CHECK} Status and control stay available during mining",
             "",
             "Controls:",
-            "  /mine-pause  — Pause and save progress",
-            "  /mine-stop   — Stop and show summary",
-            "  /mine-status — Check current progress",
+            "  python scripts/run_tool.py agent-control pause",
+            "  python scripts/run_tool.py agent-control stop",
+            "  python scripts/run_tool.py agent-control status",
             "",
-            f"Starting batch 1... say 'pause' or 'stop' anytime.",
+            "If OpenClaw provides slash aliases, it may map these to /mine-pause, /mine-stop, and /mine-status.",
         ])
     else:
         lines.append("Mining session is ready.")
@@ -720,7 +726,7 @@ def render_pause_response(
     lines.append(f"  State saved       {state_path}")
     lines.append(SYM_DIVIDER)
     lines.append("")
-    lines.append("Commands: /mine-resume | /mine-stop")
+    lines.append("Commands: python scripts/run_tool.py agent-control resume | python scripts/run_tool.py agent-control stop")
 
     return "\n".join(lines)
 
@@ -754,7 +760,7 @@ def render_resume_response(
         lines.append("")
         lines.append(f"Resuming from batch {batch_num} with {' + '.join(dataset_ids)}.")
         lines.append("")
-        lines.append("Commands: /mine-pause | /mine-stop")
+        lines.append("Commands: python scripts/run_tool.py agent-control pause | python scripts/run_tool.py agent-control stop")
 
     return "\n".join(lines)
 
@@ -795,7 +801,7 @@ def render_session_summary(
 
     lines.append(SYM_DIVIDER)
     lines.append("")
-    lines.append("Command: /mine-start to begin a new session")
+    lines.append("Command: python scripts/run_tool.py agent-start")
 
     return "\n".join(lines)
 
@@ -845,7 +851,7 @@ def render_epoch_settlement(
         lines.append("")
         lines.append(f"New epoch {new_epoch_id} started{hours_ago}.")
         lines.append("")
-        lines.append("Command: /mine-start to begin")
+        lines.append("Command: python scripts/run_tool.py agent-start")
 
     return "\n".join(lines)
 
@@ -1211,7 +1217,8 @@ def render_status_summary(worker: Any) -> str:
     ]
 
     # Miner info
-    lines.append(f"  Miner ID          {worker.config.miner_id}")
+    miner_id = getattr(worker.config, "miner_id", None) or "unknown"
+    lines.append(f"  Miner ID          {miner_id}")
 
     # Platform with network detection
     platform = worker.config.base_url
@@ -1295,12 +1302,12 @@ def render_status_summary(worker: Any) -> str:
     # Control hint
     lines.append("")
     if mining_state == "running":
-        lines.append("Commands: /mine-pause | /mine-stop")
+        lines.append("Commands: python scripts/run_tool.py agent-control pause | python scripts/run_tool.py agent-control stop")
     elif mining_state == "paused":
-        lines.append("Commands: /mine-resume | /mine-stop")
+        lines.append("Commands: python scripts/run_tool.py agent-control resume | python scripts/run_tool.py agent-control stop")
     elif mining_state == "stopped":
-        lines.append("Commands: /mine-start to begin mining")
+        lines.append("Commands: python scripts/run_tool.py agent-start")
     else:
-        lines.append("Commands: /mine-start | /mine-datasets")
+        lines.append("Commands: python scripts/run_tool.py agent-start | python scripts/run_tool.py list-datasets")
 
     return "\n".join(lines)

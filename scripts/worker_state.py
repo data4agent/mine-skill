@@ -18,6 +18,7 @@ class WorkerStateStore:
         self._submit_pending_path = self.root / "submit_pending.json"
         self._dataset_cursors_path = self.root / "dataset_cursors.json"
         self._session_path = self.root / "session.json"
+        self._background_session_path = self.root / "background_session.json"
         self._dataset_cooldowns_path = self.root / "dataset_cooldowns.json"
         self._lock_path = self.root / "worker.lock.json"
         self._session_cache: dict[str, Any] | None = None
@@ -110,6 +111,23 @@ class WorkerStateStore:
         if self._session_cache is None:
             self._session_cache = self._normalize_session(self._read_object(self._session_path))
         return self._normalize_session(self._session_cache)
+
+    def load_background_session(self) -> dict[str, Any]:
+        payload = self._read_object(self._background_session_path)
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    def save_background_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.load_background_session()
+        current.update(payload)
+        self._write_json(self._background_session_path, current)
+        return dict(current)
+
+    def clear_background_session(self) -> bool:
+        try:
+            self._background_session_path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
 
     def save_session(self, partial: dict[str, Any], *, flush: bool = True) -> dict[str, Any]:
         session = self.load_session()

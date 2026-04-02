@@ -4,6 +4,14 @@ All public runtime commands go through `scripts/run_tool.py`.
 
 ## Setup and readiness
 
+Host integrations should prefer:
+
+- `agent-status`
+- `agent-start`
+- `agent-control`
+
+The remaining commands in this file are still valid, but many of them are advanced or local-operator surfaces rather than the primary OpenClaw contract.
+
 ### `setup`
 
 ```bash
@@ -51,6 +59,26 @@ python scripts/run_tool.py agent-status
 ```
 
 Returns a compact JSON readiness summary for host integrations.
+
+### `agent-start`
+
+```bash
+python scripts/run_tool.py agent-start
+python scripts/run_tool.py agent-start datasetA,datasetB
+```
+
+Starts mining through the host-facing background session flow. If dataset selection is required, returns a structured prompt telling the host how to retry with dataset ids.
+
+### `agent-control`
+
+```bash
+python scripts/run_tool.py agent-control status
+python scripts/run_tool.py agent-control pause
+python scripts/run_tool.py agent-control resume
+python scripts/run_tool.py agent-control stop
+```
+
+Queries or controls the current background mining session.
 
 ### `diagnose`
 

@@ -10,7 +10,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from install_guidance import awp_wallet_install_steps
 
 
 def check_python_version() -> tuple[bool, str]:
@@ -111,33 +114,53 @@ def check_env_vars() -> tuple[bool, str, list[str]]:
 
 
 def attempt_install_awp_wallet() -> tuple[bool, str]:
-    """Try to install awp-wallet via npm."""
+    """Try to install awp-wallet from the supported GitHub source."""
     npm_bin = shutil.which("npm")
+    git_bin = shutil.which("git")
     if not npm_bin:
         return False, "npm not available - cannot install awp-wallet"
+    if not git_bin:
+        return False, "git not available - cannot install awp-wallet"
 
     try:
-        print("  Installing awp-wallet via npm...")
-        result = subprocess.run(
-            [npm_bin, "install", "-g", "@aspect/awp-wallet"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        print("  Installing awp-wallet from GitHub...")
+        with tempfile.TemporaryDirectory(prefix="awp-wallet-install-") as temp_dir:
+            clone_result = subprocess.run(
+                [git_bin, "clone", "https://github.com/awp-core/awp-wallet.git", temp_dir],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if clone_result.returncode != 0:
+                return False, f"git clone failed: {clone_result.stderr.strip()}"
 
-        if result.returncode == 0:
-            # Verify installation
-            ok, msg = check_awp_wallet_installed()
-            if ok:
-                return True, "awp-wallet installed successfully"
-            else:
-                return False, f"Installation completed but verification failed: {msg}"
-        else:
-            error = result.stderr.strip()
-            return False, f"npm install failed: {error}"
+            install_result = subprocess.run(
+                [npm_bin, "install"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=temp_dir,
+            )
+            if install_result.returncode != 0:
+                return False, f"npm install failed: {install_result.stderr.strip()}"
+
+            global_result = subprocess.run(
+                [npm_bin, "install", "-g", "."],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=temp_dir,
+            )
+            if global_result.returncode != 0:
+                return False, f"npm install -g . failed: {global_result.stderr.strip()}"
+
+        ok, msg = check_awp_wallet_installed()
+        if ok:
+            return True, "awp-wallet installed successfully from GitHub"
+        return False, f"Installation completed but verification failed: {msg}"
 
     except subprocess.TimeoutExpired:
-        return False, "npm install timed out (>120s)"
+        return False, "awp-wallet installation timed out"
     except Exception as e:
         return False, f"Installation failed: {e}"
 
@@ -374,7 +397,8 @@ def main():
 
             if "install_awp_wallet" in fixes_needed and "awp-wallet" in str(fixes_failed):
                 print("2. Install awp-wallet manually:")
-                print("   npm install -g @aspect/awp-wallet")
+                for step in awp_wallet_install_steps():
+                    print(f"   {step}")
                 print()
 
             print("Then re-run:")
@@ -390,7 +414,8 @@ def main():
     print("Next steps:")
     print("  1. Initialize wallet: awp-wallet init")
     print("  2. Unlock wallet:    awp-wallet unlock --duration 3600")
-    print("  3. Start mining:     python scripts/run_tool.py run-worker 60 1")
+    print("  3. Check readiness:  python scripts/run_tool.py agent-status")
+    print("  4. Start mining:     python scripts/run_tool.py agent-start")
     print()
 
 

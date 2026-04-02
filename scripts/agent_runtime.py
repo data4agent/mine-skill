@@ -1314,6 +1314,7 @@ def build_worker_from_env() -> AgentWorker:
     config = WorkerConfig(
         base_url=os.environ["PLATFORM_BASE_URL"],
         token=os.environ.get("PLATFORM_TOKEN", ""),
+        miner_id=os.environ["MINER_ID"],
         output_root=output_root,
         crawler_root=CRAWLER_ROOT,
         python_bin=python_bin,

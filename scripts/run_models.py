@@ -73,6 +73,7 @@ class WorkItem:
 class WorkerConfig:
     base_url: str
     token: str
+    miner_id: str
     output_root: Path
     crawler_root: Path
     python_bin: str
