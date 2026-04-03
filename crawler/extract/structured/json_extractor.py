@@ -340,7 +340,10 @@ class JsonExtractor:
                 for node in category_nodes
                 if node.get_text(" ", strip=True)
             ]
+            set_field("categories", categories, "amazon_html:breadcrumbs")
+            set_field("breadcrumbs", categories, "amazon_html:breadcrumbs")
             set_field("category", categories, "amazon_html:breadcrumbs")
+            set_field("category_tree", " > ".join(categories), "computed:category_tree")
 
         bullet_nodes = soup.select("#feature-bullets .a-list-item")
         if bullet_nodes:
@@ -351,14 +354,38 @@ class JsonExtractor:
                     bullets.append(text)
             set_field("bullet_points", bullets, "amazon_html:#feature-bullets")
 
-        if "category" not in fields:
+        if "categories" not in fields:
             meta_title = soup.find("meta", attrs={"name": "title"})
             title_text = meta_title.get("content", "").strip() if meta_title is not None else ""
             if not title_text and soup.title and soup.title.string:
                 title_text = soup.title.string.strip()
             category = self._extract_amazon_meta_category(title_text)
             if category:
-                set_field("category", [category], "amazon_html:meta_title_category")
+                category_list = [category]
+                set_field("categories", category_list, "amazon_html:meta_title_category")
+                set_field("breadcrumbs", category_list, "amazon_html:meta_title_category")
+                set_field("category", category_list, "amazon_html:meta_title_category")
+                set_field("category_tree", category, "computed:category_tree")
+        if "categories" not in fields:
+            department_option = soup.select_one("select#searchDropdownBox option[selected], #searchDropdownBox option[selected]")
+            department_text = department_option.get_text(" ", strip=True) if department_option is not None else ""
+            if department_text and department_text.lower() not in {"all", "all departments"}:
+                category_list = [department_text]
+                set_field("categories", category_list, "amazon_html:search_department")
+                set_field("breadcrumbs", category_list, "amazon_html:search_department")
+                set_field("category", category_list, "amazon_html:search_department")
+                set_field("category_tree", department_text, "computed:category_tree")
+
+        if "categories" not in fields:
+            department_node = soup.select_one("#nav-search-label-id, #searchDropdownBox option[selected]")
+            if department_node is not None:
+                department_text = department_node.get_text(" ", strip=True)
+                if department_text:
+                    category_list = [department_text]
+                    set_field("categories", category_list, "amazon_html:search_department")
+                    set_field("breadcrumbs", category_list, "amazon_html:search_department")
+                    set_field("category", category_list, "amazon_html:search_department")
+                    set_field("category_tree", department_text, "computed:category_tree")
 
         image_nodes = soup.select("#imgTagWrapperId img[src], #altImages img[src]")
         if image_nodes:
@@ -371,8 +398,11 @@ class JsonExtractor:
                 if absolute not in images:
                     images.append(absolute)
             set_field("images", images, "amazon_html:images")
-            # Set main_image as first image
-            if images:
+            # Prefer an actual product image over viewer chrome/icons.
+            product_images = [image for image in images if self._is_amazon_product_image(image)]
+            if product_images:
+                set_field("main_image", product_images[0], "amazon_html:product_images[0]")
+            elif images:
                 set_field("main_image", images[0], "amazon_html:images[0]")
 
         # Check for A+ content presence
@@ -499,6 +529,7 @@ class JsonExtractor:
             "#productDetails_techSpec_section_1 tr, "
             "#productDetails_detailBullets_sections1 tr, "
             "#detailBullets_feature_div li, "
+            "#detailBulletsWrapper_feature_div li, "
             "#prodDetails tr"
         )
         extracted_features: list[str] = []
@@ -542,6 +573,56 @@ class JsonExtractor:
 
         if extracted_features:
             set_field("features", extracted_features, "amazon_html:product_details_features")
+        elif "bullet_points" in fields:
+            set_field("features", fields["bullet_points"], "computed:features_from_bullets")
+
+        if {
+            "date_first_available",
+            "product_dimensions",
+            "product_weight",
+            "warranty_info",
+        } - set(fields):
+            for label, value in self._extract_amazon_detail_bullets_pairs(soup):
+                normalized_label = re.sub(r"[\s\u200e\u200f]+", "", label).strip(" :").lower()
+                if "date_first_available" not in fields and (
+                    "datefirstavailable" in normalized_label or "publicationdate" in normalized_label
+                ):
+                    set_field(
+                        "date_first_available",
+                        self._normalize_amazon_date_text(value) or value,
+                        "amazon_html:detail_bullets_pairs",
+                    )
+                elif "product_dimensions" not in fields and (
+                    "productdimensions" in normalized_label
+                    or "packagedimensions" in normalized_label
+                    or normalized_label == "dimensions"
+                    or "dimensions" in normalized_label
+                ):
+                    set_field("product_dimensions", value, "amazon_html:detail_bullets_pairs")
+                elif "product_weight" not in fields and (
+                    "itemweight" in normalized_label or "productweight" in normalized_label or normalized_label == "weight"
+                ):
+                    set_field("product_weight", value, "amazon_html:detail_bullets_pairs")
+                elif "warranty_info" not in fields and "warranty" in normalized_label:
+                    set_field("warranty_info", value, "amazon_html:detail_bullets_pairs")
+
+        if "product_dimensions" not in fields or "product_weight" not in fields:
+            content_grid_rows = soup.select("table.a-bordered tr")
+            for row in content_grid_rows:
+                cells = row.select("td")
+                if len(cells) < 2:
+                    continue
+                label = cells[0].get_text(" ", strip=True)
+                value = cells[1].get_text(" ", strip=True)
+                normalized_label = re.sub(r"[\s\u200e\u200f]+", "", label).strip(" :").lower()
+                if not label or not value:
+                    continue
+                if "product_dimensions" not in fields and normalized_label in {"size", "dimensions", "productdimensions"}:
+                    set_field("product_dimensions", value, "amazon_html:content_grid_table")
+                elif "product_weight" not in fields and normalized_label in {"weight", "itemweight", "productweight"}:
+                    set_field("product_weight", value, "amazon_html:content_grid_table")
+                elif "warranty_info" not in fields and normalized_label in {"softwaresecurityupdates", "warranty"}:
+                    set_field("warranty_info", value, "amazon_html:content_grid_table")
 
         # Extract variant dimensions (sizes, colors, styles)
         twister_labels = soup.select("#twister .a-row.a-spacing-small")
@@ -584,6 +665,10 @@ class JsonExtractor:
                     fbt_items.append(fbt_item)
             if fbt_items:
                 set_field("frequently_bought_together", fbt_items, "amazon_html:fbt_widget")
+        if "frequently_bought_together" not in fields:
+            fbt_items = self._extract_amazon_fbt_items(soup)
+            if fbt_items:
+                set_field("frequently_bought_together", fbt_items, "amazon_html:fbt_widget_fallback")
 
         # Extract customers also viewed
         cav_node = soup.select_one("#sp_detail, #sp_detail2, [data-component-type='sp_detail']")
@@ -600,6 +685,13 @@ class JsonExtractor:
                     cav_items.append(cav_item)
             if cav_items:
                 set_field("customers_also_viewed", cav_items, "amazon_html:cav_widget")
+        elif "customers_also_viewed" not in fields:
+            compare_items, compare_attributes = self._extract_amazon_compare_table(soup)
+            if compare_items:
+                set_field("customers_also_viewed", compare_items, "amazon_html:compare_widget")
+            dimensions = compare_attributes.get("dimensions")
+            if dimensions:
+                set_field("product_dimensions", dimensions, "amazon_html:compare_widget")
 
         # Extract video presence
         video_node = soup.select_one(
@@ -610,21 +702,127 @@ class JsonExtractor:
         if video_node:
             set_field("has_video", True, "amazon_html:video_present")
 
-        # Keep the legacy "category" alias for enrich inputs, while also
-        # emitting schema-aligned category fields for downstream consumers.
-        if "category" in fields:
-            categories = fields["category"]
-            set_field("categories", categories, "amazon_html:breadcrumbs")
-            set_field("breadcrumbs", categories, "amazon_html:breadcrumbs")
-            # Generate category_tree string
-            if isinstance(categories, list):
-                set_field("category_tree", " > ".join(categories), "computed:category_tree")
+        # Keep the legacy "category" alias for enrich inputs after emitting
+        # schema-aligned category fields for downstream consumers.
+        if "category" not in fields and "categories" in fields:
+            set_field("category", fields["categories"], "computed:category_alias")
 
         # Compute image_count
         if "images" in fields and isinstance(fields["images"], list):
             set_field("image_count", len(fields["images"]), "computed:image_count")
 
         return {"fields": fields, "sources": sources}
+
+    def _is_amazon_product_image(self, url: str) -> bool:
+        lowered = str(url or "").lower()
+        if not lowered:
+            return False
+        blocked_markers = (
+            "transparent-pixel",
+            "360_icon",
+            "icon_73x73",
+            "play-icon",
+            "video._cb",
+            ".gif",
+        )
+        if any(marker in lowered for marker in blocked_markers):
+            return False
+        return any(marker in lowered for marker in ("/images/i/", "m.media-amazon.com/images/i/", "images-na.ssl-images-amazon.com/images/i/"))
+
+    def _extract_amazon_detail_bullets_pairs(self, soup: BeautifulSoup) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for item in soup.select("#detailBulletsWrapper_feature_div li, #detailBullets_feature_div li"):
+            label_node = item.select_one(".a-text-bold")
+            if label_node is None:
+                continue
+            label = label_node.get_text(" ", strip=True).strip(" :")
+            text = item.get_text(" ", strip=True)
+            value = text.replace(label_node.get_text(" ", strip=True), "", 1).strip(" :")
+            if label and value:
+                pairs.append((label, value))
+        return pairs
+
+    def _extract_amazon_fbt_items(self, soup: BeautifulSoup) -> list[dict[str, Any]]:
+        container = soup.select_one("[cel_widget_id*='sims-fbt'], [id*='sims-fbt']")
+        if container is None:
+            return []
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in container.select("[data-asin], [id^='ProductTitle-']"):
+            asin = item.get("data-asin")
+            if not asin:
+                link = item.select_one("a[href*='/dp/'], a[href*='/gp/product/']")
+                if link is not None:
+                    href = link.get("href", "")
+                    match = re.search(r"/(?:dp|gp/product)/([A-Z0-9]{10})", href)
+                    if match:
+                        asin = match.group(1)
+            if not asin or asin in seen:
+                continue
+            seen.add(asin)
+            title_node = item.select_one("a[title], .a-size-base")
+            title = title_node.get_text(" ", strip=True) if title_node is not None else None
+            entry: dict[str, Any] = {"asin": asin}
+            if title:
+                entry["title"] = title
+            items.append(entry)
+        for hidden in container.select("input[name*='[asin]'][value]"):
+            asin = str(hidden.get("value") or "").strip()
+            if not asin or asin in seen:
+                continue
+            seen.add(asin)
+            items.insert(0, {"asin": asin})
+        return items
+
+    def _extract_amazon_compare_table(self, soup: BeautifulSoup) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        compare = soup.select_one("#compare table.ucc-v2-widget__table, #compare")
+        if compare is None:
+            return [], {}
+
+        rows = []
+        for tr in compare.select("tr"):
+            cells = [
+                cell.get_text(" ", strip=True)
+                for cell in tr.select("th, td")
+            ]
+            if cells:
+                rows.append(cells)
+        if len(rows) < 3:
+            return [], {}
+
+        device_row = next((row for row in rows if row and row[0].strip().upper() == "DEVICE"), None)
+        if not device_row:
+            return [], {}
+
+        products: list[dict[str, Any]] = []
+        for anchor in compare.select("a[href*='/dp/'][title]"):
+            href = str(anchor.get("href") or "").strip()
+            title = anchor.get("title") or anchor.get_text(" ", strip=True)
+            asin_match = re.search(r"/dp/([A-Z0-9]{10})", href)
+            if not asin_match or not title:
+                continue
+            asin = asin_match.group(1)
+            if any(item.get("asin") == asin for item in products):
+                continue
+            products.append(
+                {
+                    "asin": asin,
+                    "title": str(title).strip(),
+                    "url": urljoin("https://www.amazon.com", href),
+                }
+            )
+
+        attributes: dict[str, str] = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            label = row[0].strip().lower()
+            values = [value.strip() for value in row[1:] if value.strip() and value.strip() != "-"]
+            if not values:
+                continue
+            if label == "dimensions":
+                attributes["dimensions"] = values[0]
+        return products, attributes
 
     def _extract_amazon_seller_html(
         self,
@@ -804,6 +1002,10 @@ class JsonExtractor:
         if review_node.select_one("[data-hook='avp-badge'], [data-hook='vine-badge']") is not None:
             set_field("verified_purchase", True, "amazon_html:verified_purchase")
 
+        variant_purchased = self._extract_amazon_review_variant_purchased(review_node)
+        if variant_purchased:
+            set_field("variant_purchased", variant_purchased, "amazon_html:review_variant")
+
         helpful_node = review_node.select_one("[data-hook='helpful-vote-statement']")
         if helpful_node is not None:
             helpful_text = helpful_node.get_text(" ", strip=True)
@@ -855,6 +1057,81 @@ class JsonExtractor:
         if match:
             return match.group(2).strip()
         return None
+
+    def _extract_amazon_review_variant_purchased(self, review_node: Any) -> str | None:
+        containers = review_node.select(
+            "[data-hook='format-strip'], "
+            "[data-hook='format-strip-linkless'], "
+            ".review-format-strip, "
+            ".format-strip"
+        )
+        variant_parts: list[str] = []
+        seen: set[str] = set()
+
+        def add_part(text: str) -> None:
+            cleaned = re.sub(r"\s+", " ", text).strip(" |")
+            normalized_key = cleaned.lower()
+            if not cleaned or normalized_key in seen:
+                return
+            seen.add(normalized_key)
+            variant_parts.append(cleaned)
+
+        for container in containers:
+            candidates = [
+                node.get_text(" ", strip=True)
+                for node in container.select("a, span")
+                if node.get_text(" ", strip=True)
+            ]
+            if not candidates:
+                candidates = [part.strip() for part in container.get_text(" ", strip=True).split("|")]
+            for candidate in candidates:
+                if self._looks_like_amazon_variant_text(candidate):
+                    add_part(candidate)
+
+        if variant_parts:
+            return " | ".join(variant_parts)
+        return None
+
+    def _looks_like_amazon_variant_text(self, text: str) -> bool:
+        cleaned = re.sub(r"\s+", " ", text).strip(" |")
+        if not cleaned:
+            return False
+        lowered = cleaned.lower()
+        if any(
+            phrase in lowered
+            for phrase in (
+                "verified purchase",
+                "vine customer review",
+                "reviewed in",
+                "helpful",
+                "people found this helpful",
+            )
+        ):
+            return False
+
+        prefix, separator, _ = cleaned.partition(":")
+        if not separator:
+            return False
+
+        variant_prefixes = {
+            "color",
+            "size",
+            "style",
+            "pattern",
+            "flavor",
+            "configuration",
+            "item package quantity",
+            "capacity",
+            "scent",
+            "design",
+            "material",
+            "edition",
+            "format",
+            "platform",
+            "model",
+            "pack",
+        }
+        return prefix.strip().lower() in variant_prefixes
 
     def _parse_best_sellers_rank(self, text: str) -> dict[str, int]:
         """Parse Best Sellers Rank from product details text.

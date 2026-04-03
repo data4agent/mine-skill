@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
-from crawler.enrich.generative.llm_client import LLMClient, parse_json_response
+from crawler.enrich.generative.llm_client import parse_json_response
+from crawler.enrich.generative.llm_enrich import enrich_with_llm, llm_execution_available
 
 
 def extract_json_object(content: str) -> dict[str, Any]:
@@ -30,7 +31,6 @@ class SchemaExecutionResult:
 class LLMExecutor:
     def __init__(self, model_config: dict[str, Any]):
         self.model_config = model_config
-        self.client = LLMClient.from_model_config(model_config) if model_config else None
 
     async def execute(
         self,
@@ -40,8 +40,13 @@ class LLMExecutor:
         payload: dict[str, Any],
         system_prompt: str = "Extract only the requested JSON object. Return valid JSON only.",
     ) -> SchemaExecutionResult:
-        if self.client is None:
-            return SchemaExecutionResult(success=False, data={}, error="AI configuration is incomplete", schema_name=schema_name)
+        if not llm_execution_available(self.model_config):
+            return SchemaExecutionResult(
+                success=False,
+                data={},
+                error="No LLM enrich method available",
+                schema_name=schema_name,
+            )
 
         prompt = (
             f"Schema name: {schema_name}\n"
@@ -49,13 +54,19 @@ class LLMExecutor:
             f"Payload:\n{payload}"
         )
         try:
-            response = await self.client.complete(
+            response = await enrich_with_llm(
                 prompt,
-                model=str(self.model_config.get("model", "")),
-                max_tokens=int(self.model_config.get("max_tokens", 768)),
-                temperature=float(self.model_config.get("temperature", 0.1)),
+                model_config=self.model_config or None,
                 system_prompt=system_prompt,
+                timeout=float(self.model_config.get("timeout", 60.0) or 60.0),
             )
+            if not response.success:
+                return SchemaExecutionResult(
+                    success=False,
+                    data={},
+                    error=response.error or "schema execution failed",
+                    schema_name=schema_name,
+                )
             return SchemaExecutionResult(
                 success=True,
                 data=extract_json_object(response.content),

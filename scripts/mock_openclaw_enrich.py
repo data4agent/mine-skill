@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Reproduce the same enrich completion path as production **without** starting OpenClaw Gateway:
+Reproduce the same enrich completion path as production for pending enrich groups.
 
-1) OpenClaw Gateway uses LLMClient ``/responses`` (provider=openclaw).
-2) This script uses **OpenAI-compatible** ``POST {base_url}/chat/completions`` (same as LLMClient’s
-   non-openclaw branch), then calls ``EnrichPipeline.fill_pending_agent_result`` like ``fill-enrichment``.
+This script now uses the same unified LLM enrich entrypoint as production:
+
+1) benchmark-skill style OpenClaw agent CLI is preferred
+2) OpenClaw Gateway is the fallback when model_config uses ``provider=openclaw``
+3) other OpenAI-compatible APIs are used only as the final fallback
 
 Typical usage (ensure records are ``pending_agent``, or use ``recover-pending`` first)::
 
@@ -14,11 +16,12 @@ Typical usage (ensure records are ``pending_agent``, or use ``recover-pending`` 
     # Re-run enrich without LLM so failed groups become pending_agent (with prompt)
     python scripts/mock_openclaw_enrich.py recover-pending --records output/x/records.jsonl --in-place
 
-    # Chat Completions fill (same chain as non-Gateway enrich)
+    # Unified LLM fill (same chain as production enrich)
     python scripts/mock_openclaw_enrich.py chat-complete --records output/x/records.jsonl \\
         --model-config references/model_config_chat_completions.example.json --output output/x/records.filled.jsonl
 
-Environment variables override API keys in config: ``OPENAI_API_KEY`` or ``MINE_CHAT_API_KEY``.
+Environment variables override API keys in config: ``OPENAI_API_KEY`` or
+``MINE_CHAT_API_KEY`` for generic API configs.
 """
 from __future__ import annotations
 
@@ -47,21 +50,6 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
         encoding="utf-8",
     )
-
-
-def _extract_chat_content(data: dict[str, Any]) -> str:
-    """Match ``LLMClient._extract_content`` for chat completions responses."""
-    choices = data.get("choices", [])
-    if not choices:
-        return ""
-    message = choices[0].get("message", {})
-    content = message.get("content")
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts = [p.get("text", "") for p in content if isinstance(p, dict)]
-        return "".join(parts).strip()
-    return ""
 
 
 async def _recover_pending(record: dict[str, Any]) -> dict[str, Any]:
@@ -129,16 +117,11 @@ def _load_json_line(line: str) -> dict[str, Any]:
 async def _chat_complete_record(
     record: dict[str, Any],
     *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    max_tokens: int,
-    temperature: float,
+    model_config: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
-    import httpx
-
     from crawler.enrich.pipeline import EnrichPipeline
+    from crawler.enrich.generative.llm_enrich import enrich_with_llm
 
     enr = record.get("enrichment")
     if not isinstance(enr, dict):
@@ -148,40 +131,32 @@ async def _chat_complete_record(
         return record
 
     pipeline = EnrichPipeline(model_config={})
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for field_group, payload in list(results.items()):
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("status") != "pending_agent":
-                continue
-            prompt = str(payload.get("agent_prompt") or "")
-            system_prompt = str(payload.get("agent_system_prompt") or "")
-            if not prompt.strip():
-                continue
-            messages: list[dict[str, str]] = []
-            if system_prompt.strip():
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            resp = await client.post(
-                url,
-                headers=headers,
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                },
+    for field_group, payload in list(results.items()):
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("status") != "pending_agent":
+            continue
+        prompt = str(payload.get("agent_prompt") or "")
+        system_prompt = str(payload.get("agent_system_prompt") or "")
+        if not prompt.strip():
+            continue
+        response = await enrich_with_llm(
+            prompt,
+            model_config=model_config or None,
+            system_prompt=system_prompt,
+            timeout=timeout,
+        )
+        if not response.success:
+            print(
+                f"[warn] {field_group}: {response.error or 'llm enrich failed'}",
+                file=sys.stderr,
             )
-            resp.raise_for_status()
-            text = _extract_chat_content(resp.json())
-            filled = pipeline.fill_pending_agent_result(field_group, text, document=record)
-            results[field_group] = filled.to_dict()
-            for field in filled.fields:
-                if field.value is not None:
-                    enr.setdefault("enriched_fields", {})[field.field_name] = field.value
+            continue
+        filled = pipeline.fill_pending_agent_result(field_group, response.content, document=record)
+        results[field_group] = filled.to_dict()
+        for field in filled.fields:
+            if field.value is not None:
+                enr.setdefault("enriched_fields", {})[field.field_name] = field.value
 
     return record
 
@@ -194,14 +169,8 @@ async def cmd_chat_complete(args: argparse.Namespace) -> int:
         or os.environ.get("MINE_CHAT_API_KEY", "").strip()
         or str(cfg.get("api_key", "")).strip()
     )
-    if not api_key or api_key.startswith("REPLACE"):
-        print("Error: set api_key in model_config or OPENAI_API_KEY / MINE_CHAT_API_KEY", file=sys.stderr)
-        return 1
-
-    base_url = str(cfg.get("base_url", "https://api.openai.com/v1")).strip()
-    model = str(cfg.get("model", "gpt-4o-mini")).strip()
-    max_tokens = int(cfg.get("max_tokens", 768))
-    temperature = float(cfg.get("temperature", 0.1))
+    if api_key and not api_key.startswith("REPLACE"):
+        cfg["api_key"] = api_key
     timeout = float(cfg.get("timeout", 120.0))
 
     path = Path(args.records)
@@ -211,11 +180,7 @@ async def cmd_chat_complete(args: argparse.Namespace) -> int:
         updated.append(
             await _chat_complete_record(
                 rec,
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                model_config=cfg,
                 timeout=timeout,
             )
         )
@@ -261,7 +226,7 @@ def cmd_export_pending(args: argparse.Namespace) -> int:
 def _dispatch(ns: argparse.Namespace) -> int:
     if ns.command == "recover-pending":
         return asyncio.run(cmd_recover_pending(ns))
-    if ns.command == "chat-complete":
+    if ns.command in {"chat-complete", "llm-complete"}:
         return asyncio.run(cmd_chat_complete(ns))
     if ns.command == "export-pending":
         return cmd_export_pending(ns)
@@ -269,7 +234,7 @@ def _dispatch(ns: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="LinkedIn-style enrich without Gateway (Chat Completions + fill_pending)")
+    parser = argparse.ArgumentParser(description="Run pending enrich groups through the same unified LLM chain as production")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_rec = sub.add_parser("recover-pending", help="Recompute failed groups to pending_agent (no external LLM)")
@@ -278,10 +243,15 @@ def main() -> int:
     p_rec.add_argument("--in-place", action="store_true", help="Overwrite the records file")
     p_rec.add_argument("--all", action="store_true", help="Re-run enrich for all records, not only failures")
 
-    p_chat = sub.add_parser("chat-complete", help="Run Chat Completions for pending_agent groups (like fill-enrichment)")
+    p_chat = sub.add_parser("chat-complete", help="Deprecated alias for llm-complete")
     p_chat.add_argument("--records", required=True)
     p_chat.add_argument("--output", required=True)
-    p_chat.add_argument("--model-config", required=True, help="OpenAI-compatible JSON; see references/model_config_chat_completions.example.json")
+    p_chat.add_argument("--model-config", required=True, help="Model config JSON used for Gateway/API fallback; benchmark-skill remains preferred")
+
+    p_llm = sub.add_parser("llm-complete", help="Run pending_agent groups through benchmark-skill/gateway/api routing")
+    p_llm.add_argument("--records", required=True)
+    p_llm.add_argument("--output", required=True)
+    p_llm.add_argument("--model-config", required=True, help="Model config JSON used for Gateway/API fallback; benchmark-skill remains preferred")
 
     p_exp = sub.add_parser("export-pending", help="Export pending_agent prompts as JSON")
     p_exp.add_argument("--records", required=True)

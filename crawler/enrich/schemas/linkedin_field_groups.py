@@ -52,6 +52,7 @@ _profiles_identity = _group(
         _field("name_gender_inference"),
         _field("name_ethnicity_estimation"),
         _field("profile_language_detected"),
+        _field("linkable_identifiers", "object"),
     ],
     subdataset="profile",
 )
@@ -65,6 +66,12 @@ _profiles_summary = _group(
         _field("about_topics", "array<string>"),
         _field("about_sentiment"),
         _field("career_narrative_type"),
+        _field("one_line_summary"),
+        _field("recruiter_brief"),
+        _field("investor_brief"),
+        _field("full_profile_narrative"),
+        _field("writing_style_profile"),
+        _field("culture_fit_indicators"),
     ],
     subdataset="profile",
 )
@@ -81,6 +88,16 @@ _profiles_career = _group(
         _field("current_company_id"),
         _field("career_trajectory_vector", "array<number>"),
         _field("open_to_work", "boolean"),
+        _field("job_change_signal_strength", "number"),
+        _field("experience_structured", "array<object>"),
+        _field("education_structured", "array<object>"),
+        _field("skills_extracted", "array<string>"),
+        _field("skill_categories", "array<string>"),
+        _field("skill_proficiency_inferred", "object"),
+        _field("career_transition_detected", "boolean"),
+        _field("experience_gap_analysis"),
+        _field("interview_questions_suggested", "array<object>"),
+        _field("qa_pairs_generated", "array<object>"),
     ],
     subdataset="profile",
     max_tokens=1024,
@@ -91,10 +108,19 @@ _profiles_credibility = _group(
     description="Credibility and authority signals for LinkedIn profiles.",
     required_source_fields=["headline"],
     output_fields=[
-        _field("notable_publications", "array<string>"),
-        _field("patents_count", "number"),
+        _field("influence_score", "number"),
         _field("content_creator_tier"),
         _field("engagement_rate", "number"),
+        _field("credibility_assessment"),
+        _field("content_activity_level"),
+        _field("professional_cluster"),
+        _field("profile_completeness_score", "number"),
+        _field("last_active_estimate"),
+        _field("profile_freshness_grade"),
+        _field("motivation_signals", "array<string>"),
+        _field("side_project_signals", "array<string>"),
+        _field("cold_outreach_hooks", "array<string>"),
+        _field("internal_consistency_flags", "array<string>"),
     ],
     subdataset="profile",
 )
@@ -102,7 +128,7 @@ _profiles_credibility = _group(
 _profiles_multimodal = _group(
     name="linkedin_profiles_multimodal",
     description="Avatar and banner analysis for LinkedIn profiles.",
-    required_source_fields=["avatar_url"],
+    required_source_fields=["avatar"],
     output_fields=[
         _field("avatar_quality_assessment", "object", "is_professional_headshot, face_detected, lighting_quality, background_type"),
         _field("banner_content_analysis", "object", "depicts, brand_alignment_score, text_extracted_from_banner"),
@@ -132,6 +158,8 @@ _company_org_intel = _group(
         _field("parent_company"),
         _field("subsidiary_tree", "array<string>"),
         _field("department_distribution_estimated", "object"),
+        _field("parent_company_mentioned"),
+        _field("subsidiary_mentioned", "array<string>"),
     ],
     subdataset="company",
 )
@@ -142,8 +170,10 @@ _company_financial_signals = _group(
     required_source_fields=["company_name", "about"],
     output_fields=[
         _field("revenue_range_estimated"),
-        _field("funding_stage_signal"),
-        _field("profitability_signal"),
+        _field("funding_stage_inferred"),
+        _field("revenue_hints_in_text"),
+        _field("company_stage_signals", "object"),
+        _field("investor_brief"),
     ],
     subdataset="company",
 )
@@ -151,11 +181,12 @@ _company_financial_signals = _group(
 _company_talent_signals = _group(
     name="linkedin_company_talent_signals",
     description="Hiring and retention signals for LinkedIn companies.",
-    required_source_fields=["employee_count"],
+    required_source_fields=["employees_in_linkedin"],
     output_fields=[
         _field("employee_growth_trend"),
         _field("attrition_signal"),
         _field("hiring_velocity"),
+        _field("posts_recent", "array<object>"),
     ],
     subdataset="company",
 )
@@ -167,6 +198,7 @@ _company_tech_signals = _group(
     output_fields=[
         _field("tech_stack_inferred", "array<string>"),
         _field("engineering_team_size_estimated", "number"),
+        _field("top_topics", "array<string>"),
     ],
     subdataset="company",
 )
@@ -181,7 +213,17 @@ _company_summary = _group(
         _field("value_proposition"),
         _field("target_market_inferred"),
         _field("industry_standardized"),
+        _field("business_model_type"),
+        _field("brand_voice_profile"),
+        _field("elevator_pitch"),
+        _field("investor_brief"),
+        _field("competitor_brief"),
+        _field("hiring_intent_from_about"),
+        _field("posting_frequency"),
+        _field("top_topics", "array<string>"),
         _field("linkable_identifiers", "object"),
+        _field("content_strategy_analysis"),
+        _field("company_legal_name_inferred"),
     ],
     subdataset="company",
     max_tokens=1024,
@@ -194,6 +236,7 @@ _jobs_basic = _group(
     output_fields=[
         _field("job_title_standardized"),
         _field("remote_policy"),
+        _field("remote_policy_detail"),
         _field("location_parsed", "object", "city, state, country"),
     ],
     subdataset="job",
@@ -206,6 +249,9 @@ _jobs_requirements = _group(
     output_fields=[
         _field("responsibilities_extracted", "array<string>"),
         _field("requirements_extracted", "array<object>", "skill, required_or_preferred, years_experience"),
+        _field("benefits_extracted", "array<string>"),
+        _field("team_size_hint"),
+        _field("reporting_to_level"),
         _field("required_skills", "array<string>"),
         _field("preferred_skills", "array<string>"),
         _field("tools_and_platforms", "array<string>"),
@@ -245,6 +291,7 @@ _jobs_candidate_view = _group(
     required_source_fields=["job_title", "job_description"],
     output_fields=[
         _field("candidate_facing_summary"),
+        _field("hiring_manager_brief"),
         _field("ideal_candidate_persona"),
     ],
     subdataset="job",
@@ -257,7 +304,10 @@ _jobs_risk = _group(
     required_source_fields=["job_description"],
     output_fields=[
         _field("red_flags_detected", "array<string>"),
+        _field("culture_signals_extracted", "object"),
+        _field("tech_stack_full_picture", "object"),
         _field("jd_internal_contradictions", "array<string>"),
+        _field("role_clarity_score", "number"),
     ],
     subdataset="job",
 )
@@ -287,9 +337,10 @@ _posts_entities = _group(
 _posts_engagement_analysis = _group(
     name="linkedin_posts_engagement_analysis",
     description="Engagement quality analysis for LinkedIn posts.",
-    required_source_fields=["like_count", "comment_count", "share_count"],
+    required_source_fields=["num_likes", "num_comments"],
     output_fields=[
         _field("engagement_quality_score", "number"),
+        _field("comment_sentiment_distribution", "object"),
         _field("viral_coefficient_estimated", "number"),
         _field("controversial_flag", "boolean"),
     ],
@@ -299,7 +350,7 @@ _posts_engagement_analysis = _group(
 _posts_author_analysis = _group(
     name="linkedin_posts_author_analysis",
     description="Author authority signals for LinkedIn posts.",
-    required_source_fields=["author_profile_url"],
+    required_source_fields=["user_url"],
     output_fields=[
         _field("author_authority_score", "number"),
         _field("author_industry"),
@@ -316,6 +367,7 @@ _posts_discourse = _group(
         _field("argument_structure"),
         _field("posting_intent"),
         _field("audience_targeting"),
+        _field("self_promotion_score", "number"),
         _field("factual_claims_checkable", "array<string>"),
     ],
     subdataset="post",

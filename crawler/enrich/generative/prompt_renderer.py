@@ -25,6 +25,8 @@ def render_prompt(
     """
     template_path = _TEMPLATES_DIR / template_name
     if not template_path.exists():
+        if _requires_explicit_template(template_name):
+            raise FileNotFoundError(f"prompt template not found: {template_name}")
         return _fallback_prompt(
             template_name,
             source_fields,
@@ -64,6 +66,10 @@ def _expand_template(template_text: str, source_fields: dict[str, Any]) -> str:
     result = get_pattern.sub(lambda m: str(source_fields.get(m.group(1), "")), result)
 
     return result.strip()
+
+
+def _requires_explicit_template(template_name: str) -> bool:
+    return template_name.startswith("linkedin_")
 
 
 def _build_output_schema(output_fields: list[Any]) -> dict[str, Any]:

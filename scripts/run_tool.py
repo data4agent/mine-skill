@@ -1098,7 +1098,12 @@ def main() -> int:
 
     if len(namespace.args) != 3:
         raise SystemExit("export-core-submissions requires: <inputPath> <outputPath> <datasetId>")
-    output = export_core_submissions(namespace.args[0], namespace.args[1], namespace.args[2])
+    output = export_core_submissions(
+        namespace.args[0],
+        namespace.args[1],
+        namespace.args[2],
+        client=worker.client,
+    )
     print(f"exported core submissions to {output}")
     return 0
 

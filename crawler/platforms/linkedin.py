@@ -43,12 +43,17 @@ PROFILE_FIELD_GROUPS = (
     "linkedin_profiles_identity",
     "linkedin_profiles_summary",
     "linkedin_profiles_career",
+    "linkedin_profiles_credibility",
+    "linkedin_profiles_multimodal",
 )
 
 COMPANY_FIELD_GROUPS = (
     "linkedin_company_basic",
     "linkedin_company_org_intel",
     "linkedin_company_talent_signals",
+    "linkedin_company_financial_signals",
+    "linkedin_company_tech_signals",
+    "linkedin_company_summary",
 )
 
 JOB_FIELD_GROUPS = (
@@ -246,12 +251,23 @@ def _fetch_linkedin_api(record: dict, discovered: dict, storage_state_path: str 
         )
     if resource_type == "profile":
         try:
-            return _fetch_linkedin_json(
+            response = _fetch_linkedin_json(
                 canonical_url=canonical_url,
                 endpoint=_build_profile_lookup_endpoint(record["public_identifier"]),
                 storage_state_path=storage_state_path,
                 discovered=discovered,
             )
+            try:
+                html_response = _fetch_linkedin_html(
+                    canonical_url=canonical_url,
+                    storage_state_path=storage_state_path,
+                    discovered=discovered,
+                )
+                response["html_fallback_text"] = html_response.get("text")
+                response["html_fallback_content_type"] = html_response.get("content_type")
+            except Exception:
+                pass
+            return response
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 451:
                 raise
@@ -265,12 +281,23 @@ def _fetch_linkedin_api(record: dict, discovered: dict, storage_state_path: str 
             return html_response
     if resource_type == "company":
         try:
-            return _fetch_linkedin_json(
+            response = _fetch_linkedin_json(
                 canonical_url=canonical_url,
                 endpoint=_build_company_lookup_endpoint(record["company_slug"]),
                 storage_state_path=storage_state_path,
                 discovered=discovered,
             )
+            try:
+                html_response = _fetch_linkedin_html(
+                    canonical_url=canonical_url,
+                    storage_state_path=storage_state_path,
+                    discovered=discovered,
+                )
+                response["html_fallback_text"] = html_response.get("text")
+                response["html_fallback_content_type"] = html_response.get("content_type")
+            except Exception:
+                pass
+            return response
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 451:
                 raise
@@ -325,9 +352,15 @@ def _extract_linkedin(record: dict, fetched: dict) -> dict:
     if record["resource_type"] == "job" and _linkedin_job_payload_missing(data):
         extracted = _extract_linkedin_job_from_html(record, html_fallback_text) if html_fallback_text else _extract_linkedin_structured(record, data)
     elif record["resource_type"] == "company" and html_fallback_text:
-        extracted = _extract_linkedin_company_from_html(record, html_fallback_text)
+        extracted = _merge_linkedin_extractions(
+            _extract_linkedin_structured(record, data),
+            _extract_linkedin_company_from_html(record, html_fallback_text),
+        )
     elif record["resource_type"] == "profile" and html_fallback_text:
-        extracted = _extract_linkedin_profile_from_html(record, html_fallback_text)
+        extracted = _merge_linkedin_extractions(
+            _extract_linkedin_structured(record, data),
+            _extract_linkedin_profile_from_html_dom(record, html_fallback_text),
+        )
     else:
         extracted = _extract_linkedin_structured(record, data)
     metadata = {
@@ -907,6 +940,7 @@ def _extract_linkedin_bpr_payloads_from_html(html_text: str, request_keywords: t
 
 
 def _extract_linkedin_company_from_html(record: dict[str, Any], html_text: str) -> dict[str, Any]:
+    html_extracted = _extract_linkedin_company_from_html_dom(record, html_text)
     payloads = _extract_linkedin_bpr_payloads_from_html(
         html_text,
         (
@@ -917,21 +951,78 @@ def _extract_linkedin_company_from_html(record: dict[str, Any], html_text: str) 
     if payloads:
         merged = _merge_linkedin_payloads(*payloads)
         extracted = _extract_linkedin_company(merged)
-        structured = extracted.get("structured") if isinstance(extracted.get("structured"), dict) else {}
-        if structured.get("title") or structured.get("source_id"):
-            return extracted
+        return _merge_linkedin_extractions(extracted, html_extracted)
+    return html_extracted
+
+
+def _extract_linkedin_company_from_html_dom(record: dict[str, Any], html_text: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    page_text = soup.get_text("\n", strip=True)
     title_match = re.search(r"<title>([^<]+)</title>", html_text or "", re.IGNORECASE)
     raw_title = unescape(title_match.group(1)).strip() if title_match else ""
     title = raw_title.replace("| LinkedIn", "").strip() or str(record.get("company_slug") or "")
+    about = _section_text_by_heading(soup, ("概览", "overview", "about"))
+    if not about:
+        about = _extract_text_block(
+            page_text,
+            ("Overview", "概览"),
+            ("Featured", "精选", "Page Posts", "动态", "Jobs", "职位", "Life", "生活", "People", "会员"),
+        )
+    follower_count = _extract_count_from_text(page_text, "followers", "位关注者")
+    employees_count = _extract_count_from_text(page_text, "employees", "位员工")
+    logo_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*company-logo[^\s\"']+)", html_text)
+    website_url = _extract_external_company_url(soup)
     return {
         "title": title,
-        "plain_text": "",
-        "markdown": f"# {title}".strip() if title else "",
+        "plain_text": about or "",
+        "markdown": f"# {title}\n\n{about}".strip() if title or about else "",
         "structured": {
             "source_id": None,
             "title": title,
+            "description": about,
             "company_slug": record.get("company_slug"),
             "company_url": f"https://www.linkedin.com/company/{record.get('company_slug')}/" if record.get("company_slug") else None,
+            "logo_url": logo_match.group(1) if logo_match else None,
+            "website_url": website_url,
+            "follower_count": follower_count,
+            "staff_count": employees_count,
+        },
+        "metadata_extra": {
+            "entity_type": "organization",
+            "source_id": None,
+        },
+    }
+
+
+def _extract_linkedin_company_from_html_page(record: dict[str, Any], html_text: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    page_text = soup.get_text("\n", strip=True)
+    title_match = re.search(r"<title>([^<]+)</title>", html_text or "", re.IGNORECASE)
+    raw_title = unescape(title_match.group(1)).strip() if title_match else ""
+    title = raw_title.replace("| LinkedIn", "").strip() or str(record.get("company_slug") or "")
+    about = _extract_text_block(
+        page_text,
+        ("Overview", "概览"),
+        ("Featured", "精选", "Page Posts", "主页动态", "Jobs", "职位", "Life", "生活", "People", "会员"),
+    )
+    follower_count = _extract_count_from_text(page_text, "followers", "位关注者")
+    employees_count = _extract_count_from_text(page_text, "employees", "位员工")
+    logo_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*company-logo[^\s\"']+)", html_text)
+    website_url = _extract_external_company_url(soup)
+    return {
+        "title": title,
+        "plain_text": about or "",
+        "markdown": f"# {title}\n\n{about}".strip() if title or about else "",
+        "structured": {
+            "source_id": None,
+            "title": title,
+            "description": about,
+            "company_slug": record.get("company_slug"),
+            "company_url": f"https://www.linkedin.com/company/{record.get('company_slug')}/" if record.get("company_slug") else None,
+            "logo_url": logo_match.group(1) if logo_match else None,
+            "website_url": website_url,
+            "follower_count": follower_count,
+            "staff_count": employees_count,
         },
         "metadata_extra": {
             "entity_type": "organization",
@@ -953,6 +1044,30 @@ def _extract_profile_headline_from_html(soup: BeautifulSoup, canonical_url: str,
             headline = text[len(title):].strip(" -")
             if headline:
                 return headline
+        if title and text == title:
+            parent = anchor.parent if isinstance(anchor.parent, Tag) else None
+            if isinstance(parent, Tag):
+                for sibling in parent.find_all_next(limit=5):
+                    if sibling is anchor:
+                        continue
+                    sibling_text = " ".join(sibling.stripped_strings).strip()
+                    if not sibling_text or sibling_text == title:
+                        continue
+                    if canonical_url and canonical_url in sibling_text:
+                        continue
+                    return sibling_text
+    if title:
+        title_node = soup.find(string=re.compile(rf"^\s*{re.escape(title)}\s*$"))
+        if title_node is not None:
+            current = title_node.parent if isinstance(title_node.parent, Tag) else None
+            while isinstance(current, Tag):
+                next_sibling = current.find_next_sibling()
+                while isinstance(next_sibling, Tag):
+                    sibling_text = " ".join(next_sibling.stripped_strings).strip()
+                    if sibling_text and sibling_text != title:
+                        return sibling_text
+                    next_sibling = next_sibling.find_next_sibling()
+                current = current.parent if isinstance(current.parent, Tag) else None
     return None
 
 
@@ -964,7 +1079,245 @@ def _extract_profile_location_from_html(html_text: str) -> str | None:
     )
     if match:
         return unescape(match.group(1)).strip()
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    contact_anchor = soup.find("a", href=re.compile(r"/overlay/contact-info/", re.IGNORECASE))
+    if isinstance(contact_anchor, Tag):
+        for candidate in contact_anchor.find_all_previous(limit=6):
+            if not isinstance(candidate, Tag):
+                continue
+            text = " ".join(candidate.stripped_strings).strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if lowered in {"contact info", "联系方式"}:
+                continue
+            if re.search(r"[A-Za-z]+,\s*[A-Za-z]+", text):
+                return text
     return None
+
+
+def _extract_text_block(page_text: str, start_markers: tuple[str, ...], end_markers: tuple[str, ...]) -> str | None:
+    if not page_text:
+        return None
+    start_pattern = "|".join(re.escape(marker) for marker in start_markers)
+    end_pattern = "|".join(re.escape(marker) for marker in end_markers)
+    match = re.search(
+        rf"(?:{start_pattern})\s*(.+?)(?:\s*(?:{end_pattern})|\Z)",
+        page_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    block = re.sub(r"\s+", " ", match.group(1)).strip(" -·•\n\r\t")
+    if not block:
+        return None
+    # Validate: reject if result looks like LinkedIn footer content
+    if _is_linkedin_footer_content(block):
+        return None
+    return block
+
+
+def _extract_count_from_text(page_text: str, *labels: str) -> int | None:
+    escaped = "|".join(re.escape(label) for label in labels if label)
+    if not escaped:
+        return None
+    match = re.search(rf"([\d,]+)\+?\s*(?:{escaped})", page_text, re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1).replace(",", ""))
+
+
+def _extract_external_company_url(soup: BeautifulSoup) -> str | None:
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor.get("href") or "").strip()
+        if not href:
+            continue
+        lowered = href.lower()
+        if lowered.startswith(("http://", "https://")) and "linkedin.com" not in lowered:
+            return href
+    return None
+
+
+def _normalized_heading_text(value: str) -> str:
+    text = re.sub(r"\s+", "", str(value or ""))
+    return text.casefold()
+
+
+def _section_text_by_heading(soup: BeautifulSoup, headings: tuple[str, ...]) -> str | None:
+    targets = {_normalized_heading_text(item) for item in headings if item}
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        heading_text = _normalized_heading_text(heading.get_text(" ", strip=True))
+        if heading_text not in targets:
+            continue
+        container = heading.find_parent("section")
+        if not isinstance(container, Tag):
+            parent = heading.parent
+            container = parent if isinstance(parent, Tag) else None
+        if not isinstance(container, Tag):
+            continue
+        texts: list[str] = []
+        for node in container.find_all(["p", "span", "div", "li"]):
+            text = " ".join(node.stripped_strings).strip()
+            normalized = _normalized_heading_text(text)
+            if not text or normalized in targets:
+                continue
+            texts.append(text)
+        if texts:
+            result = "\n".join(dict.fromkeys(texts))
+            # Validate: reject if result looks like LinkedIn footer content
+            if _is_linkedin_footer_content(result):
+                return None
+            return result
+    return None
+
+
+def _is_linkedin_footer_content(text: str) -> bool:
+    """Check if text appears to be LinkedIn page footer rather than actual content."""
+    if not text:
+        return False
+    # LinkedIn footer contains these distinctive patterns
+    footer_markers = (
+        "LinkedIn Corporation",
+        "Accessibility",
+        "Talent Solutions",
+        "Community Guidelines",
+        "Privacy & Terms",
+        "Ad Choices",
+        "Visit our Help Center",
+        "Select language",
+        "Go to your Settings",
+    )
+    marker_count = sum(1 for marker in footer_markers if marker in text)
+    # If 3+ footer markers are found, it's likely footer content
+    return marker_count >= 3
+
+
+def _featured_content_from_html(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    targets = {_normalized_heading_text(item) for item in ("精选", "featured")}
+    featured_section: Tag | None = None
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        if _normalized_heading_text(heading.get_text(" ", strip=True)) in targets:
+            candidate = heading.find_parent("section")
+            if isinstance(candidate, Tag):
+                featured_section = candidate
+                break
+    if featured_section is None:
+        return []
+
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for anchor in featured_section.find_all("a", href=True):
+        href = str(anchor.get("href") or "").strip()
+        if not href or href in seen:
+            continue
+        text_parts = [part.strip() for part in anchor.stripped_strings if part.strip()]
+        if not text_parts:
+            continue
+        seen.add(href)
+        item_type = text_parts[0]
+        title = next((part for part in reversed(text_parts) if len(part) > 12 and part != item_type), None)
+        summary_candidates = [part for part in text_parts[1:] if part != title]
+        summary = " ".join(summary_candidates[:6]).strip() or None
+        items.append(
+            {
+                "type": item_type,
+                "title": title or (summary_candidates[0] if summary_candidates else item_type),
+                "url": href,
+                "summary": summary,
+            }
+        )
+        if len(items) >= 6:
+            break
+    return items
+
+
+def _current_company_name_from_html(soup: BeautifulSoup, canonical_url: str) -> str | None:
+    top_section = None
+    for section in soup.find_all("section"):
+        text = section.get_text(" ", strip=True)
+        if canonical_url in text or (text and canonical_url.rstrip("/") in text):
+            top_section = section
+            break
+    if top_section is None:
+        top_section = soup.find("main")
+    if not isinstance(top_section, Tag):
+        return None
+
+    ignore_exact = {
+        "contact info",
+        "联系方式",
+        "follow",
+        "关注",
+        "connect",
+        "加为好友",
+        "message",
+        "发消息",
+        "more",
+        "更多",
+    }
+
+    for node in top_section.find_all("a", href=True):
+        text = " ".join(node.stripped_strings).strip()
+        href = str(node.get("href") or "").strip()
+        if not text or not href:
+            continue
+        if text.lower() in ignore_exact or text.startswith(("http://", "https://")):
+            continue
+        if "/company/" in href:
+            return text
+
+    for node in top_section.find_all("button"):
+        text = " ".join(node.stripped_strings).strip()
+        if not text or text.lower() in ignore_exact:
+            continue
+        if re.search(r"(followers?|位关注者|评论|回应|转发)", text, re.IGNORECASE):
+            continue
+        if len(text) > 80:
+            continue
+        return text
+    return None
+
+
+def _people_also_viewed_from_html(soup: BeautifulSoup, canonical_url: str) -> list[dict[str, Any]]:
+    target_section = None
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        text = " ".join(heading.stripped_strings).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if "people also viewed" in lowered or ("也关注了" in text and "会员" in text):
+            target_section = heading.find_parent("section") or heading.parent
+            break
+    if not isinstance(target_section, Tag):
+        return []
+
+    items: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    canonical_prefix = canonical_url.rstrip("/")
+    for anchor in target_section.find_all("a", href=True):
+        href = str(anchor.get("href") or "").strip()
+        if not href or "/in/" not in href:
+            continue
+        if href.rstrip("/") == canonical_prefix or href in seen_urls:
+            continue
+        seen_urls.add(href)
+        lines = [line.strip() for line in anchor.get_text("\n", strip=True).splitlines() if line.strip()]
+        if not lines:
+            continue
+        name = lines[0]
+        headline = next((line for line in lines[1:] if not re.search(r"(followers?|位关注者)", line, re.IGNORECASE)), None)
+        followers = next((line for line in lines[1:] if re.search(r"(followers?|位关注者)", line, re.IGNORECASE)), None)
+        items.append(
+            {
+                "name": name,
+                "headline": headline,
+                "followers": followers,
+                "url": href,
+            }
+        )
+        if len(items) >= 8:
+            break
+    return items
 
 
 def _extract_linkedin_profile_from_html(record: dict[str, Any], html_text: str) -> dict[str, Any]:
@@ -1004,6 +1357,197 @@ def _extract_linkedin_profile_from_html(record: dict[str, Any], html_text: str) 
             "source_id": structured.get("source_id"),
         },
     }
+
+
+def _extract_linkedin_profile_from_html_v2(record: dict[str, Any], html_text: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    canonical_url = str(record.get("canonical_url") or f"https://www.linkedin.com/in/{record.get('public_identifier', '')}/").strip()
+    title_match = re.search(r"<title>([^<]+)</title>", html_text or "", re.IGNORECASE)
+    raw_title = unescape(title_match.group(1)).strip() if title_match else ""
+    title = raw_title.replace("| LinkedIn", "").strip() or str(record.get("public_identifier") or "")
+    headline = _extract_profile_headline_from_html(soup, canonical_url, title)
+    page_text = soup.get_text("\n", strip=True)
+    about_section = _find_profile_section(soup, ("个人简介", "About"))
+    featured_section = _find_profile_section(soup, ("精选", "Featured"))
+    about_match = re.search(
+        r"(?:个人简介|About)\s*(.+?)(?:\s*(?:精选动态|精选|活动|经验|教育|技能|兴趣|推荐内容|Featured|Activity|Experience|Education|Skills)|\Z)",
+        page_text,
+        re.DOTALL,
+    )
+    about = about_match.group(1).strip() if about_match else None
+    follower_match = re.search(r"([\d,]+)\s*(?:位关注者|followers)", page_text, re.IGNORECASE)
+    about = _extract_section_body_text(about_section, ("个人简介", "About")) or about
+    follower_match = re.search(r"([\d,]+)\s*(?:位关注者|followers?)", page_text, re.IGNORECASE) or follower_match
+    avatar_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*profile-displayphoto-[^\s\"']+)", html_text)
+    banner_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*profile-displaybackgroundimage-[^\s\"']+)", html_text)
+    structured = {
+        "source_id": str(record.get("public_identifier") or "").strip() or None,
+        "title": title,
+        "headline": headline,
+        "public_identifier": record.get("public_identifier"),
+        "about": about,
+        "city": _extract_profile_location_from_html(html_text),
+        "country_code": None,
+        "profile_url": canonical_url or None,
+        "profile_url_custom": canonical_url or None,
+        "avatar": avatar_match.group(1) if avatar_match else None,
+        "banner_image": banner_match.group(1) if banner_match else None,
+        "follower_count": int(follower_match.group(1).replace(",", "")) if follower_match else None,
+        "featured_content": _extract_featured_content_from_section(featured_section),
+    }
+    plain_text = "\n\n".join(part for part in (headline, about) if part)
+    markdown = "\n\n".join(part for part in (f"# {title}" if title else "", headline, about) if part)
+    return {
+        "title": title,
+        "plain_text": plain_text,
+        "markdown": markdown,
+        "structured": {key: value for key, value in structured.items() if value not in (None, "", [], {})},
+        "metadata_extra": {
+            "entity_type": "person",
+            "source_id": structured.get("source_id"),
+        },
+    }
+
+
+def _extract_linkedin_profile_from_html_dom(record: dict[str, Any], html_text: str) -> dict[str, Any]:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    canonical_url = str(record.get("canonical_url") or f"https://www.linkedin.com/in/{record.get('public_identifier', '')}/").strip()
+    title_match = re.search(r"<title>([^<]+)</title>", html_text or "", re.IGNORECASE)
+    raw_title = unescape(title_match.group(1)).strip() if title_match else ""
+    title = raw_title.replace("| LinkedIn", "").strip() or str(record.get("public_identifier") or "")
+    headline = _extract_profile_headline_from_html(soup, canonical_url, title)
+    page_text = soup.get_text("\n", strip=True)
+    about = _section_text_by_heading(soup, ("个人简介", "简介", "about"))
+    follower_match = re.search(r"([\d,]+)\s*(?:位关注者|followers?)", page_text, re.IGNORECASE)
+    avatar_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*profile-displayphoto-[^\s\"']+)", html_text)
+    banner_match = re.search(r"(https://media\.licdn\.com/[^\s\"']*profile-displaybackgroundimage-[^\s\"']+)", html_text)
+    featured_content = _featured_content_from_html(soup)
+    current_company_name = _current_company_name_from_html(soup, canonical_url)
+    people_also_viewed = _people_also_viewed_from_html(soup, canonical_url)
+    structured = {
+        "source_id": str(record.get("public_identifier") or "").strip() or None,
+        "title": title,
+        "headline": headline,
+        "public_identifier": record.get("public_identifier"),
+        "about": about,
+        "city": _extract_profile_location_from_html(html_text),
+        "country_code": None,
+        "profile_url": canonical_url or None,
+        "profile_url_custom": canonical_url or None,
+        "avatar": avatar_match.group(1) if avatar_match else None,
+        "banner_image": banner_match.group(1) if banner_match else None,
+        "follower_count": int(follower_match.group(1).replace(",", "")) if follower_match else None,
+        "featured_content": featured_content,
+        "current_company": current_company_name,
+        "current_company_name": current_company_name,
+        "people_also_viewed": people_also_viewed,
+    }
+    plain_text = "\n\n".join(part for part in (headline, about) if part)
+    markdown = "\n\n".join(part for part in (f"# {title}" if title else "", headline, about) if part)
+    return {
+        "title": title,
+        "plain_text": plain_text,
+        "markdown": markdown,
+        "structured": {key: value for key, value in structured.items() if value not in (None, "", [], {})},
+        "metadata_extra": {
+            "entity_type": "person",
+            "source_id": structured.get("source_id"),
+        },
+    }
+
+
+def _merge_linkedin_extractions(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(primary)
+    primary_structured = primary.get("structured") if isinstance(primary.get("structured"), dict) else {}
+    secondary_structured = secondary.get("structured") if isinstance(secondary.get("structured"), dict) else {}
+    merged_structured = dict(primary_structured)
+    for key, value in secondary_structured.items():
+        if merged_structured.get(key) in (None, "", [], {}):
+            merged_structured[key] = value
+    merged["structured"] = merged_structured
+
+    if not str(merged.get("plain_text") or "").strip():
+        merged["plain_text"] = secondary.get("plain_text")
+    if not str(merged.get("markdown") or "").strip():
+        merged["markdown"] = secondary.get("markdown")
+
+    metadata_extra = dict(primary.get("metadata_extra") or {})
+    for key, value in (secondary.get("metadata_extra") or {}).items():
+        if metadata_extra.get(key) in (None, "", [], {}):
+            metadata_extra[key] = value
+    merged["metadata_extra"] = metadata_extra
+    return merged
+
+
+def _find_profile_section(soup: BeautifulSoup, labels: tuple[str, ...]) -> Tag | None:
+    label_set = {label.strip().lower() for label in labels if label.strip()}
+    for heading in soup.select("h1, h2, h3"):
+        text = " ".join(heading.stripped_strings).strip().lower()
+        if text not in label_set:
+            continue
+        section = heading.find_parent("section")
+        if isinstance(section, Tag):
+            return section
+        node = heading.parent
+        while isinstance(node, Tag):
+            node_text = " ".join(node.stripped_strings).strip().lower()
+            if any(label in node_text for label in label_set):
+                return node
+            node = node.parent
+    return None
+
+
+def _extract_section_body_text(section: Tag | None, labels: tuple[str, ...]) -> str | None:
+    if not isinstance(section, Tag):
+        return None
+    label_set = {label.strip().lower() for label in labels if label.strip()}
+    lines = [
+        line.strip()
+        for line in section.get_text("\n", strip=True).splitlines()
+        if line and line.strip()
+    ]
+    filtered = [line for line in lines if line.lower() not in label_set]
+    text = "\n".join(filtered).strip()
+    return text or None
+
+
+def _extract_featured_content_from_section(section: Tag | None) -> list[dict[str, Any]]:
+    if not isinstance(section, Tag):
+        return []
+    items: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for anchor in section.find_all("a", href=True):
+        href = str(anchor.get("href") or "").strip()
+        if not href or href in seen_urls or "/feed/update/" not in href:
+            continue
+        texts = [
+            text.strip()
+            for text in anchor.get_text("\n", strip=True).splitlines()
+            if text and text.strip()
+        ]
+        if len(texts) < 3:
+            continue
+        seen_urls.add(href)
+        metrics_index = next((idx for idx, text in enumerate(texts) if re.search(r"\d[\d,]*\s*[·•]\s*\d", text)), None)
+        content_lines = texts[1:metrics_index] if metrics_index is not None else texts[1:]
+        if not content_lines:
+            continue
+        title = content_lines[-1]
+        body_lines = content_lines[:-1]
+        image = anchor.find("img")
+        items.append(
+            {
+                "type": texts[0],
+                "title": title,
+                "text": "\n".join(body_lines).strip() or None,
+                "url": href,
+                "image": image.get("src") if isinstance(image, Tag) and image.get("src") else None,
+                "metrics": texts[metrics_index] if metrics_index is not None else None,
+            }
+        )
+        if len(items) >= 6:
+            break
+    return items
 
 
 def _first_selector_text(soup: BeautifulSoup, selectors: tuple[str, ...]) -> str | None:
@@ -1377,22 +1921,54 @@ def _extract_linkedin_company(data: dict[str, Any]) -> dict[str, Any]:
 def _extract_linkedin_profile(data: dict[str, Any]) -> dict[str, Any]:
     payload_items = _linkedin_items(data)
     profile = _select_richest_item(payload_items, "Profile")
+    geo_location = profile.get("geoLocation") if isinstance(profile.get("geoLocation"), dict) else {}
+    geo = geo_location.get("geo") if isinstance(geo_location.get("geo"), dict) else {}
+    creator_info = profile.get("creatorInfo") if isinstance(profile.get("creatorInfo"), dict) else {}
+    creator_website = creator_info.get("creatorWebsite") if isinstance(creator_info.get("creatorWebsite"), dict) else {}
+    creator_website_url = str(creator_website.get("text") or "").strip() or None
+    associated_hashtags = creator_info.get("associatedHashtag") if isinstance(creator_info.get("associatedHashtag"), list) else []
+    featured_content_themes = [
+        str(item.get("displayName") or "").strip().lstrip("#")
+        for item in associated_hashtags
+        if isinstance(item, dict) and str(item.get("displayName") or "").strip()
+    ]
+    content_creator_tier = None
+    if profile.get("topVoiceBadge"):
+        content_creator_tier = "top_voice"
+    elif profile.get("creator") and profile.get("influencer"):
+        content_creator_tier = "influencer"
+    elif profile.get("creator"):
+        content_creator_tier = "creator"
     first = profile.get("firstName") or ""
     last = profile.get("lastName") or ""
     title = " ".join(part for part in (first, last) if part).strip() or None
     headline = profile.get("headline") or ""
-    profile_url = profile.get("publicProfileUrl")
+    public_identifier = profile.get("publicIdentifier")
+    profile_url = profile.get("publicProfileUrl") or (
+        f"https://www.linkedin.com/in/{public_identifier}/" if public_identifier else None
+    )
+    follower_count = _profile_follower_count(payload_items, profile)
     structured = {
         "source_id": _linkedin_id(profile.get("entityUrn")),
         "title": title,
         "headline": headline,
-        "public_identifier": profile.get("publicIdentifier"),
+        "public_identifier": public_identifier,
         "about": profile.get("summary"),
-        "city": profile.get("geoLocationName") or profile.get("locationName"),
-        "country_code": profile.get("locationCountryCode"),
+        "city": profile.get("geoLocationName") or profile.get("locationName") or geo.get("defaultLocalizedNameWithoutCountryName"),
+        "country_code": profile.get("locationCountryCode") or geo.get("countryISOCode"),
         "profile_url": profile_url,
+        "profile_url_custom": profile_url,
         "avatar": _image_url(profile.get("profilePicture") or profile.get("picture")),
-        "banner_image": _image_url(profile.get("backgroundImage")),
+        "banner_image": _image_url(
+            profile.get("backgroundPicture")
+            or profile.get("backgroundImage")
+            or (profile.get("coverPhotoItems") or [{}])[0]
+        ),
+        "follower_count": follower_count,
+        "featured_content": ([{"type": "link", "title": creator_website_url, "url": creator_website_url}] if creator_website_url else []),
+        "featured_content_themes": featured_content_themes,
+        "personal_brand_focus": ", ".join(featured_content_themes[:3]) if featured_content_themes else None,
+        "content_creator_tier": content_creator_tier,
     }
     return {
         "title": title,
@@ -1622,6 +2198,23 @@ def _follower_count(included: list[dict[str, Any]], company: dict[str, Any]) -> 
     return None
 
 
+def _profile_follower_count(included: list[dict[str, Any]], profile: dict[str, Any]) -> int | None:
+    direct_count = profile.get("followerCount")
+    if isinstance(direct_count, int):
+        return direct_count
+    for key in ("*followingInfo", "*followingState", "followingStateUrn", "dashFollowingStateUrn"):
+        following_urn = profile.get(key)
+        if not isinstance(following_urn, str):
+            continue
+        for item in included:
+            if item.get("entityUrn") == following_urn and isinstance(item.get("followerCount"), int):
+                return item.get("followerCount")
+    for item in included:
+        if item.get("_type") == "com.linkedin.voyager.dash.feed.FollowingState" and isinstance(item.get("followerCount"), int):
+            return item.get("followerCount")
+    return None
+
+
 def _logo_url(company: dict[str, Any]) -> str | None:
     image = None
     if isinstance(company.get("logo"), dict):
@@ -1644,6 +2237,14 @@ def _logo_url(company: dict[str, Any]) -> str | None:
 
 def _image_url(image_like: Any) -> str | None:
     image = image_like
+    if isinstance(image, dict) and "displayImageReferenceResolutionResult" in image:
+        display = image.get("displayImageReferenceResolutionResult")
+        if isinstance(display, dict):
+            direct_url = str(display.get("url") or "").strip()
+            if direct_url:
+                return direct_url
+            if isinstance(display.get("vectorImage"), dict):
+                image = display.get("vectorImage")
     if isinstance(image, dict) and "image" in image and isinstance(image.get("image"), dict):
         image = image.get("image")
     if isinstance(image, dict) and "com.linkedin.common.VectorImage" in image:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urljoin
@@ -83,6 +84,7 @@ class PlatformClient:
         return self._request("POST", f"/api/mining/v1/refresh-tasks/{task_id}/report", payload)
 
     def submit_core_submissions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._validate_submission_payload(payload)
         return self._request("POST", "/api/core/v1/submissions", payload)
 
     def fetch_core_submission(self, submission_id: str) -> dict[str, Any]:
@@ -219,6 +221,60 @@ class PlatformClient:
             raise
         data = payload.get("data")
         return data if isinstance(data, dict) else {}
+
+    def _validate_submission_payload(self, payload: dict[str, Any]) -> None:
+        dataset_id = str(payload.get("dataset_id") or "").strip()
+        entries = payload.get("entries")
+        if not dataset_id or not isinstance(entries, list) or not entries:
+            return
+        try:
+            dataset = self.fetch_dataset(dataset_id)
+        except Exception:
+            return
+        patterns = self._coerce_url_patterns(dataset)
+        template_regex = self._coerce_template_style_normalizer(dataset)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or "").strip()
+            if not url:
+                continue
+            if patterns and not any(self._regex_matches(pattern, url) for pattern in patterns):
+                raise RuntimeError(
+                    f"submission preflight failed: url {url!r} does not match dataset url_patterns for {dataset_id}"
+                )
+            if template_regex:
+                left_pattern = template_regex.split("→", 1)[0].strip()
+                if left_pattern and self._regex_matches(left_pattern, url) and not self._regex_matches(template_regex, url):
+                    raise RuntimeError(
+                        "submission preflight failed: dataset "
+                        f"{dataset_id} has a template-style url_normalize_regex; "
+                        f"url_patterns match {url!r}, but the embedded template likely causes server-side rejection"
+                    )
+
+    @staticmethod
+    def _coerce_url_patterns(dataset: dict[str, Any]) -> list[str]:
+        patterns = dataset.get("url_patterns")
+        if not isinstance(patterns, list):
+            return []
+        return [str(pattern).strip() for pattern in patterns if str(pattern).strip()]
+
+    @staticmethod
+    def _coerce_template_style_normalizer(dataset: dict[str, Any]) -> str | None:
+        schema = dataset.get("schema")
+        if not isinstance(schema, dict):
+            return None
+        pattern = schema.get("url_normalize_regex")
+        if not isinstance(pattern, str) or "→" not in pattern:
+            return None
+        return pattern.strip()
+
+    @staticmethod
+    def _regex_matches(pattern: str, value: str) -> bool:
+        try:
+            return re.match(pattern, value) is not None
+        except re.error:
+            return False
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         last_error: Exception | None = None

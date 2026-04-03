@@ -1,6 +1,12 @@
 # Field Alignment Guide
 
-This document explains how to align Mine crawler output with `schema(1)/*.schema.json`.
+This document explains how to align Mine crawler output with the authoritative `schema(1)/*.schema.json` files at the repo root.
+
+The runtime contract source of truth is:
+
+- `mine/schema(1)`
+
+The copy under `crawler/enrich/schema(1)` is a mirrored reference, not the contract authority.
 
 ---
 
@@ -44,7 +50,7 @@ cat docs/schema-coverage-report.json | python -m json.tool
 
 ```bash
 # All property keys defined in the schema
-cat crawler/enrich/schema\(1\)/amazon_products.schema.json | jq '.properties | keys'
+cat schema\(1\)/amazon_products.schema.json | jq '.properties | keys'
 
 # Fields emitted by field_groups
 grep -A20 "output_fields" crawler/enrich/schemas/amazon_field_groups.py
@@ -279,7 +285,7 @@ grep -o 'OutputField("[^"]*"' crawler/enrich/schemas/amazon_field_groups.py | wc
 | File | Purpose |
 |------|---------|
 | `schema(1)/Dataset_Product_Catalog_v3.md` | Human-readable product spec |
-| `schema(1)/*.schema.json` | Machine-readable JSON Schema |
+| `schema(1)/*.schema.json` | Authoritative machine-readable JSON Schema |
 | `scripts/schema_tools.py` | Validation tooling |
 | `docs/schema-coverage-gap.md` | Coverage gap analysis |
 | `docs/schema-coverage-report.json` | Detailed coverage report |

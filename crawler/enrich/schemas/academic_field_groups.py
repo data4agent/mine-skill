@@ -48,12 +48,12 @@ ARXIV_BASE_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "arxiv_base_page_count": _passthrough_field_group(name="arxiv_base_page_count", description="Pass through page count", platform="arxiv", subdataset="paper", source_fields=["page_count"], output_field="page_count", field_type="integer"),
     "arxiv_base_num_authors": _passthrough_field_group(name="arxiv_base_num_authors", description="Pass through author count", platform="arxiv", subdataset="paper", source_fields=["num_authors"], output_field="num_authors", field_type="integer"),
     "arxiv_base_num_figures": _passthrough_field_group(name="arxiv_base_num_figures", description="Pass through figure count", platform="arxiv", subdataset="paper", source_fields=["num_figures"], output_field="num_figures", field_type="integer"),
-    "arxiv_base_authors": _passthrough_field_group(name="arxiv_base_authors", description="Pass through authors", platform="arxiv", subdataset="paper", source_fields=["authors"], output_field="authors", field_type="array<string>"),
+    "arxiv_base_authors": _passthrough_field_group(name="arxiv_base_authors", description="Pass through authors", platform="arxiv", subdataset="paper", source_fields=["authors"], output_field="authors", field_type="array<object>"),
     "arxiv_base_categories": _passthrough_field_group(name="arxiv_base_categories", description="Pass through categories", platform="arxiv", subdataset="paper", source_fields=["categories"], output_field="categories", field_type="array<string>"),
     "arxiv_base_primary_category": _passthrough_field_group(name="arxiv_base_primary_category", description="Pass through primary category", platform="arxiv", subdataset="paper", source_fields=["primary_category"], output_field="primary_category"),
     "arxiv_base_submission_date": _passthrough_field_group(name="arxiv_base_submission_date", description="Pass through submission date", platform="arxiv", subdataset="paper", source_fields=["submission_date", "published"], output_field="submission_date"),
     "arxiv_base_update_date": _passthrough_field_group(name="arxiv_base_update_date", description="Pass through update date", platform="arxiv", subdataset="paper", source_fields=["update_date", "updated"], output_field="update_date"),
-    "arxiv_base_versions": _passthrough_field_group(name="arxiv_base_versions", description="Pass through versions", platform="arxiv", subdataset="paper", source_fields=["versions"], output_field="versions", field_type="array<string>"),
+    "arxiv_base_versions": _passthrough_field_group(name="arxiv_base_versions", description="Pass through versions", platform="arxiv", subdataset="paper", source_fields=["versions"], output_field="versions", field_type="array<object>"),
     "arxiv_base_submission_comments": _passthrough_field_group(name="arxiv_base_submission_comments", description="Pass through submission comments", platform="arxiv", subdataset="paper", source_fields=["submission_comments", "comment"], output_field="submission_comments"),
     "arxiv_base_journal_ref": _passthrough_field_group(name="arxiv_base_journal_ref", description="Pass through journal reference", platform="arxiv", subdataset="paper", source_fields=["journal_ref"], output_field="journal_ref"),
     "arxiv_base_license": _passthrough_field_group(name="arxiv_base_license", description="Pass through license", platform="arxiv", subdataset="paper", source_fields=["license"], output_field="license"),
@@ -161,7 +161,7 @@ ARXIV_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "arxiv_full_text": FieldGroupSpec(
         name="arxiv_full_text",
         description="Structured section breakdown of the full paper text",
-        required_source_fields=["full_text"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="sections_structured",
@@ -466,7 +466,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_content": FieldGroupSpec(
         name="wikipedia_content",
         description="Structured sections, table of contents, article summary, and reading level",
-        required_source_fields=["extract", "sections"],
+        required_source_fields=["raw_text", "sections_structured"],
         output_fields=[
             OutputFieldSpec(
                 name="sections_structured",
@@ -491,7 +491,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_tables": FieldGroupSpec(
         name="wikipedia_tables",
         description="Structured extraction of HTML/wikitext tables",
-        required_source_fields=["extract"],
+        required_source_fields=["HTML"],
         output_fields=[
             OutputFieldSpec(
                 name="tables_structured",
@@ -510,7 +510,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_infobox": FieldGroupSpec(
         name="wikipedia_infobox",
         description="Structured infobox key-value extraction",
-        required_source_fields=["extract"],
+        required_source_fields=["infobox_raw"],
         output_fields=[
             OutputFieldSpec(name="infobox_structured", field_type="object"),
             OutputFieldSpec(name="infobox_text_consistency", field_type="string"),
@@ -541,7 +541,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_entities": FieldGroupSpec(
         name="wikipedia_entities",
         description="Named entity extraction with Wikidata IDs and relation to subject",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="entities_extracted",
@@ -560,7 +560,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_facts": FieldGroupSpec(
         name="wikipedia_facts",
         description="Structured fact triples with confidence scores and temporal scope",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="structured_facts",
@@ -579,7 +579,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_timeline": FieldGroupSpec(
         name="wikipedia_timeline",
         description="Chronological event extraction with types and participants",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="temporal_events",
@@ -598,7 +598,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_relations": FieldGroupSpec(
         name="wikipedia_relations",
         description="Related entities with relation types and classified external links",
-        required_source_fields=["extract", "links"],
+        required_source_fields=["raw_text", "references"],
         output_fields=[
             OutputFieldSpec(
                 name="related_entities",
@@ -623,7 +623,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_quality": FieldGroupSpec(
         name="wikipedia_quality",
         description="Article quality class, neutrality score, citation density, edit controversy",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text", "references_count"],
         output_fields=[
             OutputFieldSpec(name="article_quality_class", field_type="string"),
             OutputFieldSpec(name="neutrality_score", field_type="number"),
@@ -662,7 +662,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_embeddings": FieldGroupSpec(
         name="wikipedia_embeddings",
         description="Vector embeddings for article and individual sections",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(name="article_embedding", field_type="array<number>"),
             OutputFieldSpec(name="section_embeddings", field_type="array<array<number>>"),
@@ -698,7 +698,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_multi_level_summary": FieldGroupSpec(
         name="wikipedia_multi_level_summary",
         description="Multiple summary styles: one-line, ELI5, standard, academic, key takeaways",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(name="one_line_summary", field_type="string"),
             OutputFieldSpec(name="eli5_summary", field_type="string"),
@@ -717,7 +717,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_educational": FieldGroupSpec(
         name="wikipedia_educational",
         description="Prerequisite concepts, difficulty level, quiz questions, and common misconceptions",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="prerequisite_concepts",
@@ -747,7 +747,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_bias_and_neutrality": FieldGroupSpec(
         name="wikipedia_bias_and_neutrality",
         description="Bias detection, missing perspectives, and weasel word identification",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(
                 name="bias_detection",
@@ -773,7 +773,7 @@ WIKIPEDIA_FIELD_GROUPS: dict[str, FieldGroupSpec] = {
     "wikipedia_content_freshness": FieldGroupSpec(
         name="wikipedia_content_freshness",
         description="Information freshness score, outdated claims detection, and temporal coverage gaps",
-        required_source_fields=["extract"],
+        required_source_fields=["raw_text"],
         output_fields=[
             OutputFieldSpec(name="information_freshness_score", field_type="number"),
             OutputFieldSpec(

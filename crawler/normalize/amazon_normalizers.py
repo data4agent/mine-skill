@@ -324,6 +324,48 @@ def normalize_date_text(date_str: str | None) -> str | None:
     return None
 
 
+def normalize_verified_purchase(value: Any) -> bool | None:
+    """Coerce common verified-purchase values to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "yes", "y", "1", "verified purchase"}:
+        return True
+    if text in {"false", "no", "n", "0"}:
+        return False
+    return None
+
+
+def normalize_sales_volume_hint(value: str | None) -> int | None:
+    """Parse sales hint text like ``10K+ bought in past month`` into an integer."""
+    if not value:
+        return None
+
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*([km])?\+?", value.strip(), re.IGNORECASE)
+    if not match:
+        return None
+
+    value_text, suffix = match.groups()
+    try:
+        numeric = float(value_text.replace(",", "."))
+    except ValueError:
+        return None
+
+    multiplier = 1
+    if suffix:
+        suffix = suffix.lower()
+        if suffix == "k":
+            multiplier = 1000
+        elif suffix == "m":
+            multiplier = 1000000
+    estimated = int(numeric * multiplier)
+    return estimated or None
+
+
 def normalize_amazon_record(record: dict[str, Any]) -> dict[str, Any]:
     """Apply all normalizations to an Amazon product record.
 
@@ -364,11 +406,18 @@ def normalize_amazon_record(record: dict[str, Any]) -> dict[str, Any]:
             helpful_value = normalize_reviews_count(helpful)
             if helpful_value is not None:
                 normalized["helpful_count"] = helpful_value
+        verified_purchase = record.get("verified_purchase") or record.get("structured", {}).get("verified_purchase")
+        normalized_verified_purchase = normalize_verified_purchase(verified_purchase)
+        if normalized_verified_purchase is not None:
+            normalized["verified_purchase"] = normalized_verified_purchase
         raw_date = record.get("date_posted") or record.get("structured", {}).get("date_posted")
         if raw_date:
             normalized_date = normalize_date_text(str(raw_date))
             if normalized_date is not None:
                 normalized["date_posted"] = normalized_date
+        variant_purchased = record.get("variant_purchased") or record.get("structured", {}).get("variant_purchased")
+        if variant_purchased:
+            normalized["variant_purchased"] = str(variant_purchased).strip()
         return normalized
 
     # Default to product normalization.
@@ -401,5 +450,11 @@ def normalize_amazon_record(record: dict[str, Any]) -> dict[str, Any]:
         for key, value in fulfillment_data.items():
             if key not in normalized:
                 normalized[key] = value
+
+    if "estimated_monthly_sales" not in normalized:
+        sales_hint = record.get("sales_volume_hint") or record.get("structured", {}).get("sales_volume_hint")
+        estimated_monthly_sales = normalize_sales_volume_hint(str(sales_hint)) if sales_hint else None
+        if estimated_monthly_sales is not None:
+            normalized["estimated_monthly_sales"] = estimated_monthly_sales
 
     return normalized

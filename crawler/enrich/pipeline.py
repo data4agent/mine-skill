@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 from crawler.enrich.extractive.lookup_enricher import LookupEnricher
 from crawler.enrich.extractive.regex_enricher import RegexEnricher
-from crawler.enrich.generative.llm_client import LLMClient, parse_json_response
+from crawler.enrich.generative.llm_client import parse_json_response
+from crawler.enrich.generative.llm_enrich import enrich_with_llm, llm_execution_available
 from crawler.enrich.generative.prompt_renderer import render_prompt
 from crawler.enrich.models import (
     EnrichedField,
@@ -53,10 +54,10 @@ class LLMSchemaFieldGroupExecutor:
 class EnrichPipeline:
     """Enrichment pipeline: extractive-first, generative with graceful fallback.
 
-    Without ``model_config``, generative field groups return ``pending_agent``
-    so an orchestrating agent can fulfill the prompt later. When
-    ``model_config`` is available, the pipeline executes the generative prompt
-    directly and writes the final structured result.
+    Generative execution prefers the benchmark-skill style OpenClaw agent CLI.
+    If that path is unavailable, it falls back to model-config driven Gateway or
+    other OpenAI-compatible APIs. Only when no execution path is available do
+    generative field groups remain ``pending_agent`` for later fulfillment.
     """
 
     def __init__(
@@ -70,7 +71,6 @@ class EnrichPipeline:
         self._regex_cache: dict[str, RegexEnricher] = {}
         self._cache_dir = cache_dir
         self._model_config = model_config or {}
-        self._llm_client = LLMClient.from_model_config(self._model_config) if self._model_config else None
         if self._cache_dir is not None:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._llm_schema_executor = (
@@ -269,7 +269,7 @@ class EnrichPipeline:
                 field_group_name=spec.name,
                 field_group_description=spec.description,
             )
-            if self._llm_client is not None:
+            if llm_execution_available(self._model_config):
                 return await self._run_generative(spec, prompt, gen_config.system_prompt, start, document)
             return FieldGroupResult(
                 field_group=spec.name,
@@ -295,21 +295,12 @@ class EnrichPipeline:
         start: float,
         document: dict[str, Any] | None = None,
     ) -> FieldGroupResult:
-        if self._llm_client is None:
-            return FieldGroupResult(
-                field_group=spec.name,
-                status="failed",
-                error="llm client not configured",
-                latency_ms=int((time.monotonic() - start) * 1000),
-            )
-
         try:
-            response = await self._llm_client.complete(
+            response = await enrich_with_llm(
                 prompt,
-                model=str(self._model_config.get("model", "")),
-                max_tokens=int(self._model_config.get("max_tokens", 768)),
-                temperature=float(self._model_config.get("temperature", 0.1)),
+                model_config=self._model_config or None,
                 system_prompt=system_prompt or "",
+                timeout=float(self._model_config.get("timeout", 120.0) or 120.0),
             )
         except Exception as exc:
             return FieldGroupResult(
@@ -319,14 +310,25 @@ class EnrichPipeline:
                 latency_ms=int((time.monotonic() - start) * 1000),
             )
 
+        if not response.success:
+            return FieldGroupResult(
+                field_group=spec.name,
+                status="failed",
+                error=response.error or "llm enrich failed",
+                latency_ms=int((time.monotonic() - start) * 1000),
+            )
+
+        source_details = f"llm:{response.method}"
+        if response.model:
+            source_details = f"{source_details}:{response.model}"
         result = self.fill_pending_agent_result(
             spec.name,
             response.content,
             document=document,
-            source_details=f"llm:{response.model}",
+            source_details=source_details,
             model_used=response.model,
-            tokens_used=response.tokens_used,
-            evidence=["llm_executed"],
+            tokens_used=response.tokens_used or None,
+            evidence=[f"llm_{response.method}"],
         )
         result.latency_ms = int((time.monotonic() - start) * 1000)
         return result

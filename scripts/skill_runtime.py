@@ -266,7 +266,7 @@ def render_dataset_listing(client_or_datasets: Any) -> str:
         return f"Active datasets\n  {SYM_BULLET} none available"
     lines = ["Active datasets", ""]
     for index, dataset in enumerate(datasets, start=1):
-        dataset_id = str(dataset.get("id") or f"dataset-{index}")
+        dataset_id = str(dataset.get("dataset_id") or dataset.get("id") or f"dataset-{index}")
         domains = dataset.get("source_domains")
         if isinstance(domains, list):
             domain_text = ", ".join(str(item) for item in domains[:3])

@@ -34,7 +34,7 @@ _products_identity = FieldGroupSpec(
 _products_pricing = FieldGroupSpec(
     name="amazon_products_pricing",
     description="Price analysis, tier classification, and deal quality scoring",
-    required_source_fields=["price", "category"],
+    required_source_fields=["price", "categories"],
     output_fields=[
         OutputFieldSpec(name="price_tier", field_type="string"),
         OutputFieldSpec(name="price_vs_category_avg", field_type="number"),
@@ -67,7 +67,7 @@ _products_description = FieldGroupSpec(
 _products_category = FieldGroupSpec(
     name="amazon_products_category",
     description="Category standardization, niche tagging, and seasonal relevance",
-    required_source_fields=["category", "title"],
+    required_source_fields=["categories", "title"],
     output_fields=[
         OutputFieldSpec(name="category_standardized", field_type="string"),
         OutputFieldSpec(name="niche_tags", field_type="array<string>"),
@@ -115,7 +115,7 @@ _products_availability = FieldGroupSpec(
 _products_competition = FieldGroupSpec(
     name="amazon_products_competition",
     description="Competitive positioning, listing quality, and SEO keyword density",
-    required_source_fields=["title", "category", "price", "rating"],
+    required_source_fields=["title", "categories", "price", "rating"],
     output_fields=[
         OutputFieldSpec(name="competitive_position", field_type="object"),
         OutputFieldSpec(name="listing_quality_score", field_type="number"),
@@ -212,7 +212,7 @@ _products_multi_level_summary = FieldGroupSpec(
 _products_market_positioning = FieldGroupSpec(
     name="amazon_products_market_positioning",
     description="Lifecycle stage inference, USPs, purchase decision factors, and cross-sell hints",
-    required_source_fields=["title", "description", "category", "rating", "reviews_count"],
+    required_source_fields=["title", "description", "categories", "rating", "reviews_count"],
     output_fields=[
         OutputFieldSpec(name="product_lifecycle_stage_inferred", field_type="string"),
         OutputFieldSpec(name="lifecycle_evidence", field_type="string"),

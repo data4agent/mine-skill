@@ -112,8 +112,8 @@ class LLMClient:
 
             input_items: list[dict[str, str]] = []
             if system_prompt:
-                input_items.append({"role": "system", "content": system_prompt})
-            input_items.append({"role": "user", "content": prompt})
+                input_items.append({"type": "message", "role": "system", "content": system_prompt})
+            input_items.append({"type": "message", "role": "user", "content": prompt})
             return (
                 f"{self.base_url}/responses",
                 {
