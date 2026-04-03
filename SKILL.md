@@ -22,7 +22,20 @@ requires:
    - Windows: `.\scripts\bootstrap.cmd`
    - Unix: `./scripts/bootstrap.sh`
 2. **Check readiness**: `python scripts/run_tool.py agent-status`
-3. **Start mining**: `python scripts/run_tool.py agent-start`
+3. **Start mining** — use `sessions_spawn` to run mining in a background sub-agent:
+
+```
+sessions_spawn({
+  task: "cd mine && python scripts/run_tool.py agent-start",
+  label: "mine-worker",
+  runTimeoutSeconds: 3600
+})
+```
+
+This keeps the user conversation free. The sub-agent announces results back when done.
+
+If `sessions_spawn` is unavailable, fall back to direct execution:
+`python scripts/run_tool.py agent-start`
 
 That is the entire setup. Do NOT read source code or clone external repos.
 
@@ -48,8 +61,24 @@ That is the entire setup. Do NOT read source code or clone external repos.
 
 1. Run **Check readiness** first
 2. If not initialized → run **Initialize** → then check again
-3. When ready → **Start mining**
+3. When ready → **Start mining** via `sessions_spawn` (preferred) or direct command
 4. Control with **Check status** / **Pause** / **Resume** / **Stop**
+5. Sub-agent announces progress back to the main conversation automatically
+
+Use `/subagents list` to see active mining sub-agents, `/subagents kill <id>` to stop one.
+
+## Sub-Agent Pattern
+
+| Scenario | Method |
+| -------- | ------ |
+| OpenClaw host | `sessions_spawn` — non-blocking, result announced back |
+| Cursor / other hosts | `python scripts/run_tool.py agent-start` — forks background process via `subprocess.Popen` |
+
+Sub-agent guidelines:
+- **One mining worker per session** — do not spawn multiple concurrent miners
+- Use `runTimeoutSeconds` to set a hard cap (recommended: 3600)
+- Use `agent-control status` to poll progress from the main conversation
+- Use `agent-control stop` or `/subagents kill <id>` to terminate
 
 ## Reference
 
