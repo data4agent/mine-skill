@@ -66,6 +66,8 @@ That is the entire setup. Do NOT read source code or clone external repos.
 
 ## Actions
 
+### Mining
+
 | Action | Command |
 | ------ | ------- |
 | Initialize | `python scripts/run_tool.py init` |
@@ -82,13 +84,35 @@ That is the entire setup. Do NOT read source code or clone external repos.
 | Validate schema | `python scripts/schema_tools.py validate` |
 | Export submissions | `python scripts/run_tool.py export-core-submissions <input> <output> <datasetId>` |
 
+### Validator
+
+| Action | Command |
+| ------ | ------- |
+| Initialize validator | `python scripts/run_tool.py validator-init` |
+| Start validating | `python scripts/run_tool.py validator-start` |
+| Check validator status | `python scripts/run_tool.py validator-control status` |
+| Pause validator | `python scripts/run_tool.py validator-control pause` |
+| Resume validator | `python scripts/run_tool.py validator-control resume` |
+| Stop validator | `python scripts/run_tool.py validator-control stop` |
+| Diagnose validator | `python scripts/run_tool.py validator-doctor` |
+
 ## Flow
+
+### Mining Flow
 
 1. Run **Check readiness** first
 2. If not initialized → run **Initialize** → then check again
 3. When ready → **Start mining** via `sessions_spawn` (preferred) or direct command
 4. Control with **Check status** / **Pause** / **Resume** / **Stop**
 5. Sub-agent announces progress back to the main conversation automatically
+
+### Validator Flow
+
+1. Run **Initialize validator** — auto-configures wallet, applies as validator
+2. Run **Start validating** — connects via WebSocket, receives evaluation tasks
+3. Monitor with **Check validator status** / **Pause** / **Resume** / **Stop**
+
+The validator connects to the platform via WebSocket, receives evaluation tasks, scores miner submissions using 4-dimension LLM analysis (field completeness, value accuracy, type correctness, information sufficiency), and reports scores back.
 
 Use `/subagents list` to see active mining sub-agents, `/subagents kill <id>` to stop one.
 
@@ -105,6 +129,17 @@ Sub-agent guidelines:
 - Use `agent-control status` to poll progress from the main conversation
 - Use `agent-control stop` or `/subagents kill <id>` to terminate
 
+## Validator Environment (defaults work)
+
+```bash
+VALIDATOR_ID=validator-agent            # default
+EVAL_LLM_MODEL=                         # LLM model for evaluation (auto-detected)
+EVAL_LLM_TEMPERATURE=0.0               # evaluation temperature
+EVAL_TIMEOUT_SECONDS=480                # single evaluation timeout (8 min)
+```
+
+Shared settings (`PLATFORM_BASE_URL`, `AWP_WALLET_BIN`, EIP-712 config) are inherited from the mining configuration.
+
 ## Reference
 
 Read these docs only when needed for the specific topic:
@@ -114,3 +149,5 @@ Read these docs only when needed for the specific topic:
 - [Agent guide](./docs/AGENT_GUIDE.md) — detailed operational guide
 - [Environment](./docs/ENVIRONMENT.md) — environment variables and config
 - [OpenClaw integration](./docs/OPENCLAW_HOST_INTEGRATION.md) — host contract for OpenClaw
+- [Validator API](./references/api-validator.md) — validator API endpoints
+- [Validator Protocol](./references/protocol-validator.md) — WebSocket protocol and evaluation flow
