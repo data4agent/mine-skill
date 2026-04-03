@@ -1662,7 +1662,7 @@ def main() -> int:
             runtime = ValidatorRuntime(
                 platform_client=platform,
                 ws_client=ws,
-                eval_engine=engine,
+                engine=engine,
                 validator_id=resolve_validator_id(),
             )
 
