@@ -854,6 +854,12 @@ def build_parser() -> argparse.ArgumentParser:
             "browser-session",
             "browser-session-status",
             "browser-session-wait",
+            # Validator commands
+            "validator-status",
+            "validator-start",
+            "validator-control",
+            "validator-doctor",
+            "run-validator-worker",
         ),
     )
     parser.add_argument("args", nargs="*")
@@ -1271,6 +1277,216 @@ def run_agent_loop(max_iterations: int = 1) -> str:
         })
 
 
+def _validator_state_root() -> Path:
+    from common import resolve_validator_state_root
+    return resolve_validator_state_root()
+
+
+def _validator_background_snapshot() -> dict[str, object]:
+    from validator_worker import get_status
+    return get_status(state_root=_validator_state_root())
+
+
+def render_validator_status() -> str:
+    """Concise validator status as JSON."""
+    snapshot = _validator_background_snapshot()
+    status = str(snapshot.get("status") or "not_running")
+
+    if status == "running":
+        session_id = str(snapshot.get("session_id") or "")
+        return json.dumps({
+            "ready": True,
+            "state": "running",
+            "user_message": f"Validator is running (session: {session_id}).",
+            "user_actions": ["Check status", "Stop validator"],
+            "_internal": {
+                "next_command": "python scripts/run_tool.py validator-control status",
+                "action_map": {
+                    "Check status": "python scripts/run_tool.py validator-control status",
+                    "Stop validator": "python scripts/run_tool.py validator-control stop",
+                },
+                "session": snapshot,
+            },
+        }, ensure_ascii=False, indent=2)
+
+    return json.dumps({
+        "ready": True,
+        "state": "idle",
+        "user_message": "Validator is not running.",
+        "user_actions": ["Start validator"],
+        "_internal": {
+            "next_command": "python scripts/run_tool.py validator-start",
+            "action_map": {
+                "Start validator": "python scripts/run_tool.py validator-start",
+            },
+        },
+    }, ensure_ascii=False, indent=2)
+
+
+def run_validator_start() -> str:
+    """Start the validator background worker."""
+    from validator_worker import start_background
+
+    snapshot = _validator_background_snapshot()
+    if snapshot.get("status") == "running":
+        session_id = str(snapshot.get("session_id") or "")
+        return json.dumps({
+            "state": "running",
+            "user_message": f"Validator is already running (session: {session_id}).",
+            "user_actions": ["Check status", "Stop validator"],
+            "_internal": {
+                "next_command": "python scripts/run_tool.py validator-control status",
+                "action_map": {
+                    "Check status": "python scripts/run_tool.py validator-control status",
+                    "Stop validator": "python scripts/run_tool.py validator-control stop",
+                },
+                "session": snapshot,
+            },
+        }, ensure_ascii=False, indent=2)
+
+    try:
+        result = start_background(state_root=_validator_state_root())
+    except Exception as exc:
+        return json.dumps({
+            "state": "error",
+            "user_message": f"Failed to start validator: {exc}",
+            "user_actions": ["Retry", "Run doctor"],
+            "_internal": {
+                "error": str(exc),
+                "action_map": {
+                    "Retry": "python scripts/run_tool.py validator-start",
+                    "Run doctor": "python scripts/run_tool.py validator-doctor",
+                },
+            },
+        }, ensure_ascii=False, indent=2)
+
+    session_id = str(result.get("session_id") or "")
+    return json.dumps({
+        "state": result.get("status", "started"),
+        "user_message": f"Validator started (session: {session_id}).",
+        "user_actions": ["Check status", "Stop validator"],
+        "_internal": {
+            "next_command": "python scripts/run_tool.py validator-control status",
+            "action_map": {
+                "Check status": "python scripts/run_tool.py validator-control status",
+                "Stop validator": "python scripts/run_tool.py validator-control stop",
+            },
+            "session": result,
+        },
+    }, ensure_ascii=False, indent=2)
+
+
+def run_validator_control(action: str = "status") -> str:
+    """Control the validator background worker: status, stop."""
+    from validator_worker import stop_background
+
+    normalized = (action or "status").strip().lower()
+    snapshot = _validator_background_snapshot()
+
+    if normalized == "status":
+        return render_validator_status()
+
+    if normalized != "stop":
+        return json.dumps({
+            "state": "error",
+            "user_message": f"Unknown validator action: {normalized}",
+            "user_actions": ["Check status"],
+            "_internal": {
+                "action_map": {"Check status": "python scripts/run_tool.py validator-control status"},
+            },
+        }, ensure_ascii=False, indent=2)
+
+    if snapshot.get("status") != "running":
+        return json.dumps({
+            "state": "idle",
+            "user_message": "Validator is not running.",
+            "user_actions": ["Start validator"],
+            "_internal": {
+                "action_map": {"Start validator": "python scripts/run_tool.py validator-start"},
+            },
+        }, ensure_ascii=False, indent=2)
+
+    result = stop_background(state_root=_validator_state_root())
+    return json.dumps({
+        "state": result.get("status", "stopped"),
+        "user_message": "Validator stopped.",
+        "user_actions": ["Start validator"],
+        "_internal": {
+            "action_map": {"Start validator": "python scripts/run_tool.py validator-start"},
+            "result": result,
+        },
+    }, ensure_ascii=False, indent=2)
+
+
+def run_validator_doctor() -> str:
+    """Run validator-specific diagnostics."""
+    from common import resolve_validator_id, resolve_ws_url, resolve_eval_timeout
+
+    snapshot = _validator_background_snapshot()
+    state_root = _validator_state_root()
+
+    checks: list[dict[str, object]] = []
+    fix_commands: list[str] = []
+
+    # Check 1: State directory
+    state_exists = state_root.exists()
+    checks.append({
+        "name": "state_directory",
+        "ok": state_exists,
+        "value": str(state_root),
+    })
+    if not state_exists:
+        fix_commands.append("python scripts/run_tool.py validator-start")
+
+    # Check 2: Validator ID
+    validator_id = resolve_validator_id()
+    checks.append({
+        "name": "validator_id",
+        "ok": bool(validator_id),
+        "value": validator_id,
+    })
+
+    # Check 3: WebSocket URL
+    ws_url = resolve_ws_url()
+    checks.append({
+        "name": "ws_url",
+        "ok": bool(ws_url),
+        "value": ws_url,
+    })
+
+    # Check 4: Eval timeout
+    eval_timeout = resolve_eval_timeout()
+    checks.append({
+        "name": "eval_timeout",
+        "ok": eval_timeout > 0,
+        "value": eval_timeout,
+    })
+
+    # Check 5: Background process
+    running = snapshot.get("status") == "running"
+    checks.append({
+        "name": "background_process",
+        "ok": running,
+        "value": "running" if running else "not running",
+        "pid": snapshot.get("pid"),
+        "session_id": snapshot.get("session_id"),
+    })
+
+    all_ok = all(c["ok"] for c in checks)
+    next_command = None
+    if all_ok and not running:
+        next_command = "python scripts/run_tool.py validator-start"
+    elif fix_commands:
+        next_command = fix_commands[0]
+
+    return json.dumps({
+        "status": "ok" if all_ok else "error",
+        "checks": checks,
+        "fix_commands": fix_commands,
+        "next_command": next_command,
+    }, ensure_ascii=False, indent=2)
+
+
 def main() -> int:
     namespace = build_parser().parse_args()
 
@@ -1371,6 +1587,35 @@ def main() -> int:
             print("Usage: browser-session-wait <platform>")
             return 1
         print(run_browser_session_wait(namespace.args[0]))
+        return 0
+
+    if namespace.command == "validator-status":
+        print(render_validator_status())
+        return 0
+
+    if namespace.command == "validator-start":
+        print(run_validator_start())
+        return 0
+
+    if namespace.command == "validator-control":
+        action = namespace.args[0] if namespace.args else "status"
+        print(run_validator_control(action))
+        return 0
+
+    if namespace.command == "validator-doctor":
+        print(run_validator_doctor())
+        return 0
+
+    if namespace.command == "run-validator-worker":
+        session_id = namespace.args[0] if namespace.args else None
+        from common import resolve_validator_state_root
+        from worker_state import ValidatorStateStore
+
+        state_root = resolve_validator_state_root()
+        store = ValidatorStateStore(state_root)
+        if session_id:
+            store.update_session(session_id=session_id, status="running")
+        print(json.dumps({"status": "worker_started", "session_id": session_id}, ensure_ascii=False, indent=2))
         return 0
 
     if namespace.command == "diagnose":
