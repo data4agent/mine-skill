@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -177,17 +177,17 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     <div class="statusbar">
       <span class="dot dot-health" id="healthDot"></span>
       <span class="dot dot-rec"    id="recDot"></span>
-      <span id="statusText">连接中</span>
+      <span id="statusText">Connecting…</span>
     </div>
 
     <!-- observer badge -->
-    <div class="obs-badge" id="obsBadge">👁 观察模式</div>
+    <div class="obs-badge" id="obsBadge">👁 Observer mode</div>
 
     <!-- guide banner -->
     <div class="guide info" id="guide">
       <span class="guide-icon" id="guideIcon">ℹ️</span>
       <span class="guide-text" id="guideText"></span>
-      <button class="guide-close" id="guideClose" title="关闭">✕</button>
+      <button class="guide-close" id="guideClose" title="Close">✕</button>
     </div>
 
     <!-- noVNC iframe (src set by JS) -->
@@ -196,11 +196,11 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     <!-- gate modal -->
     <div class="gate-overlay" id="gateOverlay">
       <div class="gate-card">
-        <h3>⚠️ 等待确认</h3>
+        <h3>⚠️ Awaiting confirmation</h3>
         <p id="gatePrompt"></p>
         <div class="gate-btns">
-          <button class="btn-approve" id="gateApprove">✅ 确认</button>
-          <button class="btn-reject"  id="gateReject">✗ 取消</button>
+          <button class="btn-approve" id="gateApprove">✅ Confirm</button>
+          <button class="btn-reject"  id="gateReject">✗ Cancel</button>
         </div>
       </div>
     </div>
@@ -208,23 +208,23 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     <!-- FAB area -->
     <div class="fab">
       <span class="fab-toast" id="toast" style="opacity:0"></span>
-      <button class="btn-continue" id="continueBtn">✅ 已完成，继续</button>
+      <button class="btn-continue" id="continueBtn">✅ Done, continue</button>
       <div class="fab-menu" id="fabMenu">
-        <button class="fab-toggle" id="fabToggle" title="更多操作">⋯</button>
+        <button class="fab-toggle" id="fabToggle" title="More">⋯</button>
         <div class="fab-panel" id="fabPanel">
           <button class="fab-item" id="clipBtn">
-            <span class="fab-icon">📋</span>剪贴板注入
+            <span class="fab-icon">📋</span>Inject clipboard
           </button>
           <button class="fab-item" id="filesBtn">
-            <span class="fab-icon">📁</span>文件列表
+            <span class="fab-icon">📁</span>Files
           </button>
           <div class="fab-sep"></div>
           <button class="fab-item" id="recordBtn">
-            <span class="fab-icon" id="recIcon">⏺</span><span id="recLabel">开始录屏</span>
+            <span class="fab-icon" id="recIcon">⏺</span><span id="recLabel">Start recording</span>
           </button>
           <div class="fab-sep"></div>
           <div class="preset-section">
-            <div class="preset-label">设备预设</div>
+            <div class="preset-label">Device presets</div>
             <div id="presetList"></div>
           </div>
         </div>
@@ -233,18 +233,18 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
 
     <!-- clipboard popup -->
     <div class="popup clip-popup" id="clipPopup">
-      <div class="popup-title">📋 注入远端剪贴板</div>
-      <textarea id="clipText" placeholder="输入要注入的文本…"></textarea>
-      <button class="popup-btn" id="clipSubmit">注入</button>
+      <div class="popup-title">📋 Inject remote clipboard</div>
+      <textarea id="clipText" placeholder="Text to inject…"></textarea>
+      <button class="popup-btn" id="clipSubmit">Inject</button>
     </div>
 
     <!-- files popup -->
     <div class="popup files-popup" id="filesPopup">
-      <div class="popup-title">📁 文件列表</div>
+      <div class="popup-title">📁 Files</div>
       <div class="files-cats">
-        <button class="files-cat active" data-cat="downloads">下载</button>
-        <button class="files-cat"        data-cat="screenshots">截图</button>
-        <button class="files-cat"        data-cat="workspace">工作区</button>
+        <button class="files-cat active" data-cat="downloads">Downloads</button>
+        <button class="files-cat"        data-cat="screenshots">Screenshots</button>
+        <button class="files-cat"        data-cat="workspace">Workspace</button>
       </div>
       <div class="file-list" id="fileList"></div>
     </div>
@@ -256,7 +256,7 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
 (function () {
   'use strict';
 
-  /* ── 参数解析 ── */
+  /* Parameter parsing */
   var P         = new URLSearchParams(location.search);
   var switchApi = P.get('switch_api') || '';
   var token     = P.get('token')      || '';
@@ -269,15 +269,15 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
   }
   if (switchApi && isCfUrl(switchApi)) apiBase = switchApi.replace(/\/+$/, '');
 
-  /* ── noVNC iframe ── */
+  /* noVNC iframe */
   var vo = viewOnly ? '1' : '0';
   document.getElementById('vnc').src =
     '/vnc.html?autoconnect=true&resize=scale&quality=6&compression=2&view_only=' + vo;
 
-  /* ── observer badge ── */
+  /* observer badge */
   if (viewOnly) document.getElementById('obsBadge').style.display = '';
 
-  /* ── helpers ── */
+  /* helpers */
   function apiUrl(path, extra) {
     if (!apiBase || !token) return null;
     return apiBase + path + '?token=' + encodeURIComponent(token) + (extra || '');
@@ -305,13 +305,13 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     document.documentElement.style.setProperty('--stage-h', m[2]);
   }
 
-  /* ── status polling ── */
+  /* status polling */
   var _recActive = false;
   var _curMode   = '';
 
   function refreshStatus() {
     if (!apiBase || !token) {
-      document.getElementById('statusText').textContent = '缺少控制链接';
+      document.getElementById('statusText').textContent = 'Missing control link';
       return;
     }
     apiFetch('/status').then(function (d) {
@@ -319,19 +319,19 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
       var mode = d.mode || 'desktop';
       var vp   = d.viewport_geom ? ' ' + d.viewport_geom : '';
       var dpr  = (d.dpr && d.dpr !== '1') ? ' @' + d.dpr + 'x' : '';
-      var exp  = d.export === 'browser-window' ? ' · 窗口' : ' · 全屏';
+      var exp  = d.export === 'browser-window' ? ' · Window' : ' · Full screen';
       document.getElementById('statusText').textContent = mode + vp + dpr + exp;
       document.getElementById('healthDot').className = 'dot dot-health' + (d.health === false ? ' bad' : '');
       setRecording(d.recording);
       updateActivePreset(mode);
     }).catch(function () {
-      document.getElementById('statusText').textContent = '状态获取失败';
+      document.getElementById('statusText').textContent = 'Status unavailable';
     });
   }
   refreshStatus();
   setInterval(refreshStatus, 5000);
 
-  /* ── guide banner ── */
+  /* guide banner */
   var _guideTs       = 0;
   var _guideClosed   = false;
   var _guideClosedTs = 0;
@@ -365,17 +365,17 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
   pollGuide();
   setInterval(pollGuide, 3000);
 
-  /* ── gate polling ── */
+  /* gate polling */
   var _gateId = '';
   document.getElementById('gateApprove').onclick = function () {
     apiFetch('/gate/respond', { method: 'POST', body: JSON.stringify({ approved: true }) })
-      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('已确认 ✅'); })
-      .catch(function () { toast('操作失败'); });
+      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('Confirmed ✅'); })
+      .catch(function () { toast('Action failed'); });
   };
   document.getElementById('gateReject').onclick = function () {
     apiFetch('/gate/respond', { method: 'POST', body: JSON.stringify({ approved: false }) })
-      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('已取消'); })
-      .catch(function () { toast('操作失败'); });
+      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('Cancelled'); })
+      .catch(function () { toast('Action failed'); });
   };
 
   function pollGate() {
@@ -397,14 +397,14 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
   }
   if (apiBase && token) { pollGate(); setInterval(pollGate, 2000); }
 
-  /* ── continue button ── */
+  /* continue button */
   document.getElementById('continueBtn').onclick = function () {
     apiFetch('/continue', { method: 'POST' })
-      .then(function () { toast('已通知 AI 继续 ✅'); })
-      .catch(function () { toast('通知失败，请检查连接'); });
+      .then(function () { toast('Notified AI to continue ✅'); })
+      .catch(function () { toast('Notify failed; check connection'); });
   };
 
-  /* ── FAB menu toggle ── */
+  /* FAB menu toggle */
   var fabMenu = document.getElementById('fabMenu');
   document.getElementById('fabToggle').onclick = function (e) {
     e.stopPropagation();
@@ -419,27 +419,27 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     hidePopups();
   });
 
-  /* ── recording ── */
+  /* recording */
   function setRecording(active) {
     _recActive = !!active;
     document.getElementById('recDot').className   = 'dot dot-rec' + (active ? ' on' : '');
     document.getElementById('recIcon').textContent  = active ? '⏹' : '⏺';
-    document.getElementById('recLabel').textContent = active ? '停止录屏' : '开始录屏';
+    document.getElementById('recLabel').textContent = active ? 'Stop recording' : 'Start recording';
   }
   document.getElementById('recordBtn').onclick = function () {
     var path = _recActive ? '/record/stop' : '/record/start';
     var body = _recActive ? undefined : JSON.stringify({ interval: 3 });
     apiFetch(path, { method: 'POST', body: body }).then(function (d) {
       if (d.ok) {
-        toast(_recActive ? ('录屏已停止，共 ' + (d.count || 0) + ' 帧') : '录屏已开始');
+        toast(_recActive ? ('Recording stopped, ' + (d.count || 0) + ' frames') : 'Recording started');
         setRecording(!_recActive);
       } else {
-        toast('录屏失败: ' + (d.error || ''));
+        toast('Recording failed: ' + (d.error || ''));
       }
-    }).catch(function () { toast('录屏操作失败'); });
+    }).catch(function () { toast('Recording action failed'); });
   };
 
-  /* ── clipboard popup ── */
+  /* clipboard popup */
   var clipPopup  = document.getElementById('clipPopup');
   var filesPopup = document.getElementById('filesPopup');
 
@@ -460,13 +460,13 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
     if (!text) return;
     apiFetch('/clipboard', { method: 'POST', body: JSON.stringify({ text: text }) })
       .then(function (d) {
-        toast(d.ok ? '已注入剪贴板 ✅' : ('注入失败: ' + (d.error || '')));
+        toast(d.ok ? 'Clipboard injected ✅' : ('Injection failed: ' + (d.error || '')));
         if (d.ok) { clipPopup.classList.remove('show'); document.getElementById('clipText').value = ''; }
       })
-      .catch(function () { toast('注入失败'); });
+      .catch(function () { toast('Injection failed'); });
   };
 
-  /* ── files popup ── */
+  /* files popup */
   var _filesCat = 'downloads';
 
   document.getElementById('filesBtn').onclick = function (e) {
@@ -493,10 +493,10 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
   }
 
   function loadFiles(cat) {
-    document.getElementById('fileList').innerHTML = '<div class="files-empty">加载中…</div>';
+    document.getElementById('fileList').innerHTML = '<div class="files-empty">Loading…</div>';
     apiFetch('/files', null, '&dir=' + encodeURIComponent(cat)).then(function (d) {
       if (!d.files || !d.files.length) {
-        document.getElementById('fileList').innerHTML = '<div class="files-empty">暂无文件</div>';
+        document.getElementById('fileList').innerHTML = '<div class="files-empty">No files</div>';
         return;
       }
       document.getElementById('fileList').innerHTML = d.files.map(function (f) {
@@ -506,11 +506,11 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
           + '</div>';
       }).join('');
     }).catch(function () {
-      document.getElementById('fileList').innerHTML = '<div class="files-empty">加载失败</div>';
+      document.getElementById('fileList').innerHTML = '<div class="files-empty">Load failed</div>';
     });
   }
 
-  /* ── device preset list ── */
+  /* device preset list */
   function updateActivePreset(mode) {
     _curMode = mode;
     document.querySelectorAll('.preset-btn').forEach(function (btn) {
@@ -540,18 +540,18 @@ iframe { width:100%; height:100%; border:0; display:block; background:#000; }
   function doSwitch(mode) {
     if (_switching) return;
     _switching = true;
-    toast('切换中… ' + mode);
+    toast('Switching… ' + mode);
     apiFetch('/switch', { method: 'POST' }, '&mode=' + encodeURIComponent(mode))
       .then(function (d) {
         if (d.status === 'ok') {
           applyRatio(d.viewer_geom || d.geom);
-          toast('已切换: ' + (d.label || mode));
+          toast('Switched: ' + (d.label || mode));
           refreshStatus();
         } else {
-          toast('切换失败: ' + (d.error || ''));
+          toast('Switch failed: ' + (d.error || ''));
         }
       })
-      .catch(function () { toast('服务不可达'); })
+      .catch(function () { toast('Service unreachable'); })
       .finally(function () { _switching = false; fabMenu.classList.remove('open'); });
   }
 })();
