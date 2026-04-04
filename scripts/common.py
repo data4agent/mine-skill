@@ -545,7 +545,7 @@ def resolve_runtime_readiness() -> dict[str, Any]:
             "message": str(exc),
         }
 
-    # Session expiry check
+    # Session expiry check — auto-renew if expired or near expiry
     warnings: list[str] = []
     session_expiry_seconds: int | None = None
     expires_at_raw = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
@@ -554,7 +554,15 @@ def resolve_runtime_readiness() -> dict[str, Any]:
 
     wallet_session_ready = bool(wallet_token.strip())
 
-    # Check expiry and add warnings
+    if session_expiry_seconds is not None and session_expiry_seconds <= 0 and wallet_found:
+        renewed_token = _try_auto_renew_session(wallet_bin)
+        if renewed_token:
+            wallet_token = renewed_token
+            wallet_session_ready = True
+            new_expires_raw = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
+            session_expiry_seconds = int(new_expires_raw) - int(time.time()) if new_expires_raw.isdigit() else None
+            warnings.append("wallet session auto-renewed on startup")
+
     if session_expiry_seconds is not None:
         if session_expiry_seconds <= 0:
             warnings.append("wallet session expired")
@@ -727,6 +735,23 @@ def _run_wallet_json(wallet_bin: str, *args: str) -> dict[str, Any]:
         raise RuntimeError(f"awp-wallet returned non-JSON output for {' '.join(args)}") from exc
 
 
+def _try_auto_renew_session(wallet_bin: str) -> str:
+    """Attempt to renew an expired wallet session via awp-wallet unlock.
+
+    Returns the new session token on success, empty string on failure.
+    Safe to call even if wallet is locked or unavailable — all errors are swallowed.
+    """
+    if not (Path(wallet_bin).exists() or shutil.which(wallet_bin)):
+        return ""
+    try:
+        token = _ensure_wallet_session(wallet_bin, duration_seconds=WALLET_SESSION_DURATION_SECONDS)
+        if token:
+            logger.info("Auto-renewed expired wallet session on startup")
+        return token
+    except Exception:
+        return ""
+
+
 def _ensure_wallet_session(wallet_bin: str, *, duration_seconds: int = WALLET_SESSION_DURATION_SECONDS) -> str:
     try:
         _run_wallet_json(wallet_bin, "receive")
@@ -763,6 +788,15 @@ def resolve_wallet_config() -> tuple[str, str]:
 
     wallet_bin = resolve_wallet_bin()
     wallet_token = os.environ.get("AWP_WALLET_TOKEN", "").strip()
+
+    # Discard env token if it's already expired
+    if wallet_token:
+        exp_raw = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
+        if exp_raw.isdigit() and int(exp_raw) <= int(time.time()):
+            wallet_token = ""
+            os.environ.pop("AWP_WALLET_TOKEN", None)
+            os.environ.pop("AWP_WALLET_TOKEN_EXPIRES_AT", None)
+
     if not wallet_token:
         ref_raw = os.environ.get("AWP_WALLET_TOKEN_SECRET_REF", "").strip()
         if ref_raw:
