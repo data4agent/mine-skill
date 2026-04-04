@@ -10,3 +10,6 @@ markdownify>=0.13.1
 PyMuPDF>=1.26.0
 pymupdf4llm>=0.0.27
 pycryptodome>=3.20.0
+# Validator runtime
+websockets>=16.0
+eth-account>=0.13.0

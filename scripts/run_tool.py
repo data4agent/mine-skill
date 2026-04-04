@@ -1289,16 +1289,18 @@ def _validator_background_snapshot() -> dict[str, object]:
 
 
 def render_validator_status() -> str:
-    """Concise validator status as JSON."""
-    snapshot = _validator_background_snapshot()
-    status = str(snapshot.get("status") or "not_running")
+    """Validator 状态检查（对齐 miner 的 agent-status），含就绪判断。"""
+    from common import resolve_validator_readiness
 
-    if status == "running":
+    snapshot = _validator_background_snapshot()
+    bg_status = str(snapshot.get("status") or "not_running")
+
+    if bg_status == "running":
         session_id = str(snapshot.get("session_id") or "")
         return json.dumps({
             "ready": True,
             "state": "running",
-            "user_message": f"Validator is running (session: {session_id}).",
+            "user_message": f"Validator 运行中 (session: {session_id})。",
             "user_actions": ["Check status", "Stop validator"],
             "_internal": {
                 "next_command": "python scripts/run_tool.py validator-control status",
@@ -1310,10 +1312,32 @@ def render_validator_status() -> str:
             },
         }, ensure_ascii=False, indent=2)
 
+    readiness = resolve_validator_readiness(auto_install_deps=False)
+
+    if not readiness["can_start"]:
+        return json.dumps({
+            "ready": False,
+            "state": readiness["state"],
+            "user_message": f"Validator 未就绪: {'; '.join(readiness.get('warnings', []))}",
+            "user_actions": ["Run doctor", "Start validator"],
+            "_internal": {
+                "next_command": "python scripts/run_tool.py validator-doctor",
+                "action_map": {
+                    "Run doctor": "python scripts/run_tool.py validator-doctor",
+                    "Start validator": "python scripts/run_tool.py validator-start",
+                },
+                "readiness": readiness,
+            },
+        }, ensure_ascii=False, indent=2)
+
+    warnings = readiness.get("warnings", [])
+    msg = "Validator 就绪，可以启动。"
+    if warnings:
+        msg += f" 注意: {'; '.join(warnings)}"
     return json.dumps({
         "ready": True,
         "state": "idle",
-        "user_message": "Validator is not running.",
+        "user_message": msg,
         "user_actions": ["Start validator"],
         "_internal": {
             "next_command": "python scripts/run_tool.py validator-start",
@@ -1325,7 +1349,8 @@ def render_validator_status() -> str:
 
 
 def run_validator_start() -> str:
-    """Start the validator background worker."""
+    """Start the validator background worker with full readiness checks."""
+    from common import resolve_validator_readiness
     from validator_worker import start_background
 
     snapshot = _validator_background_snapshot()
@@ -1333,7 +1358,7 @@ def run_validator_start() -> str:
         session_id = str(snapshot.get("session_id") or "")
         return json.dumps({
             "state": "running",
-            "user_message": f"Validator is already running (session: {session_id}).",
+            "user_message": f"Validator 已在运行中 (session: {session_id})。",
             "user_actions": ["Check status", "Stop validator"],
             "_internal": {
                 "next_command": "python scripts/run_tool.py validator-control status",
@@ -1345,12 +1370,37 @@ def run_validator_start() -> str:
             },
         }, ensure_ascii=False, indent=2)
 
+    readiness = resolve_validator_readiness(auto_install_deps=True)
+
+    if not readiness["can_start"]:
+        fix_commands: list[str] = []
+        state = readiness["state"]
+        if state == "missing_dependencies":
+            missing = readiness.get("checks", {}).get("dependencies", {}).get("missing", [])
+            pip_names = [m["pip"] for m in missing]
+            fix_commands.append(f'pip install {" ".join(pip_names)}')
+        elif state == "signer_unavailable":
+            fix_commands.append("# 设置 VALIDATOR_PRIVATE_KEY 或确保 awp-wallet 可用")
+        return json.dumps({
+            "state": state,
+            "user_message": f"Validator 未就绪: {'; '.join(readiness['warnings'])}",
+            "user_actions": ["Run doctor", "Retry"],
+            "_internal": {
+                "readiness": readiness,
+                "fix_commands": fix_commands,
+                "action_map": {
+                    "Run doctor": "python scripts/run_tool.py validator-doctor",
+                    "Retry": "python scripts/run_tool.py validator-start",
+                },
+            },
+        }, ensure_ascii=False, indent=2)
+
     try:
         result = start_background(state_root=_validator_state_root())
     except Exception as exc:
         return json.dumps({
             "state": "error",
-            "user_message": f"Failed to start validator: {exc}",
+            "user_message": f"启动 validator 失败: {exc}",
             "user_actions": ["Retry", "Run doctor"],
             "_internal": {
                 "error": str(exc),
@@ -1362,9 +1412,13 @@ def run_validator_start() -> str:
         }, ensure_ascii=False, indent=2)
 
     session_id = str(result.get("session_id") or "")
+    warnings = readiness.get("warnings", [])
+    msg = f"Validator 已启动 (session: {session_id})。"
+    if warnings:
+        msg += f" 注意: {'; '.join(warnings)}"
     return json.dumps({
         "state": result.get("status", "started"),
-        "user_message": f"Validator started (session: {session_id}).",
+        "user_message": msg,
         "user_actions": ["Check status", "Stop validator"],
         "_internal": {
             "next_command": "python scripts/run_tool.py validator-control status",
@@ -1373,6 +1427,7 @@ def run_validator_start() -> str:
                 "Stop validator": "python scripts/run_tool.py validator-control stop",
             },
             "session": result,
+            "readiness": readiness,
         },
     }, ensure_ascii=False, indent=2)
 
@@ -1420,50 +1475,115 @@ def run_validator_control(action: str = "status") -> str:
 
 
 def run_validator_doctor() -> str:
-    """Run validator-specific diagnostics."""
-    from common import resolve_validator_id, resolve_ws_url, resolve_eval_timeout
+    """完整的 validator 诊断，对齐 miner 的 doctor 命令。
+
+    检查项:
+      1. Python 版本
+      2. Python 依赖 (websockets, eth_account, pycryptodome)
+      3. 签名器 (VALIDATOR_PRIVATE_KEY 或 awp-wallet)
+      4. 平台连通性
+      5. 认证测试 (heartbeat)
+      6. AWP 注册状态
+      7. 配置项 (validator_id, ws_url, eval_timeout)
+      8. 后台进程状态
+    """
+    from common import (
+        resolve_validator_id, resolve_ws_url, resolve_eval_timeout,
+        check_validator_dependencies, resolve_validator_readiness,
+    )
 
     snapshot = _validator_background_snapshot()
     state_root = _validator_state_root()
+    readiness = resolve_validator_readiness(auto_install_deps=False)
 
     checks: list[dict[str, object]] = []
     fix_commands: list[str] = []
 
-    # Check 1: State directory
-    state_exists = state_root.exists()
-    checks.append({
-        "name": "state_directory",
-        "ok": state_exists,
-        "value": str(state_root),
-    })
-    if not state_exists:
-        fix_commands.append("python scripts/run_tool.py validator-start")
+    # 1. Python 版本
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    py_ok = sys.version_info >= (3, 11)
+    checks.append({"name": "python", "ok": py_ok, "value": py_ver, "required": "3.11+"})
 
-    # Check 2: Validator ID
+    # 2. 依赖
+    deps = check_validator_dependencies()
+    checks.append({
+        "name": "dependencies",
+        "ok": deps["ok"],
+        "installed": deps["installed"],
+        "missing": deps["missing"],
+    })
+    if not deps["ok"]:
+        pip_names = [m["pip"] for m in deps["missing"]]
+        fix_commands.append(f'pip install {" ".join(pip_names)}')
+
+    # 3. 签名器
+    signer_check = readiness.get("checks", {}).get("signer", {})
+    checks.append({
+        "name": "signer",
+        "ok": signer_check.get("ok", False),
+        "type": signer_check.get("type", ""),
+        "address": signer_check.get("address", ""),
+        "error": signer_check.get("error", ""),
+    })
+    if not signer_check.get("ok"):
+        fix_commands.append("# 设置 VALIDATOR_PRIVATE_KEY 或运行 bootstrap 配置 awp-wallet")
+
+    # 4. 平台连通性
+    platform_check = readiness.get("checks", {}).get("platform", {})
+    checks.append({
+        "name": "platform",
+        "ok": platform_check.get("ok", False),
+        "url": platform_check.get("url", ""),
+        "error": platform_check.get("error", ""),
+    })
+
+    # 5. 认证测试 (heartbeat)
+    auth_check: dict[str, object] = {"name": "auth_heartbeat", "ok": False}
+    if signer_check.get("ok") and platform_check.get("ok"):
+        try:
+            from common import resolve_validator_signer, resolve_platform_base_url
+            from lib.platform_client import PlatformClient
+
+            signer, _ = resolve_validator_signer()
+            client = PlatformClient(
+                base_url=resolve_platform_base_url(),
+                token="",
+                signer=signer,
+            )
+            hb = client.send_unified_heartbeat(client_name=f"validator-{resolve_validator_id()}")
+            auth_check["ok"] = True
+            eligible = hb.get("data", {}).get("eligible") if isinstance(hb.get("data"), dict) else hb.get("eligible")
+            auth_check["eligible"] = eligible
+        except Exception as exc:
+            auth_check["error"] = str(exc)
+    checks.append(auth_check)
+
+    # 6. AWP 注册状态
+    reg_check = readiness.get("checks", {}).get("registration", {})
+    checks.append({
+        "name": "awp_registration",
+        "ok": reg_check.get("registered", False),
+        "status": reg_check.get("status", "unknown"),
+        "address": reg_check.get("wallet_address", ""),
+        "registration_required": reg_check.get("registration_required", False),
+    })
+    if reg_check.get("registration_required") and not reg_check.get("registered"):
+        fix_commands.append("python scripts/run_tool.py validator-start  # 启动时自动注册")
+
+    # 7. 配置项
     validator_id = resolve_validator_id()
-    checks.append({
-        "name": "validator_id",
-        "ok": bool(validator_id),
-        "value": validator_id,
-    })
-
-    # Check 3: WebSocket URL
     ws_url = resolve_ws_url()
-    checks.append({
-        "name": "ws_url",
-        "ok": bool(ws_url),
-        "value": ws_url,
-    })
-
-    # Check 4: Eval timeout
     eval_timeout = resolve_eval_timeout()
     checks.append({
-        "name": "eval_timeout",
-        "ok": eval_timeout > 0,
-        "value": eval_timeout,
+        "name": "config",
+        "ok": True,
+        "validator_id": validator_id,
+        "ws_url": ws_url,
+        "eval_timeout": eval_timeout,
+        "platform_url": readiness.get("checks", {}).get("platform", {}).get("url", ""),
     })
 
-    # Check 5: Background process
+    # 8. 后台进程
     running = snapshot.get("status") == "running"
     checks.append({
         "name": "background_process",
@@ -1473,7 +1593,7 @@ def run_validator_doctor() -> str:
         "session_id": snapshot.get("session_id"),
     })
 
-    all_ok = all(c["ok"] for c in checks)
+    all_ok = all(c.get("ok", False) for c in checks)
     next_command = None
     if all_ok and not running:
         next_command = "python scripts/run_tool.py validator-start"
@@ -1482,8 +1602,10 @@ def run_validator_doctor() -> str:
 
     return json.dumps({
         "status": "ok" if all_ok else "error",
+        "can_start": readiness.get("can_start", False),
         "checks": checks,
         "fix_commands": fix_commands,
+        "warnings": readiness.get("warnings", []),
         "next_command": next_command,
     }, ensure_ascii=False, indent=2)
 
@@ -1615,42 +1737,67 @@ def main() -> int:
             resolve_validator_id,
             resolve_ws_url,
             resolve_eval_timeout,
-            resolve_wallet_config,
             resolve_awp_registration,
+            check_validator_dependencies,
+            install_validator_dependencies,
+            resolve_validator_signer,
         )
         from worker_state import ValidatorStateStore
 
         state_root = resolve_validator_state_root()
         store = ValidatorStateStore(state_root)
         if session_id:
-            store.update_session(session_id=session_id, status="running")
+            store.update_session(session_id=session_id, status="starting")
 
-        # Run the actual validator runtime
+        # 阶段 1: 依赖检查与自动安装
+        deps = check_validator_dependencies()
+        if not deps["ok"]:
+            print(json.dumps({"phase": "deps", "status": "installing", "missing": deps["missing"]}, ensure_ascii=False), flush=True)
+            install_result = install_validator_dependencies()
+            if install_result["ok"]:
+                print(json.dumps({"phase": "deps", "status": "installed", "packages": install_result["installed"]}, ensure_ascii=False), flush=True)
+            else:
+                store.update_session(status="error", error=f"依赖安装失败: {install_result['failed']}")
+                print(json.dumps({"status": "error", "phase": "deps", "failed": install_result["failed"]}, ensure_ascii=False, indent=2))
+                return 1
+            deps = check_validator_dependencies()
+            if not deps["ok"]:
+                store.update_session(status="error", error=f"依赖仍缺失: {deps['missing']}")
+                print(json.dumps({"status": "error", "phase": "deps", "still_missing": deps["missing"]}, ensure_ascii=False, indent=2))
+                return 1
+
+        # 阶段 2: 签名器初始化
+        try:
+            signer, signer_type = resolve_validator_signer()
+            signer_address = signer.get_address() if hasattr(signer, "get_address") else str(getattr(signer, "signer_address", ""))
+            print(json.dumps({"phase": "signer", "type": signer_type, "address": signer_address}, ensure_ascii=False), flush=True)
+        except Exception as exc:
+            store.update_session(status="error", error=str(exc))
+            print(json.dumps({"status": "error", "phase": "signer", "error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+
+        # 阶段 3: AWP 注册（自动注册）
+        try:
+            registration = resolve_awp_registration(auto_register=True, signer=signer)
+            reg_status = registration.get("status", "")
+            print(json.dumps({"phase": "registration", "status": reg_status, "address": registration.get("wallet_address")}, ensure_ascii=False), flush=True)
+            if reg_status == "auto_register_failed":
+                print(json.dumps({"warning": "auto_register_failed", "message": registration.get("message")}, ensure_ascii=False), flush=True)
+            elif registration.get("registration_required") and not registration.get("registered"):
+                print(json.dumps({"warning": "awp_unregistered", "message": registration.get("message")}, ensure_ascii=False), flush=True)
+        except Exception as reg_exc:
+            print(json.dumps({"warning": "registration_check_failed", "error": str(reg_exc)}, ensure_ascii=False), flush=True)
+
+        if session_id:
+            store.update_session(status="running")
+
+        # 阶段 4: 构建运行时组件并启动
         try:
             from validator_runtime import ValidatorRuntime
             from evaluation_engine import EvaluationEngine
             from ws_client import ValidatorWSClient
             from lib.platform_client import PlatformClient
 
-            # Check for direct private key (bypass awp-wallet)
-            private_key = os.environ.get("VALIDATOR_PRIVATE_KEY", "").strip()
-            if private_key:
-                from pk_signer import PrivateKeySigner
-                signer = PrivateKeySigner(private_key)
-                print(json.dumps({"info": "using_private_key", "address": signer.signer_address}, ensure_ascii=False), flush=True)
-            else:
-                from signer import WalletSigner
-                # Get wallet config with session token (same as miner)
-                wallet_bin, wallet_token = resolve_wallet_config()
-                if wallet_token.strip():
-                    # Try auto-register but don't block on failure
-                    try:
-                        registration = resolve_awp_registration(auto_register=True)
-                        if registration.get("status") == "auto_register_failed":
-                            print(json.dumps({"warning": "auto_register_failed", "message": registration.get("message")}, ensure_ascii=False), flush=True)
-                    except Exception as reg_exc:
-                        print(json.dumps({"warning": "registration_check_failed", "error": str(reg_exc)}, ensure_ascii=False), flush=True)
-                signer = WalletSigner(wallet_bin=wallet_bin, session_token=wallet_token)
             platform = PlatformClient(
                 base_url=resolve_platform_base_url(),
                 token="",
@@ -1659,9 +1806,14 @@ def main() -> int:
 
             ws_url = resolve_ws_url()
             auth_headers = signer.build_auth_headers("GET", ws_url, None)
+
+            def _refresh_ws_auth() -> dict[str, str]:
+                return signer.build_auth_headers("GET", ws_url, None)
+
             ws = ValidatorWSClient(
                 ws_url=ws_url,
                 auth_headers=auth_headers,
+                on_auth_refresh=_refresh_ws_auth,
             )
 
             engine = EvaluationEngine(timeout=resolve_eval_timeout())
@@ -1676,7 +1828,6 @@ def main() -> int:
             print(json.dumps({"status": "worker_started", "session_id": session_id}, ensure_ascii=False, indent=2))
             result = runtime.start()
             print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-            # Block until runtime stops (threads exit or stop() called)
             try:
                 while runtime._running:
                     time.sleep(1)

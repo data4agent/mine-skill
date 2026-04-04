@@ -77,6 +77,10 @@ class PrivateKeySigner:
     def signer_address(self) -> str:
         return self._address
 
+    def get_address(self) -> str:
+        """与 WalletSigner.get_address() 兼容的地址获取接口。"""
+        return self._address
+
     def sign_typed_data(self, typed_data: dict[str, Any]) -> str:
         """Sign EIP-712 typed data and return signature."""
         signable = encode_typed_data(full_message=typed_data)
