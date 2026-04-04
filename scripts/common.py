@@ -40,8 +40,8 @@ AWP_REGISTRATION_POLL_ATTEMPTS = 5
 AWP_REGISTRATION_POLL_INTERVAL_SECONDS = 2
 
 # Wallet session lifetime and renewal policy
-WALLET_SESSION_DURATION_SECONDS = 24 * 60 * 60      # 24 hours
-WALLET_SESSION_RENEW_THRESHOLD_SECONDS = 30 * 60  # renew when <= 30 minutes left
+WALLET_SESSION_DURATION_SECONDS = 3600          # 1 hour
+WALLET_SESSION_RENEW_THRESHOLD_SECONDS = 300    # renew when <= 5 minutes left
 
 
 def resolve_crawler_root() -> Path:
