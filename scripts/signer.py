@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import subprocess
 import time
 import uuid
@@ -225,11 +224,13 @@ class WalletSigner:
         content_type: str = "application/json",
         chain_id: int = DEFAULT_EIP712_CHAIN_ID,
         domain_name: str = DEFAULT_EIP712_DOMAIN_NAME,
+        domain_version: str = "1",
         verifying_contract: str = DEFAULT_EIP712_VERIFYING_CONTRACT,
     ) -> dict[str, str]:
         now = int(time.time())
-        nonce = secrets.randbits(52)
-        nonce_str = str(uuid.uuid4())
+        nonce_uuid = uuid.uuid4()
+        nonce = nonce_uuid.int  # UUID 128-bit 整数作为 EIP-712 uint256 nonce
+        nonce_str = str(nonce_uuid)  # UUID 字符串作为 X-Nonce 头
         typed_data = self.build_typed_data(
             method=method,
             url=url,
@@ -239,6 +240,7 @@ class WalletSigner:
             nonce=nonce,
             chain_id=chain_id,
             domain_name=domain_name,
+            domain_version=domain_version,
             verifying_contract=verifying_contract,
         )
         signature = self.sign_typed_data(typed_data)

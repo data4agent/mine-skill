@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urlencode, urljoin
 
 import httpx
 from common import (
@@ -27,6 +27,7 @@ class PlatformClient:
         signer: "WalletSigner | None" = None,
         eip712_chain_id: int | None = None,
         eip712_domain_name: str | None = None,
+        eip712_domain_version: str | None = None,
         eip712_verifying_contract: str | None = None,
     ) -> None:
         signature_config = (
@@ -45,6 +46,11 @@ class PlatformClient:
             eip712_domain_name
             if eip712_domain_name is not None
             else signature_config.get("domain_name", DEFAULT_EIP712_DOMAIN_NAME)
+        )
+        self._eip712_domain_version = str(
+            eip712_domain_version
+            if eip712_domain_version is not None
+            else (signature_config.get("domain_version") if signature_config else "1") or "1"
         )
         self._eip712_verifying_contract = str(
             eip712_verifying_contract
@@ -123,16 +129,6 @@ class PlatformClient:
             "/api/mining/v1/heartbeat",
             {
                 "client": client_name,
-            },
-        )
-
-    def submit_preflight(self, dataset_id: str, epoch_id: str) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/api/mining/v1/miners/preflight",
-            {
-                "dataset_id": dataset_id,
-                "epoch_id": epoch_id,
             },
         )
 
@@ -317,6 +313,7 @@ class PlatformClient:
                     content_type="application/json",
                     chain_id=self._eip712_chain_id,
                     domain_name=self._eip712_domain_name,
+                    domain_version=self._eip712_domain_version,
                     verifying_contract=self._eip712_verifying_contract,
                 )
             try:
@@ -346,11 +343,13 @@ class PlatformClient:
                     if isinstance(error_body, dict):
                         error_code = str(error_body.get("code") or "")
                         error_message = str(error_body.get("message") or "")
+                        error_retryable = bool(error_body.get("retryable", False))
+                        error_category = str(error_body.get("category") or "")
                     else:
                         error_code = str(error_payload.get("code") or "")
                         error_message = str(error_payload.get("message") or "")
-                    error_retryable = bool(error_payload.get("retryable", False))
-                    error_category = str(error_payload.get("category") or "")
+                        error_retryable = bool(error_payload.get("retryable", False))
+                        error_category = str(error_payload.get("category") or "")
                 if status_code == 401:
                     if error_code == "MISSING_HEADERS":
                         raise RuntimeError(
@@ -405,18 +404,22 @@ class PlatformClient:
         """POST /api/mining/v1/validators/unready"""
         return self._request("POST", "/api/mining/v1/validators/unready", {})
 
+    def claim_evaluation_task(self) -> dict[str, Any] | None:
+        """POST /api/mining/v1/evaluation-tasks/claim"""
+        return self._claim("/api/mining/v1/evaluation-tasks/claim")
+
     def get_evaluation_task(self, task_id: str) -> dict[str, Any]:
         """GET /api/mining/v1/evaluation-tasks/{id}"""
         resp = self._request("GET", f"/api/mining/v1/evaluation-tasks/{task_id}", None)
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
-    def report_evaluation(self, task_id: str, score: int, *, assignment_id: str = "") -> dict[str, Any]:
+    def report_evaluation(self, task_id: str, score: int, *, assignment_id: str) -> dict[str, Any]:
         """POST /api/mining/v1/evaluation-tasks/{id}/report"""
-        body: dict[str, Any] = {"score": score}
-        if assignment_id:
-            body["assignment_id"] = assignment_id
-        return self._request("POST", f"/api/mining/v1/evaluation-tasks/{task_id}/report", body)
+        return self._request("POST", f"/api/mining/v1/evaluation-tasks/{task_id}/report", {
+            "assignment_id": assignment_id,
+            "score": score,
+        })
 
     def create_validation_result(self, submission_id: str, verdict: str, score: int, comment: str, idempotency_key: str) -> dict[str, Any]:
         """POST /api/core/v1/validation-results"""
@@ -430,7 +433,7 @@ class PlatformClient:
 
     def list_validation_results(self, **params: Any) -> list[dict[str, Any]]:
         """GET /api/core/v1/validation-results"""
-        query = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
+        query = urlencode({k: v for k, v in params.items() if v is not None})
         path = "/api/core/v1/validation-results"
         if query:
             path = f"{path}?{query}"

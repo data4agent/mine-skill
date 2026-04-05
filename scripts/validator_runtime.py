@@ -8,7 +8,6 @@ import uuid
 from typing import Any
 
 from common import (
-    resolve_credit_interval,
     resolve_eval_timeout,
     resolve_platform_base_url,
     resolve_validator_id,
@@ -82,14 +81,20 @@ class ValidatorRuntime:
             app_status = str(app.get("status") or "")
             if app_status == "pending_review":
                 log.warning("Validator application is pending review, cannot start yet")
+                with self._lock:
+                    self._running = False
                 return self.status()
             if app_status == "rejected":
                 log.warning("Validator application was rejected")
+                with self._lock:
+                    self._running = False
                 return self.status()
             if not app_status:
                 log.info("No validator application found, submitting one")
                 self._platform.submit_validator_application()
                 log.info("Validator application submitted, waiting for approval")
+                with self._lock:
+                    self._running = False
                 return self.status()
         except Exception as exc:
             log.warning("Validator application check failed: %s (proceeding anyway)", exc)
@@ -181,12 +186,14 @@ class ValidatorRuntime:
             if not self._ws.connected:
                 try:
                     self._ws.reconnect_with_backoff()
-                    consecutive_ws_failures = 0
                 except Exception as exc:
-                    consecutive_ws_failures += 1
                     log.error("Reconnect error: %s", exc)
-                if not self._ws.connected:
-                    # WS 连接失败时回退到 HTTP polling
+                # 根据重连结果更新计数器
+                if self._ws.connected:
+                    consecutive_ws_failures = 0
+                else:
+                    consecutive_ws_failures += 1
+                    # WS 连续失败时回退到 HTTP polling
                     if consecutive_ws_failures >= 3:
                         self._poll_evaluation_task_http()
                     if self._stop_event.wait(timeout=5):
@@ -221,31 +228,31 @@ class ValidatorRuntime:
         log.info("Main loop exited")
 
     def _poll_evaluation_task_http(self) -> None:
-        """HTTP polling fallback: claim evaluation task via REST API."""
+        """HTTP polling fallback when WS is unavailable."""
         if not self._eligible or self._paused:
             return
         try:
-            resp = self._platform._request("POST", "/api/mining/v1/evaluation-tasks/claim", None)
-            data = resp.get("data") if isinstance(resp, dict) else None
-            if not isinstance(data, dict):
+            claim_data = self._platform.claim_evaluation_task()
+            if not claim_data:
                 return
-            msg = WSMessage({"type": "evaluation_task", "data": data})
+            msg = WSMessage({"type": "evaluation_task", "data": claim_data})
             self._stats["tasks_received"] += 1
-            self._handle_evaluation_task(msg)
+            self._handle_evaluation_task(msg, via_http=True)
         except Exception as exc:
             error_str = str(exc)
             if "404" not in error_str and "409" not in error_str:
                 log.warning("HTTP poll claim failed: %s", exc)
 
-    def _handle_evaluation_task(self, msg: WSMessage) -> None:
+    def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
         """Process a single evaluation task assignment."""
         assignment_id = msg.assignment_id
         task_id = msg.task_id
         submission_id = msg.submission_id
 
-        # Step 1: ACK within 30s
-        self._ws.send_ack_eval(assignment_id)
-        log.info("ACK sent for assignment=%s task=%s", assignment_id, task_id)
+        # Step 1: ACK (HTTP claim is implicit ACK, WS needs explicit ACK)
+        if not via_http:
+            self._ws.send_ack_eval(assignment_id)
+        log.info("Task claimed: assignment=%s task=%s http=%s", assignment_id, task_id, via_http)
 
         # Step 2: Fetch task details and submission
         task_details = self._platform.get_evaluation_task(task_id)

@@ -91,6 +91,7 @@ class WorkerConfig:
     gateway_model_config: dict[str, Any] = field(default_factory=dict)
     # EIP-712 signature domain parameters
     eip712_domain_name: str = DEFAULT_EIP712_DOMAIN_NAME
+    eip712_domain_version: str = "1"
     eip712_chain_id: int = DEFAULT_EIP712_CHAIN_ID
     eip712_verifying_contract: str = DEFAULT_EIP712_VERIFYING_CONTRACT
 

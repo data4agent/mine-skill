@@ -554,11 +554,13 @@ class AgentWorker:
             self.state_store.save_session({"last_heartbeat_at": int(time.time())})
         except Exception as exc:
             summary.errors.append(f"miner heartbeat failed: {exc}")
-        # 加入矿工就绪池以接收 repeat crawl 任务
-        try:
-            self.client.join_miner_ready_pool()
-        except Exception as exc:
-            summary.errors.append(f"join miner ready pool failed: {exc}")
+        # 加入矿工就绪池（仅首次或掉线后重新加入）
+        if not getattr(self, "_miner_ready_pool_joined", False):
+            try:
+                self.client.join_miner_ready_pool()
+                self._miner_ready_pool_joined = True
+            except Exception as exc:
+                summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
 
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
@@ -700,10 +702,6 @@ class AgentWorker:
         terminal_state = self._handle_preflight_common(item, writer=writer, command=command)
         if terminal_state == "occupancy_blocked":
             raise SkipItemError(f"URL already occupied for {item.url}")
-        if terminal_state == "preflight_rejected":
-            raise SkipItemError(f"preflight rejected for {item.item_id}")
-        if terminal_state == "challenge_received_but_unsolved":
-            raise SkipItemError(f"challenge received but unsolved for {item.item_id}")
 
     def _handle_result(self, item: WorkItem, result: CrawlerRunResult, summary: WorkerIterationSummary) -> None:
         auth_pending = self.auth_orchestrator.handle_errors(item, result.errors)
@@ -817,6 +815,7 @@ class AgentWorker:
         return "processed"
 
     def _handle_preflight_common(self, item: WorkItem, writer: RunArtifactWriter | None, *, command: str) -> str | None:
+        """Pre-submission check: occupancy only. PoW challenges are handled on submission response."""
         if item.dataset_id and command != "discover-crawl":
             occupancy = self.client.check_url_occupancy(
                 item.dataset_id,
@@ -827,33 +826,6 @@ class AgentWorker:
                 writer.write_json("occupancy/response.json", occupancy if isinstance(occupancy, dict) else {})
             if occupancy.get("occupied"):
                 return "occupancy_blocked"
-
-        epoch_id = optional_string(item.metadata.get("epoch_id"))
-        if not item.dataset_id or not epoch_id:
-            return None
-        preflight = self.client.submit_preflight(item.dataset_id, epoch_id)
-        if writer is not None:
-            writer.write_json("preflight/response.json", preflight if isinstance(preflight, dict) else {})
-        preflight_data = preflight.get("data", {}) if isinstance(preflight, dict) else {}
-        if not isinstance(preflight_data, dict):
-            return None
-        if not preflight_data.get("allowed", True):
-            if writer is not None:
-                writer.write_json("preflight/rejection.json", preflight_data)
-            return "preflight_rejected"
-        challenge = preflight_data.get("challenge")
-        if isinstance(challenge, dict) and challenge:
-            if writer is not None:
-                writer.write_json("preflight/challenge.json", challenge)
-            try:
-                answer = solve_challenge(challenge)
-            except UnsupportedChallenge:
-                return "challenge_received_but_unsolved"
-            challenge_id = optional_string(challenge.get("id")) or optional_string(preflight_data.get("challenge_id")) or ""
-            if challenge_id and answer:
-                if writer is not None:
-                    writer.write_json("preflight/answer.json", {"challenge_id": challenge_id, "answer": answer})
-                self.client.answer_pow_challenge(challenge_id, answer)
         return None
 
     def _artifact_writer_for_item(self, item: WorkItem) -> RunArtifactWriter:
@@ -871,15 +843,16 @@ class AgentWorker:
         data = payload.get("data")
         source = data if isinstance(data, dict) else payload
         update: dict[str, Any] = {"last_heartbeat_at": int(time.time())}
-        # 从 miner 子对象提取信用相关字段
+        # 先从顶层读取（兼容旧格式）
+        for key in ("credit_score", "credit_tier", "epoch_id", "epoch_submitted", "epoch_target", "epoch_submit_limit", "pow_probability"):
+            if key in source:
+                update[key] = source[key]
+        # miner 子对象优先级更高（新格式），覆盖顶层同名字段
         miner_info = source.get("miner")
         if isinstance(miner_info, dict):
             for key in ("credit", "credit_tier", "epoch_submit_limit", "pow_probability"):
                 if key in miner_info:
                     update[key] = miner_info[key]
-        for key in ("credit_score", "credit_tier", "epoch_id", "epoch_submitted", "epoch_target", "epoch_submit_limit", "pow_probability"):
-            if key in source:
-                update[key] = source.get(key)
         credit = source.get("credit")
         if isinstance(credit, dict):
             update["credit"] = dict(credit)
@@ -1194,6 +1167,7 @@ def build_worker_from_env(*, auto_register_awp: bool = False) -> AgentWorker:
         gateway_model_config=gateway_model_config,
         # Signature params follow platform discovery/cache; env vars override when set.
         eip712_domain_name=str(signature_config.get("domain_name") or DEFAULT_EIP712_DOMAIN_NAME),
+        eip712_domain_version=str(signature_config.get("domain_version") or "1"),
         eip712_chain_id=int(signature_config.get("chain_id") or DEFAULT_EIP712_CHAIN_ID),
         eip712_verifying_contract=str(
             signature_config.get("verifying_contract") or DEFAULT_EIP712_VERIFYING_CONTRACT
@@ -1215,6 +1189,7 @@ def build_worker_from_env(*, auto_register_awp: bool = False) -> AgentWorker:
         signer=signer,
         eip712_chain_id=config.eip712_chain_id,
         eip712_domain_name=config.eip712_domain_name,
+        eip712_domain_version=config.eip712_domain_version,
         eip712_verifying_contract=config.eip712_verifying_contract,
     )
     runner = CrawlerRunner(config)
@@ -1324,6 +1299,8 @@ def _export_and_submit_core_submissions_for_task(
                     response = client.submit_core_submissions(payload)
                 except UnsupportedChallenge:
                     pass  # 无法解答的挑战类型，保留原始响应
+                except Exception:
+                    pass  # PoW 应答或重试失败，保留原始 challenge_required 响应
     response_path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return export_path, response_path
 

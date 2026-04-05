@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +11,17 @@ from urllib.parse import parse_qsl, quote, urlsplit
 from eth_account import Account
 from eth_account.messages import encode_typed_data
 from Crypto.Hash import keccak
+
+try:
+    from common import (
+        DEFAULT_EIP712_CHAIN_ID,
+        DEFAULT_EIP712_DOMAIN_NAME,
+        DEFAULT_EIP712_VERIFYING_CONTRACT,
+    )
+except ImportError:
+    DEFAULT_EIP712_CHAIN_ID = 8453
+    DEFAULT_EIP712_DOMAIN_NAME = "aDATA"
+    DEFAULT_EIP712_VERIFYING_CONTRACT = "0x0000000000000000000000000000000000000000"
 
 
 EMPTY_HASH = f"0x{'0' * 64}"
@@ -98,10 +108,10 @@ class PrivateKeySigner:
         content_type: str,
         now: int,
         nonce: int,
-        chain_id: int = 8453,
-        domain_name: str = "aDATA",
+        chain_id: int = DEFAULT_EIP712_CHAIN_ID,
+        domain_name: str = DEFAULT_EIP712_DOMAIN_NAME,
         domain_version: str = "1",
-        verifying_contract: str = "0x0000000000000000000000000000000000000000",
+        verifying_contract: str = DEFAULT_EIP712_VERIFYING_CONTRACT,
         signed_headers: tuple[str, ...] = DEFAULT_SIGNED_HEADERS,
     ) -> dict[str, Any]:
         """Build EIP-712 typed data matching platform's APIRequest schema."""
@@ -157,14 +167,16 @@ class PrivateKeySigner:
         body: dict[str, Any] | None = None,
         *,
         content_type: str = "application/json",
-        chain_id: int = 8453,
-        domain_name: str = "aDATA",
-        verifying_contract: str = "0x0000000000000000000000000000000000000000",
+        chain_id: int = DEFAULT_EIP712_CHAIN_ID,
+        domain_name: str = DEFAULT_EIP712_DOMAIN_NAME,
+        domain_version: str = "1",
+        verifying_contract: str = DEFAULT_EIP712_VERIFYING_CONTRACT,
     ) -> dict[str, str]:
         """Build EIP-712 signed auth headers for API request."""
         now = int(time.time())
-        nonce = secrets.randbits(52)
-        nonce_str = str(uuid.uuid4())
+        nonce_uuid = uuid.uuid4()
+        nonce = nonce_uuid.int  # UUID 128-bit 整数作为 EIP-712 uint256 nonce
+        nonce_str = str(nonce_uuid)  # UUID 字符串作为 X-Nonce 头
 
         typed_data = self.build_typed_data(
             method=method,
@@ -175,6 +187,7 @@ class PrivateKeySigner:
             nonce=nonce,
             chain_id=chain_id,
             domain_name=domain_name,
+            domain_version=domain_version,
             verifying_contract=verifying_contract,
         )
         signature = self.sign_typed_data(typed_data)

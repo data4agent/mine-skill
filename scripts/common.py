@@ -286,7 +286,7 @@ def _awp_request_json(method: str, base_url: str, path: str, payload: dict[str, 
     return body
 
 
-def _awp_jsonrpc(base_url: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+def _awp_jsonrpc(base_url: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
     """Call AWP API v2 using JSON-RPC format."""
     request_url = base_url.rstrip("/")
     payload = {
@@ -319,22 +319,36 @@ def _awp_post_json(base_url: str, path: str, payload: dict[str, Any]) -> dict[st
     return _awp_request_json("POST", base_url, path, payload)
 
 
-def _registration_domain_from_registry(registry: dict[str, Any]) -> dict[str, Any]:
-    # AWP contract is on Base (chainId=8453); registry API may return wrong chainId
-    AWP_CHAIN_ID = 8453
-    domain = registry.get("eip712Domain")
+def _registration_domain_from_registry(registry: dict[str, Any] | list[Any], chain_id: int = 8453) -> dict[str, Any]:
+    """Extract EIP-712 domain from registry API response.
+
+    The registry.get RPC returns a list (multi-chain) or a single dict.
+    Select the matching chain entry, then extract eip712Domain.
+    """
+    entry: dict[str, Any] = {}
+    if isinstance(registry, list):
+        for item in registry:
+            if isinstance(item, dict) and int(item.get("chainId") or 0) == chain_id:
+                entry = item
+                break
+        if not entry and registry:
+            entry = registry[0] if isinstance(registry[0], dict) else {}
+    elif isinstance(registry, dict):
+        entry = registry
+
+    domain = entry.get("eip712Domain")
     if isinstance(domain, dict):
         return {
             "name": str(domain.get("name") or "AWPRegistry"),
             "version": str(domain.get("version") or "1"),
-            "chainId": AWP_CHAIN_ID,
-            "verifyingContract": str(domain.get("verifyingContract") or registry.get("awpRegistry") or ""),
+            "chainId": int(domain.get("chainId") or chain_id),
+            "verifyingContract": str(domain.get("verifyingContract") or entry.get("awpRegistry") or ""),
         }
     return {
         "name": "AWPRegistry",
         "version": "1",
-        "chainId": AWP_CHAIN_ID,
-        "verifyingContract": str(registry.get("awpRegistry") or ""),
+        "chainId": chain_id,
+        "verifyingContract": str(entry.get("awpRegistry") or ""),
     }
 
 
@@ -493,7 +507,7 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
             },
         )
         result["tx_hash"] = str(relay.get("txHash") or relay.get("tx_hash") or "").strip()
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, AttributeError, TypeError) as exc:
         result["status"] = "auto_register_failed"
         result["message"] = f"auto registration failed: {exc}"
         return result
