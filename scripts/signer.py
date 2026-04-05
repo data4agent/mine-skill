@@ -7,6 +7,8 @@ import os
 import secrets
 import subprocess
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlsplit
 
@@ -210,7 +212,7 @@ class WalletSigner:
                 "bodyHash": _hash_body(body, content_type),
                 "nonce": nonce,
                 "issuedAt": now,
-                "expiresAt": now + 60,
+                "expiresAt": now + 300,
             },
         }
 
@@ -227,6 +229,7 @@ class WalletSigner:
     ) -> dict[str, str]:
         now = int(time.time())
         nonce = secrets.randbits(52)
+        nonce_str = str(uuid.uuid4())
         typed_data = self.build_typed_data(
             method=method,
             url=url,
@@ -240,13 +243,15 @@ class WalletSigner:
         )
         signature = self.sign_typed_data(typed_data)
         message = typed_data["message"]
+        issued_at = datetime.fromtimestamp(message["issuedAt"], tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expires_at = datetime.fromtimestamp(message["expiresAt"], tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         return {
             "Content-Type": content_type,
             "X-Signer": self.get_address(),
             "X-Signature": signature,
-            "X-Nonce": str(message["nonce"]),
-            "X-Issued-At": str(message["issuedAt"]),
-            "X-Expires-At": str(message["expiresAt"]),
+            "X-Nonce": nonce_str,
+            "X-Issued-At": issued_at,
+            "X-Expires-At": expires_at,
             "X-Chain-Id": str(chain_id),
             "X-Signed-Headers": ",".join(DEFAULT_SIGNED_HEADERS),
         }

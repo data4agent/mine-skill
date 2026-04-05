@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import secrets
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlsplit
 
@@ -144,7 +146,7 @@ class PrivateKeySigner:
                 "bodyHash": _hash_body(body, content_type),
                 "nonce": nonce,
                 "issuedAt": now,
-                "expiresAt": now + 60,
+                "expiresAt": now + 300,
             },
         }
 
@@ -162,6 +164,7 @@ class PrivateKeySigner:
         """Build EIP-712 signed auth headers for API request."""
         now = int(time.time())
         nonce = secrets.randbits(52)
+        nonce_str = str(uuid.uuid4())
 
         typed_data = self.build_typed_data(
             method=method,
@@ -176,14 +179,16 @@ class PrivateKeySigner:
         )
         signature = self.sign_typed_data(typed_data)
         message = typed_data["message"]
+        issued_at = datetime.fromtimestamp(message["issuedAt"], tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expires_at = datetime.fromtimestamp(message["expiresAt"], tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         return {
             "Content-Type": content_type,
             "X-Signer": self._address,
             "X-Signature": f"0x{signature}" if not signature.startswith("0x") else signature,
-            "X-Nonce": str(message["nonce"]),
-            "X-Issued-At": str(message["issuedAt"]),
-            "X-Expires-At": str(message["expiresAt"]),
+            "X-Nonce": nonce_str,
+            "X-Issued-At": issued_at,
+            "X-Expires-At": expires_at,
             "X-Chain-Id": str(chain_id),
             "X-Signed-Headers": ",".join(DEFAULT_SIGNED_HEADERS),
         }

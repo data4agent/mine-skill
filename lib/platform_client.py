@@ -81,6 +81,10 @@ class PlatformClient:
     def report_repeat_crawl_task_result(self, task_id: str, payload: dict[str, Any]) -> None:
         return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/report", payload)
 
+    def reject_repeat_crawl_task(self, task_id: str) -> dict[str, Any]:
+        """POST /api/mining/v1/repeat-crawl-tasks/{id}/reject — 无惩罚拒绝任务"""
+        return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/reject", {})
+
     def report_refresh_task_result(self, task_id: str, payload: dict[str, Any]) -> None:
         return self._request("POST", f"/api/mining/v1/refresh-tasks/{task_id}/report", payload)
 
@@ -113,13 +117,12 @@ class PlatformClient:
                 return [item for item in items if isinstance(item, dict)]
         return []
 
-    def send_unified_heartbeat(self, *, client_name: str, ip_address: str = "") -> dict[str, Any]:
+    def send_unified_heartbeat(self, *, client_name: str) -> dict[str, Any]:
         return self._request(
             "POST",
             "/api/mining/v1/heartbeat",
             {
                 "client": client_name,
-                "ip_address": ip_address,
             },
         )
 
@@ -186,6 +189,24 @@ class PlatformClient:
             for key, value in payload.items()
             if value not in (None, "", [], {})
         }
+
+    def join_miner_ready_pool(self) -> dict[str, Any]:
+        """POST /api/mining/v1/miners/ready — 加入矿工就绪池以接收 repeat crawl 任务"""
+        return self._request("POST", "/api/mining/v1/miners/ready", {})
+
+    def leave_miner_ready_pool(self) -> dict[str, Any]:
+        """POST /api/mining/v1/miners/unready — 离开矿工就绪池"""
+        return self._request("POST", "/api/mining/v1/miners/unready", {})
+
+    def check_dedup_by_hash(self, dataset_id: str, dedup_hash: str) -> dict[str, Any]:
+        """GET /api/core/v1/dedup/check — 按 hash 检查去重"""
+        resp = self._request(
+            "GET",
+            f"/api/core/v1/dedup/check?dataset_id={quote(dataset_id, safe='')}&dedup_hash={quote(dedup_hash, safe='')}",
+            None,
+        )
+        data = resp.get("data")
+        return data if isinstance(data, dict) else {}
 
     def fetch_miner_status(self) -> dict[str, Any]:
         miner_id = self._signer.get_address() if self._signer else ""
@@ -310,18 +331,27 @@ class PlatformClient:
             except httpx.HTTPStatusError as error:
                 last_error = error
                 status_code = error.response.status_code
+                # 解析结构化错误响应
+                error_code = ""
+                error_message = ""
+                error_retryable = False
+                error_category = ""
+                try:
+                    error_payload = error.response.json()
+                except ValueError:
+                    error_payload = {}
+                if isinstance(error_payload, dict):
+                    # 兼容两种错误格式：顶层字段或嵌套 error 对象
+                    error_body = error_payload.get("error")
+                    if isinstance(error_body, dict):
+                        error_code = str(error_body.get("code") or "")
+                        error_message = str(error_body.get("message") or "")
+                    else:
+                        error_code = str(error_payload.get("code") or "")
+                        error_message = str(error_payload.get("message") or "")
+                    error_retryable = bool(error_payload.get("retryable", False))
+                    error_category = str(error_payload.get("category") or "")
                 if status_code == 401:
-                    error_code = ""
-                    error_message = ""
-                    try:
-                        error_payload = error.response.json()
-                    except ValueError:
-                        error_payload = {}
-                    if isinstance(error_payload, dict):
-                        error_body = error_payload.get("error")
-                        if isinstance(error_body, dict):
-                            error_code = str(error_body.get("code") or "")
-                            error_message = str(error_body.get("message") or "")
                     if error_code == "MISSING_HEADERS":
                         raise RuntimeError(
                             "Platform API requires Web3 signature headers. "
@@ -340,9 +370,11 @@ class PlatformClient:
                             self._last_wallet_refresh = renew_session(duration_seconds=WALLET_SESSION_DURATION_SECONDS)
                             renewed_session = True
                             continue
-                if status_code < 500 or attempt >= self._max_retries:
-                    raise
-                time.sleep(0.5 * attempt)
+                # 可重试的服务端错误或标记为 retryable 的错误
+                if (status_code >= 500 or error_retryable) and attempt < self._max_retries:
+                    time.sleep(0.5 * attempt)
+                    continue
+                raise
         if last_error is not None:
             raise last_error
         raise RuntimeError(f"request failed for {method} {path}")
@@ -379,9 +411,12 @@ class PlatformClient:
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
-    def report_evaluation(self, task_id: str, score: int) -> dict[str, Any]:
+    def report_evaluation(self, task_id: str, score: int, *, assignment_id: str = "") -> dict[str, Any]:
         """POST /api/mining/v1/evaluation-tasks/{id}/report"""
-        return self._request("POST", f"/api/mining/v1/evaluation-tasks/{task_id}/report", {"score": score})
+        body: dict[str, Any] = {"score": score}
+        if assignment_id:
+            body["assignment_id"] = assignment_id
+        return self._request("POST", f"/api/mining/v1/evaluation-tasks/{task_id}/report", body)
 
     def create_validation_result(self, submission_id: str, verdict: str, score: int, comment: str, idempotency_key: str) -> dict[str, Any]:
         """POST /api/core/v1/validation-results"""

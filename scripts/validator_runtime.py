@@ -57,6 +57,9 @@ class ValidatorRuntime:
             "tasks_rejected": 0,
             "errors": 0,
         }
+        # 从 heartbeat 响应中动态更新
+        self._eligible = True
+        self._min_task_interval = 30
 
     # ------------------------------------------------------------------
     # Public control API
@@ -72,6 +75,24 @@ class ValidatorRuntime:
             self._stop_event.clear()
 
         log.info("ValidatorRuntime starting (id=%s)", self._validator_id)
+
+        # 检查 validator 申请状态
+        try:
+            app = self._platform.get_my_validator_application()
+            app_status = str(app.get("status") or "")
+            if app_status == "pending_review":
+                log.warning("Validator application is pending review, cannot start yet")
+                return self.status()
+            if app_status == "rejected":
+                log.warning("Validator application was rejected")
+                return self.status()
+            if not app_status:
+                log.info("No validator application found, submitting one")
+                self._platform.submit_validator_application()
+                log.info("Validator application submitted, waiting for approval")
+                return self.status()
+        except Exception as exc:
+            log.warning("Validator application check failed: %s (proceeding anyway)", exc)
 
         try:
             self._ws.connect()
@@ -154,14 +175,20 @@ class ValidatorRuntime:
     # ------------------------------------------------------------------
 
     def _main_loop(self) -> None:
-        """WS receive loop: receive messages, ACK, evaluate, report."""
+        """WS receive loop with HTTP polling fallback."""
+        consecutive_ws_failures = 0
         while self._running:
             if not self._ws.connected:
                 try:
                     self._ws.reconnect_with_backoff()
+                    consecutive_ws_failures = 0
                 except Exception as exc:
+                    consecutive_ws_failures += 1
                     log.error("Reconnect error: %s", exc)
                 if not self._ws.connected:
+                    # WS 连接失败时回退到 HTTP polling
+                    if consecutive_ws_failures >= 3:
+                        self._poll_evaluation_task_http()
                     if self._stop_event.wait(timeout=5):
                         break
                     continue
@@ -177,6 +204,9 @@ class ValidatorRuntime:
 
             if msg.type == "evaluation_task":
                 self._stats["tasks_received"] += 1
+                if not self._eligible:
+                    log.info("Not eligible — ignoring evaluation_task %s", msg.assignment_id)
+                    continue
                 if self._paused:
                     log.info("Paused — ignoring evaluation_task %s", msg.assignment_id)
                     continue
@@ -189,6 +219,23 @@ class ValidatorRuntime:
                 log.debug("Ignoring message type=%s", msg.type)
 
         log.info("Main loop exited")
+
+    def _poll_evaluation_task_http(self) -> None:
+        """HTTP polling fallback: claim evaluation task via REST API."""
+        if not self._eligible or self._paused:
+            return
+        try:
+            resp = self._platform._request("POST", "/api/mining/v1/evaluation-tasks/claim", None)
+            data = resp.get("data") if isinstance(resp, dict) else None
+            if not isinstance(data, dict):
+                return
+            msg = WSMessage({"type": "evaluation_task", "data": data})
+            self._stats["tasks_received"] += 1
+            self._handle_evaluation_task(msg)
+        except Exception as exc:
+            error_str = str(exc)
+            if "404" not in error_str and "409" not in error_str:
+                log.warning("HTTP poll claim failed: %s", exc)
 
     def _handle_evaluation_task(self, msg: WSMessage) -> None:
         """Process a single evaluation task assignment."""
@@ -216,7 +263,7 @@ class ValidatorRuntime:
 
         # Step 4/5: Report based on consistency
         if result.consistent:
-            self._platform.report_evaluation(task_id, result.score)
+            self._platform.report_evaluation(task_id, result.score, assignment_id=assignment_id)
             self._stats["tasks_accepted"] += 1
             log.info(
                 "Evaluation reported: task=%s score=%d verdict=%s",
@@ -227,17 +274,16 @@ class ValidatorRuntime:
             self._platform.create_validation_result(
                 submission_id, "rejected", 0, result.reason, idempotency_key
             )
-            self._platform.report_evaluation(task_id, 0)
+            self._platform.report_evaluation(task_id, 0, assignment_id=assignment_id)
             self._stats["tasks_rejected"] += 1
             log.info(
                 "Evaluation rejected: task=%s reason=%s",
                 task_id, result.reason[:120],
             )
 
-        # Step 6: Wait credit interval, then rejoin ready pool
-        credit_tier = str(task_details.get("credit_tier") or "novice")
-        wait_seconds = resolve_credit_interval(credit_tier)
-        log.info("Waiting %ds (credit_tier=%s) before rejoining ready pool", wait_seconds, credit_tier)
+        # Step 6: Wait min_task_interval, then rejoin ready pool
+        wait_seconds = self._min_task_interval
+        log.info("Waiting %ds (min_task_interval) before rejoining ready pool", wait_seconds)
         if self._stop_event.wait(timeout=wait_seconds):
             return
         try:
@@ -255,9 +301,19 @@ class ValidatorRuntime:
         log.info("Heartbeat loop exited")
 
     def _send_heartbeat(self) -> None:
-        """Send a single heartbeat."""
+        """Send a single heartbeat and update runtime state from response."""
         try:
-            self._platform.send_unified_heartbeat(client_name=f"validator-{self._validator_id}")
+            resp = self._platform.send_unified_heartbeat(client_name=f"validator-{self._validator_id}")
+            data = resp.get("data") if isinstance(resp, dict) else None
+            if isinstance(data, dict):
+                validator_info = data.get("validator")
+                if isinstance(validator_info, dict):
+                    self._eligible = validator_info.get("eligible", True)
+                    interval = validator_info.get("min_task_interval_seconds")
+                    if isinstance(interval, (int, float)) and interval > 0:
+                        self._min_task_interval = int(interval)
+                    if not self._eligible:
+                        log.warning("Validator not eligible (evicted or suspended)")
             log.debug("Heartbeat sent")
         except Exception as exc:
             log.warning("Heartbeat failed: %s", exc)

@@ -39,6 +39,15 @@ class WSMessage:
     def mode(self) -> str:
         return str(self.data.get("mode") or "single")
 
+    @property
+    def golden(self) -> bool:
+        return bool(self.data.get("golden", False))
+
+    @property
+    def repeat_crawl_task_id(self) -> str:
+        """repeat_crawl_task 消息中的任务 ID"""
+        return str(self.data.get("id") or "")
+
     def __repr__(self) -> str:
         return f"WSMessage(type={self.type!r}, task_id={self.task_id!r}, assignment_id={self.assignment_id!r})"
 
@@ -112,6 +121,16 @@ class ValidatorWSClient:
         """Send evaluation task acknowledgment. Must be called within 30s of receiving task."""
         self._send({"ack_eval": assignment_id})
         log.info("Sent ack_eval for assignment %s", assignment_id)
+
+    def send_ack_repeat_crawl(self, task_id: str) -> None:
+        """Acknowledge repeat crawl task, starts 5-min lease."""
+        self._send({"ack": task_id})
+        log.info("Sent ack for repeat crawl task %s", task_id)
+
+    def send_reject_repeat_crawl(self, task_id: str) -> None:
+        """Reject repeat crawl task, no penalty."""
+        self._send({"reject": task_id})
+        log.info("Sent reject for repeat crawl task %s", task_id)
 
     def receive(self, timeout: float = 30.0) -> WSMessage | None:
         """

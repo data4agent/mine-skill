@@ -110,6 +110,7 @@ def _normalize_signature_config(payload: dict[str, Any], *, fetched_at: int | No
     return {
         "scheme": str(body.get("scheme") or DEFAULT_SIGNATURE_SCHEME),
         "domain_name": str(body.get("domain_name") or domain.get("name") or DEFAULT_EIP712_DOMAIN_NAME),
+        "domain_version": str(body.get("domain_version") or domain.get("version") or "1"),
         "chain_id": chain_id,
         "verifying_contract": str(
             body.get("verifying_contract") or domain.get("verifying_contract") or DEFAULT_EIP712_VERIFYING_CONTRACT
@@ -137,6 +138,7 @@ def _default_signature_config() -> dict[str, Any]:
     return {
         "scheme": DEFAULT_SIGNATURE_SCHEME,
         "domain_name": DEFAULT_EIP712_DOMAIN_NAME,
+        "domain_version": "1",
         "chain_id": DEFAULT_EIP712_CHAIN_ID,
         "verifying_contract": DEFAULT_EIP712_VERIFYING_CONTRACT,
         "required_headers": list(DEFAULT_SIGNATURE_REQUIRED_HEADERS),
@@ -819,7 +821,9 @@ DEFAULT_VALIDATOR_ID = "validator-agent"
 DEFAULT_EVAL_TIMEOUT = 120
 
 CREDIT_TIER_INTERVALS = {
-    "novice": 120,
+    "novice": 600,
+    "restricted": 300,
+    "normal": 120,
     "good": 30,
     "excellent": 10,
 }

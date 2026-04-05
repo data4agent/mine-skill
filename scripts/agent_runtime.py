@@ -554,6 +554,11 @@ class AgentWorker:
             self.state_store.save_session({"last_heartbeat_at": int(time.time())})
         except Exception as exc:
             summary.errors.append(f"miner heartbeat failed: {exc}")
+        # 加入矿工就绪池以接收 repeat crawl 任务
+        try:
+            self.client.join_miner_ready_pool()
+        except Exception as exc:
+            summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
 
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
@@ -866,7 +871,13 @@ class AgentWorker:
         data = payload.get("data")
         source = data if isinstance(data, dict) else payload
         update: dict[str, Any] = {"last_heartbeat_at": int(time.time())}
-        for key in ("credit_score", "credit_tier", "epoch_id", "epoch_submitted", "epoch_target"):
+        # 从 miner 子对象提取信用相关字段
+        miner_info = source.get("miner")
+        if isinstance(miner_info, dict):
+            for key in ("credit", "credit_tier", "epoch_submit_limit", "pow_probability"):
+                if key in miner_info:
+                    update[key] = miner_info[key]
+        for key in ("credit_score", "credit_tier", "epoch_id", "epoch_submitted", "epoch_target", "epoch_submit_limit", "pow_probability"):
             if key in source:
                 update[key] = source.get(key)
         credit = source.get("credit")
@@ -1300,6 +1311,19 @@ def _export_and_submit_core_submissions_for_task(
             response_path.write_text(json.dumps(response_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return export_path, response_path
     response = client.submit_core_submissions(payload)
+    # 处理 PoW 挑战：如果 admission_status 为 challenge_required，回答挑战后重新提交
+    resp_data = response.get("data") if isinstance(response, dict) else None
+    if isinstance(resp_data, dict) and resp_data.get("admission_status") == "challenge_required":
+        challenge = resp_data.get("challenge")
+        if isinstance(challenge, dict) and challenge:
+            challenge_id = str(challenge.get("id") or "")
+            if challenge_id:
+                try:
+                    answer = solve_challenge(challenge)
+                    client.answer_pow_challenge(challenge_id, answer)
+                    response = client.submit_core_submissions(payload)
+                except UnsupportedChallenge:
+                    pass  # 无法解答的挑战类型，保留原始响应
     response_path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return export_path, response_path
 
