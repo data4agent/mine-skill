@@ -327,7 +327,7 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
             SYM_DIVIDER,
         ])
         for index, dataset in enumerate(datasets, start=1):
-            dataset_id = str(dataset.get("id") or f"dataset-{index}")
+            dataset_id = str(dataset.get("dataset_id") or dataset.get("id") or f"dataset-{index}")
             domains = dataset.get("source_domains")
             if isinstance(domains, list):
                 domain_text = ", ".join(str(item) for item in domains[:2])
@@ -598,7 +598,7 @@ def render_epoch_progress(
 
     # Per-dataset progress bars
     for ds in datasets:
-        ds_id = str(ds.get("id") or "unknown")
+        ds_id = str(ds.get("dataset_id") or ds.get("id") or "unknown")
         ds_submitted = int(ds.get("submitted") or 0)
         ds_target = int(ds.get("target") or 80)
         bar = text_progress_bar(ds_submitted, ds_target, width=16)

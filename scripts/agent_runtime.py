@@ -160,7 +160,7 @@ class AgentWorker:
 
     def start_working(self, *, selected_dataset_ids: list[str] | None = None) -> dict[str, Any]:
         datasets = self.client.list_datasets()
-        dataset_ids = [str(dataset.get("id") or "").strip() for dataset in datasets if str(dataset.get("id") or "").strip()]
+        dataset_ids = [str(dataset.get("dataset_id") or dataset.get("id") or "").strip() for dataset in datasets if str(dataset.get("dataset_id") or dataset.get("id") or "").strip()]
         session = self.state_store.load_session()
         current_selected = [str(dataset_id) for dataset_id in (session.get("selected_dataset_ids") or []) if str(dataset_id).strip()]
         requested_selected = (
@@ -238,7 +238,7 @@ class AgentWorker:
         cooldowns = self.state_store.active_dataset_cooldowns()
         annotated: list[dict[str, Any]] = []
         for dataset in datasets:
-            dataset_id = optional_string(dataset.get("id")) or ""
+            dataset_id = optional_string(dataset.get("dataset_id")) or optional_string(dataset.get("id")) or ""
             entry = dict(dataset)
             entry["selected"] = dataset_id in selected if dataset_id else False
             if dataset_id in cooldowns:

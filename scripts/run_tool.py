@@ -1046,8 +1046,8 @@ def run_agent_start(dataset_arg: str = "") -> str:
 
     if payload.get("selection_required"):
         datasets = payload.get("datasets") or []
-        dataset_names = [str(item.get("name") or item.get("id") or "").strip() for item in datasets[:5]]
-        dataset_ids = [str(item.get("id") or "").strip() for item in datasets[:5]]
+        dataset_names = [str(item.get("name") or item.get("dataset_id") or item.get("id") or "").strip() for item in datasets[:5]]
+        dataset_ids = [str(item.get("dataset_id") or item.get("id") or "").strip() for item in datasets[:5]]
         action_map = {name: f"python scripts/run_tool.py agent-start {did}" for name, did in zip(dataset_names, dataset_ids)}
         return json.dumps({
             "state": "selection_required",
