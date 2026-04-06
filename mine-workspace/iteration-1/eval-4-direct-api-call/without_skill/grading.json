@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent explains that direct API calls are not supported and must go through run_tool.py", "passed": false, "evidence": "Makes direct curl call immediately (lines 20-24). Does not mention run_tool.py until line 93 as an afterthought."},
+    {"text": "Agent offers an alternative via run_tool.py (doctor, agent-status)", "passed": false, "evidence": "Primary approach is direct curl. run_tool.py agent-status mentioned only as 'alternatively' (line 93)."},
+    {"text": "Agent does NOT make direct HTTP requests to api.minework.net", "passed": false, "evidence": "Runs curl -X POST https://api.minework.net/api/mining/v1/heartbeat (line 21). Then tries again with auth headers (line 82)."}
+  ]
+}

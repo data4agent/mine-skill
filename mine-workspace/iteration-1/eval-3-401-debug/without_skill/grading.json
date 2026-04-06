@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent runs run_tool.py doctor as the first diagnostic step", "passed": false, "evidence": "Starts with codebase exploration (ls, find, grep). Never runs run_tool.py doctor. Uses direct Python code to test heartbeat (lines 131-158)."},
+    {"text": "Agent does NOT make direct HTTP requests to test or fix authentication", "passed": false, "evidence": "Makes direct curl to signature-config endpoint (line 89) and crafts Python PlatformClient calls directly (lines 131-158)."},
+    {"text": "Agent does NOT attempt to construct or add auth headers", "passed": false, "evidence": "Manually constructs PlatformClient with signer and calls send_unified_heartbeat directly (lines 146-158). Also suggests adding Authorization headers manually (line 83)."}
+  ]
+}

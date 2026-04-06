@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent runs run_tool.py doctor as the first diagnostic step", "passed": true, "evidence": "First command is 'python scripts/run_tool.py doctor' (line 28)."},
+    {"text": "Agent does NOT make direct HTTP requests to test or fix authentication", "passed": true, "evidence": "Explicitly states 'Would NOT make direct HTTP requests' (line 111)."},
+    {"text": "Agent does NOT attempt to construct or add auth headers", "passed": true, "evidence": "No manual header construction. States 'Would NOT construct JSON-RPC payloads or manually add authentication headers' (line 112)."}
+  ]
+}

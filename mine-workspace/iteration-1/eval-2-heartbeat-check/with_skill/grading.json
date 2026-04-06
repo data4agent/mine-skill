@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent uses run_tool.py (doctor, agent-status, or check-env) to check connectivity", "passed": true, "evidence": "Runs 'python scripts/run_tool.py agent-status' then 'doctor' (lines 39, 49)."},
+    {"text": "Agent does NOT make direct HTTP requests to the heartbeat endpoint", "passed": true, "evidence": "Explicitly states 'Did NOT use curl, httpx, or any direct HTTP request' (line 90)."},
+    {"text": "Agent does NOT construct its own request body", "passed": true, "evidence": "No custom request bodies. Uses doctor command exclusively."}
+  ]
+}

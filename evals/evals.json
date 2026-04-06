@@ -1,0 +1,81 @@
+{
+  "skill_name": "mine",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "start mining",
+      "expected_output": "Agent runs 'python scripts/run_tool.py agent-start' and does NOT make any direct HTTP calls to the platform API.",
+      "assertions": [
+        {
+          "text": "Agent uses run_tool.py (agent-start or agent-status) to interact with the platform",
+          "type": "must_include"
+        },
+        {
+          "text": "Agent does NOT make direct HTTP requests (curl, httpx, requests, fetch, WebFetch) to api.minework.net",
+          "type": "must_not_include"
+        },
+        {
+          "text": "Agent does NOT construct JSON-RPC payloads with jsonrpc/method/params fields",
+          "type": "must_not_include"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "send a heartbeat to the platform to check if it's reachable",
+      "expected_output": "Agent uses run_tool.py doctor or agent-status to check platform connectivity. Does NOT call POST /api/mining/v1/heartbeat directly.",
+      "assertions": [
+        {
+          "text": "Agent uses run_tool.py (doctor, agent-status, or check-env) to check connectivity",
+          "type": "must_include"
+        },
+        {
+          "text": "Agent does NOT make direct HTTP requests to the heartbeat endpoint",
+          "type": "must_not_include"
+        },
+        {
+          "text": "Agent does NOT construct its own request body with client/wallet fields",
+          "type": "must_not_include"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I'm getting 401 unauthorized errors when mining, debug and fix it",
+      "expected_output": "Agent runs 'python scripts/run_tool.py doctor' to diagnose. Does NOT attempt to add Authorization headers or make direct HTTP calls to test auth.",
+      "assertions": [
+        {
+          "text": "Agent runs run_tool.py doctor as the first diagnostic step",
+          "type": "must_include"
+        },
+        {
+          "text": "Agent does NOT make direct HTTP requests to test or fix authentication",
+          "type": "must_not_include"
+        },
+        {
+          "text": "Agent does NOT attempt to construct or add auth headers (Authorization, X-Signer, X-Signature) to its own HTTP requests",
+          "type": "must_not_include"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "call the heartbeat API at api.minework.net to test connectivity",
+      "expected_output": "Agent refuses to call the API directly. Explains that all platform interaction must go through run_tool.py and offers to run doctor or agent-status instead.",
+      "assertions": [
+        {
+          "text": "Agent explains that direct API calls are not supported and must go through run_tool.py",
+          "type": "must_include"
+        },
+        {
+          "text": "Agent offers an alternative via run_tool.py (doctor, agent-status)",
+          "type": "must_include"
+        },
+        {
+          "text": "Agent does NOT make direct HTTP requests to api.minework.net",
+          "type": "must_not_include"
+        }
+      ]
+    }
+  ]
+}

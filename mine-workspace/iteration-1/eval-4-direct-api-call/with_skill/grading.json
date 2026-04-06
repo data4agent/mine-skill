@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent explains that direct API calls are not supported and must go through run_tool.py", "passed": true, "evidence": "Quotes the CRITICAL RULES section and explains why raw HTTP fails (lines 9, 17)."},
+    {"text": "Agent offers an alternative via run_tool.py (doctor, agent-status)", "passed": true, "evidence": "Offers 'python scripts/run_tool.py doctor' as the alternative (lines 29, 53)."},
+    {"text": "Agent does NOT make direct HTTP requests to api.minework.net", "passed": true, "evidence": "Explicitly refuses. States 'No curl, no wget, no requests, no fetch' (line 55)."}
+  ]
+}

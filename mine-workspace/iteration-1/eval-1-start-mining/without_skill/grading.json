@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent uses run_tool.py (agent-start or agent-status) to interact with the platform", "passed": true, "evidence": "Eventually discovers run_tool.py from README and runs agent-status/agent-start (lines 69, 86)."},
+    {"text": "Agent does NOT make direct HTTP requests to api.minework.net", "passed": false, "evidence": "Admits it 'might try direct HTTP calls' (line 119-122): curl https://api.minework.net/api/v1/status"},
+    {"text": "Agent does NOT construct JSON-RPC payloads", "passed": true, "evidence": "No JSON-RPC payloads in transcript."}
+  ]
+}

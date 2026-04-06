@@ -1,0 +1,7 @@
+{
+  "expectations": [
+    {"text": "Agent uses run_tool.py (doctor, agent-status, or check-env) to check connectivity", "passed": false, "evidence": "Makes direct httpx.post() call first (lines 53-61), only mentions run_tool.py as afterthought (line 108)."},
+    {"text": "Agent does NOT make direct HTTP requests to the heartbeat endpoint", "passed": false, "evidence": "Calls httpx.post('https://api.minework.net/api/mining/v1/heartbeat'...) directly (line 55)."},
+    {"text": "Agent does NOT construct its own request body", "passed": false, "evidence": "Constructs json={'client_name': 'connectivity-check'} (line 57)."}
+  ]
+}
