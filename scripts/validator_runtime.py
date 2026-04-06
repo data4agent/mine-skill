@@ -1,10 +1,23 @@
-"""ValidatorRuntime – main event loop for the validator agent."""
+"""ValidatorRuntime – main event loop for the validator agent.
+
+Optimized with patterns from example-worker.py:
+- Consecutive failure tracking with alerting (#1)
+- Status file for external monitoring (#4)
+- JSONL history logging (#5)
+- Hot-reloadable config file (#6)
+- Auto-restart on crash (#7)
+- Notification system via openclaw message (#8)
+- Stats persistence across restarts (#9)
+"""
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
-import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from common import (
@@ -18,6 +31,7 @@ log = logging.getLogger("validator.runtime")
 
 HEARTBEAT_INTERVAL = 55
 WS_RECEIVE_TIMEOUT = 30.0
+FALLBACK_ALERT_THRESHOLD = 5
 
 
 class ValidatorRuntime:
@@ -31,6 +45,7 @@ class ValidatorRuntime:
         engine: EvaluationEngine | None = None,
         validator_id: str = "",
         heartbeat_interval: int = HEARTBEAT_INTERVAL,
+        state_dir: str = "",
     ) -> None:
         self._platform = platform_client
         self._ws = ws_client
@@ -51,10 +66,146 @@ class ValidatorRuntime:
             "tasks_accepted": 0,
             "tasks_rejected": 0,
             "errors": 0,
+            "consecutive_failures": 0,
         }
+        self._start_time = time.monotonic()
         # Dynamically updated from heartbeat response
         self._eligible = True
         self._min_task_interval = 30
+        self._last_action = ""
+        self._last_action_at = ""
+        self._recent_actions: list[dict[str, str]] = []
+
+        # File paths for persistence
+        suffix = f"-{self._validator_id}" if self._validator_id else ""
+        if state_dir:
+            base = Path(state_dir)
+        else:
+            base = Path(os.environ.get("VALIDATOR_OUTPUT_ROOT", "output/validator-runs"))
+        base.mkdir(parents=True, exist_ok=True)
+        self._status_file = base / f"validator{suffix}-status.json"
+        self._history_file = base / f"validator{suffix}-history.jsonl"
+        self._config_file = base / f"validator{suffix}-config.json"
+
+    # ------------------------------------------------------------------
+    # Persistence (#4, #5, #9)
+    # ------------------------------------------------------------------
+
+    def _write_status(self) -> None:
+        """Write current status to JSON file for external monitoring."""
+        status = {
+            "running": self._running,
+            "pid": os.getpid(),
+            "uptime_seconds": int(time.monotonic() - self._start_time),
+            "validator_id": self._validator_id,
+            "eligible": self._eligible,
+            "ws_connected": self._ws.connected,
+            "stats": dict(self._stats),
+            "last_action": self._last_action,
+            "last_action_at": self._last_action_at,
+            "recent_actions": self._recent_actions[-30:],
+            "min_task_interval": self._min_task_interval,
+        }
+        try:
+            tmp = str(self._status_file) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(status, f, indent=2)
+            os.replace(tmp, str(self._status_file))
+        except OSError as e:
+            log.warning("Failed to write status file: %s", e)
+
+    def _restore_stats(self) -> None:
+        """Restore stats from previous run so counters survive restarts."""
+        try:
+            data = json.loads(self._status_file.read_text(encoding="utf-8"))
+            prev = data.get("stats", {})
+            for key in self._stats:
+                if key in prev and isinstance(prev[key], int):
+                    self._stats[key] = prev[key]
+            self._last_action = data.get("last_action", "")
+            self._last_action_at = data.get("last_action_at", "")
+            actions = data.get("recent_actions", [])
+            if isinstance(actions, list):
+                self._recent_actions = actions[-30:]
+            log.info("Restored stats from previous run: %s", self._stats)
+        except (OSError, json.JSONDecodeError, KeyError):
+            log.info("No previous stats to restore, starting fresh")
+
+    def _log_history(self, entry: dict[str, Any]) -> None:
+        """Append evaluation record to JSONL history file."""
+        entry["time"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            with open(self._history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    def _record_action(self, action: str, detail: dict[str, Any] | None = None) -> None:
+        """Record an action for status reporting."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self._last_action = action
+        self._last_action_at = now
+        entry: dict[str, Any] = {"time": now, "action": action}
+        if detail:
+            entry.update(detail)
+        self._recent_actions.append(entry)
+        if len(self._recent_actions) > 60:
+            del self._recent_actions[:len(self._recent_actions) - 30]
+
+    # ------------------------------------------------------------------
+    # Config (#6)
+    # ------------------------------------------------------------------
+
+    def _read_config(self) -> dict[str, Any]:
+        """Read hot-reloadable config. Edit the file to change behavior without restart."""
+        defaults: dict[str, Any] = {
+            "cli_timeout": 120,
+            "notify_enabled": False,
+            "notify_interval": 300,
+        }
+        try:
+            data = json.loads(self._config_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for key in defaults:
+                    if key in data:
+                        defaults[key] = data[key]
+        except (OSError, json.JSONDecodeError):
+            pass
+        return defaults
+
+    def _write_default_config(self) -> None:
+        """Write default config file if it does not exist."""
+        if self._config_file.exists():
+            return
+        try:
+            self._config_file.write_text(json.dumps({
+                "cli_timeout": 120,
+                "notify_enabled": False,
+                "notify_interval": 300,
+            }, indent=2), encoding="utf-8")
+            log.info("Config file created: %s", self._config_file)
+        except OSError:
+            pass
+
+    # ------------------------------------------------------------------
+    # Notification (#8)
+    # ------------------------------------------------------------------
+
+    def _send_notification(self, message: str) -> None:
+        """Send notification via openclaw message send (if configured)."""
+        cfg = self._read_config()
+        if not cfg.get("notify_enabled"):
+            return
+        try:
+            import subprocess
+            import shutil
+            openclaw_bin = shutil.which("openclaw") or "openclaw"
+            subprocess.run(
+                [openclaw_bin, "message", "send", "--message", message],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            log.warning("Failed to send notification")
 
     # ------------------------------------------------------------------
     # Public control API
@@ -78,6 +229,10 @@ class ValidatorRuntime:
             log.info("OpenClaw agent initialized: %s", agent_id)
         except Exception as exc:
             log.warning("OpenClaw init failed: %s (will retry on first eval)", exc)
+
+        # Restore stats from previous run (#9)
+        self._restore_stats()
+        self._write_default_config()
 
         # Check validator application status
         try:
@@ -124,6 +279,8 @@ class ValidatorRuntime:
         )
         self._main_thread.start()
 
+        self._record_action("started")
+        self._write_status()
         return self.status()
 
     def stop(self) -> dict[str, Any]:
@@ -148,6 +305,8 @@ class ValidatorRuntime:
         if self._main_thread and self._main_thread.is_alive():
             self._main_thread.join(timeout=10)
 
+        self._record_action("stopped")
+        self._write_status()
         return self.status()
 
     def pause(self) -> dict[str, Any]:
@@ -155,6 +314,8 @@ class ValidatorRuntime:
         with self._lock:
             self._paused = True
         log.info("ValidatorRuntime paused")
+        self._record_action("paused")
+        self._write_status()
         return self.status()
 
     def resume(self) -> dict[str, Any]:
@@ -162,6 +323,8 @@ class ValidatorRuntime:
         with self._lock:
             self._paused = False
         log.info("ValidatorRuntime resumed")
+        self._record_action("resumed")
+        self._write_status()
         return self.status()
 
     def status(self) -> dict[str, Any]:
@@ -176,7 +339,14 @@ class ValidatorRuntime:
             "state": state,
             "validator_id": self._validator_id,
             "ws_connected": self._ws.connected,
+            "eligible": self._eligible,
+            "uptime_seconds": int(time.monotonic() - self._start_time),
             "stats": dict(self._stats),
+            "last_action": self._last_action,
+            "last_action_at": self._last_action_at,
+            "status_file": str(self._status_file),
+            "history_file": str(self._history_file),
+            "config_file": str(self._config_file),
         }
 
     # ------------------------------------------------------------------
@@ -226,11 +396,21 @@ class ValidatorRuntime:
                     self._handle_evaluation_task(msg)
                 except Exception as exc:
                     self._stats["errors"] += 1
+                    self._stats["consecutive_failures"] += 1
                     log.error("Error handling evaluation task %s: %s", msg.assignment_id, exc)
+                    self._record_action(f"error: {exc}", {"task_id": msg.task_id})
+                    # Alert on consecutive failures (#1)
+                    if self._stats["consecutive_failures"] >= FALLBACK_ALERT_THRESHOLD:
+                        if self._stats["consecutive_failures"] % FALLBACK_ALERT_THRESHOLD == 0:
+                            alert = f"WARNING: {self._stats['consecutive_failures']} consecutive evaluation failures!"
+                            log.warning(alert)
+                            self._send_notification(alert)
+                    self._write_status()
             else:
                 log.debug("Ignoring message type=%s", msg.type)
 
         log.info("Main loop exited")
+        self._write_status()
 
     def _poll_evaluation_task_http(self) -> None:
         """HTTP polling fallback when WS is unavailable."""
@@ -300,18 +480,35 @@ class ValidatorRuntime:
             assignment_id=assignment_id,
             result=eval_result.result,
         )
+
+        # Reset consecutive failures on success (#1)
+        self._stats["consecutive_failures"] = 0
+
         if eval_result.result == "match":
             self._stats["tasks_accepted"] += 1
-            log.info(
-                "Evaluation reported: task=%s result=%s score=%d",
-                task_id, eval_result.result, eval_result.score,
-            )
+            action = f"match score={eval_result.score} task={task_id}"
+            log.info("Evaluation reported: %s", action)
         else:
             self._stats["tasks_rejected"] += 1
-            log.info(
-                "Evaluation reported: task=%s result=%s reason=%s",
-                task_id, eval_result.result, eval_result.reason[:120],
-            )
+            action = f"mismatch task={task_id} reason={eval_result.reason[:80]}"
+            log.info("Evaluation reported: %s", action)
+
+        self._record_action(action, {
+            "type": "evaluation",
+            "task_id": task_id,
+            "assignment_id": assignment_id,
+            "result": eval_result.result,
+            "score": eval_result.score,
+        })
+        self._log_history({
+            "type": "evaluation",
+            "task_id": task_id,
+            "assignment_id": assignment_id,
+            "result": eval_result.result,
+            "score": eval_result.score,
+            "reason": eval_result.reason,
+        })
+        self._write_status()
 
         # Step 6: Wait min_task_interval, then rejoin ready pool
         wait_seconds = self._min_task_interval
@@ -328,6 +525,7 @@ class ValidatorRuntime:
         """Send periodic heartbeats to the platform."""
         while self._running:
             self._send_heartbeat()
+            self._write_status()
             if self._stop_event.wait(timeout=self._heartbeat_interval):
                 break
         log.info("Heartbeat loop exited")

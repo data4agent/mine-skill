@@ -1866,13 +1866,37 @@ def main() -> int:
             )
 
             print(json.dumps({"status": "worker_started", "session_id": session_id}, ensure_ascii=False, indent=2))
-            result = runtime.start()
-            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-            try:
-                while runtime._running:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                runtime.stop()
+
+            # Auto-restart loop (#7): restart on crash up to 5 times
+            max_restarts = 5
+            restart_cooldown = 10
+            restarts = 0
+            while True:
+                try:
+                    result = runtime.start()
+                    print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+                    while runtime._running:
+                        time.sleep(1)
+                    break  # clean exit
+                except KeyboardInterrupt:
+                    runtime.stop()
+                    break
+                except Exception as loop_exc:
+                    restarts += 1
+                    print(json.dumps({"status": "crash", "restart": restarts, "error": str(loop_exc)}, ensure_ascii=False), flush=True)
+                    if restarts > max_restarts:
+                        print(json.dumps({"status": "error", "error": f"exceeded {max_restarts} restarts"}, ensure_ascii=False))
+                        store.update_session(status="error", error=f"exceeded {max_restarts} restarts: {loop_exc}")
+                        return 1
+                    time.sleep(restart_cooldown)
+                    # Re-initialize runtime for restart
+                    runtime = ValidatorRuntime(
+                        platform_client=platform,
+                        ws_client=ws,
+                        engine=engine,
+                        validator_id=resolve_validator_id(),
+                    )
+
             store.update_session(status="stopped")
             print(json.dumps(runtime.status(), ensure_ascii=False, indent=2))
         except Exception as exc:
