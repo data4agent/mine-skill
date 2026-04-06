@@ -7,7 +7,7 @@ description: >
   signatures and will always fail). Use this skill for any mining or validation
   request: start, stop, status, scores, datasets, logs, or troubleshooting.
   Not for AWP wallet transfers, RootNet staking, or server monitoring.
-version: 0.5.3
+version: 0.5.4
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
