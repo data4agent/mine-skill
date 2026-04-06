@@ -19,10 +19,6 @@ SYM_ARROW = "→"
 SYM_DASH = "—"
 SYM_BOX_H = "─"
 SYM_BOX_V = "│"
-SYM_BOX_TL = "┌"
-SYM_BOX_TR = "┐"
-SYM_BOX_BL = "└"
-SYM_BOX_BR = "┘"
 SYM_DIVIDER = "────────────────────────────────────────"
 
 
@@ -37,18 +33,6 @@ def text_progress_bar(current: int, total: int, width: int = 20) -> str:
     return f"[{'█' * filled}{'░' * empty}] {percent}%"
 
 
-def render_status_box(title: str, rows: list[tuple[str, str]], width: int = 40) -> str:
-    """Render a status box with title and key-value rows."""
-    lines = [SYM_DIVIDER]
-    if title:
-        lines.append(f"  {title}")
-        lines.append(f"  {SYM_BOX_H * (width - 4)}")
-    for label, value in rows:
-        lines.append(f"  {label:<20} {value}")
-    lines.append(SYM_DIVIDER)
-    return "\n".join(lines)
-
-
 def render_step(status: str, text: str) -> str:
     """Render a step line with status icon."""
     if status == "ok":
@@ -59,21 +43,6 @@ def render_step(status: str, text: str) -> str:
         return f"{SYM_WARN} {text}"
     else:
         return f"{SYM_BULLET} {text}"
-
-
-def render_labeled_progress(label: str, current: int, total: int, label_width: int = 18) -> str:
-    """Render a labeled progress bar like: wiki-articles    [████░░░░] 40%  12/30"""
-    bar = text_progress_bar(current, total, width=12)
-    return f"  {label:<{label_width}} {bar}  {current}/{total}"
-
-
-def format_bytes(size: int) -> str:
-    """Format byte size to human readable string."""
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    return f"{size / (1024 * 1024):.1f} MB"
 
 
 def _read_local_version() -> str:
@@ -114,7 +83,7 @@ def _wallet_ready() -> tuple[bool, str, list[str]]:
         # Agent identity not initialized - internal setup issue
         return False, f"{SYM_CROSS} Agent identity {SYM_DASH} not initialized", [
             "# Run bootstrap to initialize agent identity",
-            "powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1" if os.name == "nt" else "./scripts/bootstrap.sh",
+            ".\\scripts\\bootstrap.cmd" if os.name == "nt" else "./scripts/bootstrap.sh",
         ]
     if wallet_token.strip():
         return True, f"{SYM_CHECK} Agent identity {SYM_DASH} ready", []
@@ -129,7 +98,7 @@ def _crawler_ready() -> tuple[bool, str, list[str]]:
     if crawler_root is None:
         return False, f"{SYM_CROSS} Mine runtime {SYM_DASH} not ready (Python {py_ver})", [
             "# Bootstrap the current Mine checkout",
-            "powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1" if os.name == "nt" else "./scripts/bootstrap.sh",
+            ".\\scripts\\bootstrap.cmd" if os.name == "nt" else "./scripts/bootstrap.sh",
         ]
     if sys.version_info < (3, 11):
         return False, f"{SYM_CROSS} Mine runtime {SYM_DASH} found, but Mine needs Python 3.11+ (current: {py_ver})", [
@@ -314,7 +283,7 @@ def render_start_working_response(worker: Any, *, selected_dataset_ids: list[str
             lines.extend([
                 "",
                 "This looks like a wallet session issue.",
-                f"  {SYM_BULLET} Run: powershell -ExecutionPolicy Bypass -File .\\scripts\\bootstrap.ps1" if os.name == "nt" else f"  {SYM_BULLET} Run: ./scripts/bootstrap.sh",
+                f"  {SYM_BULLET} Run: .\\scripts\\bootstrap.cmd" if os.name == "nt" else f"  {SYM_BULLET} Run: ./scripts/bootstrap.sh",
                 f"  {SYM_BULLET} If that does not recover the session, run: awp-wallet unlock --duration 3600",
                 f"  {SYM_BULLET} Retry: python scripts/run_tool.py agent-start",
             ])
@@ -1144,8 +1113,6 @@ def route_and_execute(user_input: str, worker: Any, *, first_run: bool = False) 
         needs_confirmation = True
     elif intent_id == "A1" and first_run:
         needs_confirmation = True
-    else:
-        needs_confirmation = False
 
     # If needs confirmation, return prompt instead of executing
     if needs_confirmation and not _is_confirmed(user_input):
@@ -1242,6 +1209,18 @@ def _execute_intent(intent_id: str, command: str | None, worker: Any) -> str:
 
     if intent_id == "first_load":
         return render_first_load_experience()
+
+    if intent_id in {"role_miner", "role_validator", "switch_role"}:
+        return render_first_load_experience()
+
+    if intent_id == "V_start":
+        return "Use: python scripts/run_tool.py validator-start"
+
+    if intent_id == "V_status":
+        return "Use: python scripts/run_tool.py validator-control status"
+
+    if intent_id == "V_stop":
+        return "Use: python scripts/run_tool.py validator-control stop"
 
     return f"Unknown intent: {intent_id}"
 

@@ -76,7 +76,7 @@ def _canonical_body(body: Any, content_type: str) -> str | None:
 
 def _hash_body(body: Any, content_type: str) -> str:
     canonical_body = _canonical_body(body, content_type)
-    if not canonical_body:
+    if canonical_body is None:
         return EMPTY_HASH
     return _keccak_hex(canonical_body)
 
@@ -249,7 +249,7 @@ class WalletSigner:
         return {
             "Content-Type": content_type,
             "X-Signer": self.get_address(),
-            "X-Signature": signature,
+            "X-Signature": signature if signature.startswith("0x") else f"0x{signature}",
             "X-Nonce": nonce_str,
             "X-Issued-At": issued_at,
             "X-Expires-At": expires_at,

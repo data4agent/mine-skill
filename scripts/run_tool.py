@@ -14,11 +14,9 @@ from common import (
     DEFAULT_MINER_ID,
     DEFAULT_PLATFORM_BASE_URL,
     WALLET_SESSION_DURATION_SECONDS,
-    resolve_awp_registration,
     resolve_local_venv_python,
     resolve_miner_id,
     resolve_platform_base_url,
-    resolve_signature_config,
     resolve_wallet_bin,
     resolve_wallet_config,
 )

@@ -75,8 +75,8 @@ class PlatformClient:
         self._last_wallet_refresh = None
         return payload
 
-    def send_miner_heartbeat(self, *, client_name: str) -> None:
-        self.send_unified_heartbeat(client_name=client_name)
+    def send_miner_heartbeat(self, *, client_name: str) -> dict[str, Any]:
+        return self.send_unified_heartbeat(client_name=client_name)
 
     def claim_repeat_crawl_task(self) -> dict[str, Any] | None:
         return self._claim("/api/mining/v1/repeat-crawl-tasks/claim")
@@ -84,14 +84,14 @@ class PlatformClient:
     def claim_refresh_task(self) -> dict[str, Any] | None:
         return self._claim("/api/mining/v1/refresh-tasks/claim")
 
-    def report_repeat_crawl_task_result(self, task_id: str, payload: dict[str, Any]) -> None:
+    def report_repeat_crawl_task_result(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/report", payload)
 
     def reject_repeat_crawl_task(self, task_id: str) -> dict[str, Any]:
         """POST /api/mining/v1/repeat-crawl-tasks/{id}/reject — reject task without penalty"""
         return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/reject", {})
 
-    def report_refresh_task_result(self, task_id: str, payload: dict[str, Any]) -> None:
+    def report_refresh_task_result(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/api/mining/v1/refresh-tasks/{task_id}/report", payload)
 
     def submit_core_submissions(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -218,7 +218,7 @@ class PlatformClient:
 
     def _claim(self, path: str) -> dict[str, Any] | None:
         try:
-            payload = self._request("POST", path, None)
+            payload = self._request("POST", path, {})
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:
                 return None
@@ -297,7 +297,9 @@ class PlatformClient:
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         last_error: Exception | None = None
         renewed_session = False
-        for attempt in range(1, self._max_retries + 1):
+        # Extra attempt slot for post-renewal retry
+        max_attempts = self._max_retries + 1
+        for attempt in range(1, max_attempts + 1):
             kwargs: dict[str, Any] = {}
             if payload is not None:
                 kwargs["json"] = payload
@@ -370,7 +372,7 @@ class PlatformClient:
                             renewed_session = True
                             continue
                 # Retryable server error or explicitly marked as retryable
-                if (status_code >= 500 or error_retryable) and attempt < self._max_retries:
+                if (status_code >= 500 or error_retryable) and attempt < max_attempts:
                     time.sleep(0.5 * attempt)
                     continue
                 raise

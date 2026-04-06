@@ -9,11 +9,7 @@ from typing import Any
 
 from common import (
     resolve_eval_timeout,
-    resolve_platform_base_url,
     resolve_validator_id,
-    resolve_validator_state_root,
-    resolve_wallet_config,
-    resolve_ws_url,
 )
 from evaluation_engine import EvaluationEngine, EvaluationResult
 from ws_client import ValidatorWSClient, WSDisconnected, WSMessage
@@ -204,6 +200,7 @@ class ValidatorRuntime:
                 msg = self._ws.receive(timeout=WS_RECEIVE_TIMEOUT)
             except WSDisconnected:
                 log.warning("WS disconnected during receive")
+                consecutive_ws_failures += 1
                 continue
 
             if msg is None:

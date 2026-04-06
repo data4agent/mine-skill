@@ -121,16 +121,6 @@ class CrawlerRunner:
             argv.extend(["--model-config", str(config_path)])
 
 
-def _solve_pow_challenge(challenge: dict[str, Any]) -> str:
-    """Solve a PoW challenge.  Returns the answer string.
-
-    Placeholder implementation — returns the prompt directly.
-    The actual solving strategy depends on ``question_type`` values
-    the backend sends (LLM-answerable questions, hash puzzles, etc.).
-    """
-    return str(challenge.get("prompt", ""))
-
-
 def _build_test_config(root: Path) -> WorkerConfig:
     return WorkerConfig(
         base_url="http://example.test",
@@ -700,8 +690,8 @@ class AgentWorker:
 
     def _preflight_item(self, item: WorkItem, *, command: str, writer: RunArtifactWriter | None = None) -> None:
         terminal_state = self._handle_preflight_common(item, writer=writer, command=command)
-        if terminal_state == "occupancy_blocked":
-            raise SkipItemError(f"URL already occupied for {item.url}")
+        if terminal_state is not None:
+            raise SkipItemError(f"preflight blocked ({terminal_state}) for {item.url}")
 
     def _handle_result(self, item: WorkItem, result: CrawlerRunResult, summary: WorkerIterationSummary) -> None:
         auth_pending = self.auth_orchestrator.handle_errors(item, result.errors)
@@ -850,7 +840,7 @@ class AgentWorker:
         # Miner sub-object takes precedence (new format), overrides top-level keys
         miner_info = source.get("miner")
         if isinstance(miner_info, dict):
-            for key in ("credit", "credit_tier", "epoch_submit_limit", "pow_probability"):
+            for key in ("credit", "credit_score", "credit_tier", "epoch_submit_limit", "pow_probability"):
                 if key in miner_info:
                     update[key] = miner_info[key]
         credit = source.get("credit")
