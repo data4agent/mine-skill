@@ -502,7 +502,7 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
                 "recipient": wallet_address,
                 "nonce": nonce,
                 "deadline": deadline,
-                "chainId": domain.get("chainId", 1),
+                "chainId": domain.get("chainId", DEFAULT_EIP712_CHAIN_ID),
                 "signature": signature,
             },
         )

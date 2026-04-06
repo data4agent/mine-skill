@@ -852,12 +852,13 @@ class AgentWorker:
                     update["credit_score"] = int(credit_val)
                 else:
                     update["credit"] = credit_val
+        # Top-level credit handling — only if miner sub-object didn't already set credit_score
         credit = source.get("credit")
-        if isinstance(credit, dict):
-            update["credit"] = dict(credit)
-        elif isinstance(credit, (int, float)):
+        if "credit_score" not in update and isinstance(credit, (int, float)):
             update["credit_score"] = int(credit)
-        else:
+        elif isinstance(credit, dict):
+            update["credit"] = dict(credit)
+        elif "credit_score" not in update:
             credit_update = {
                 key: source[key]
                 for key in ("credit_score", "credit_tier", "credit_delta", "credit_status")

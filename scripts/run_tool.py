@@ -1889,7 +1889,12 @@ def main() -> int:
                         store.update_session(status="error", error=f"exceeded {max_restarts} restarts: {loop_exc}")
                         return 1
                     time.sleep(restart_cooldown)
-                    # Re-initialize runtime for restart
+                    # Re-create WS client and runtime for restart
+                    ws = ValidatorWSClient(
+                        ws_url=ws_url,
+                        auth_headers=_refresh_ws_auth(),
+                        on_auth_refresh=_refresh_ws_auth,
+                    )
                     runtime = ValidatorRuntime(
                         platform_client=platform,
                         ws_client=ws,

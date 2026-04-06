@@ -75,7 +75,7 @@ def _canonical_body(body: Any, content_type: str) -> str | None:
     if isinstance(body, str):
         return body
     if isinstance(body, bytes):
-        return body.decode("utf-8", errors="replace")
+        return body  # _keccak_hex handles bytes directly
     try:
         return json.dumps(body, ensure_ascii=False)
     except (TypeError, ValueError):

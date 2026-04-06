@@ -447,17 +447,20 @@ class ValidatorRuntime:
         schema_fields = claim_data.get("schema_fields") or []
         dataset_schema = claim_data.get("dataset_schema") or {}
 
-        # Fallback: re-claim via HTTP to get full evaluation data
+        # Fallback: fetch task details via HTTP if claim payload is incomplete
         if not cleaned_data or not structured_data:
-            claim_fallback = self._platform.claim_evaluation_task()
-            if isinstance(claim_fallback, dict):
-                cleaned_data = cleaned_data or str(claim_fallback.get("cleaned_data") or "")
-                repeat_cleaned_data = repeat_cleaned_data or str(claim_fallback.get("repeat_cleaned_data") or "")
-                structured_data = structured_data or claim_fallback.get("structured_data") or {}
-                if not schema_fields:
-                    schema_fields = claim_fallback.get("schema_fields") or []
-                if not dataset_schema:
-                    dataset_schema = claim_fallback.get("dataset_schema") or {}
+            try:
+                task_detail = self._platform.get_evaluation_task(task_id)
+                if isinstance(task_detail, dict):
+                    cleaned_data = cleaned_data or str(task_detail.get("cleaned_data") or "")
+                    repeat_cleaned_data = repeat_cleaned_data or str(task_detail.get("repeat_cleaned_data") or "")
+                    structured_data = structured_data or task_detail.get("structured_data") or {}
+                    if not schema_fields:
+                        schema_fields = task_detail.get("schema_fields") or []
+                    if not dataset_schema:
+                        dataset_schema = task_detail.get("dataset_schema") or {}
+            except Exception as exc:
+                log.warning("Fallback fetch for task %s failed: %s", task_id, exc)
 
         if not isinstance(structured_data, dict):
             structured_data = {}

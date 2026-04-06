@@ -163,20 +163,6 @@ class PlatformClient:
             data = resp.get("data")
             return data if isinstance(data, dict) else {}
 
-        encoded_url = quote(url, safe="")
-        try:
-            resp = self._request(
-                "GET",
-                f"/api/core/v1/url-occupancies/check?dataset_id={dataset_id}&url={encoded_url}",
-                None,
-            )
-        except httpx.HTTPStatusError as error:
-            if error.response.status_code == 404:
-                return {}
-            raise
-        data = resp.get("data")
-        return data if isinstance(data, dict) else {}
-
     @staticmethod
     def _build_occupancy_structured_data(url: str, structured_data: dict[str, Any] | None) -> dict[str, Any]:
         payload = dict(structured_data or {})
