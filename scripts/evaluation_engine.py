@@ -131,20 +131,12 @@ class EvaluationEngine:
             response = self.llm_call(prompt)
             result = parse_json_response(response)
 
-            if not result or "result" not in result:
-                log.error("evaluation parse failed: %s", response[:200])
-                return EvaluationResult(
-                    result="mismatch" if has_repeat else "match",
-                    verdict="rejected",
-                    consistent=False,
-                    score=0,
-                )
+            # Normalize keys to lowercase for case-insensitive matching
+            if result:
+                result = {k.lower(): v for k, v in result.items()}
 
-            eval_result = str(result.get("result", "match"))
-            eval_score = int(result.get("score", 0))
+            eval_result, eval_score = self._extract_result_and_score(result, response, has_repeat)
 
-            if eval_result not in ("match", "mismatch"):
-                eval_result = "match"
             eval_score = max(0, min(100, eval_score))
 
             if eval_result == "mismatch":
@@ -170,4 +162,66 @@ class EvaluationEngine:
                 consistent=False,
                 score=0,
             )
+
+    @staticmethod
+    def _extract_result_and_score(
+        parsed: dict[str, Any] | None,
+        raw_response: str,
+        has_repeat: bool,
+    ) -> tuple[str, int]:
+        """Extract result and score from LLM response with maximum tolerance.
+
+        Handles: key case variations, value case, non-JSON text, missing fields.
+        Returns (result, score) tuple.
+        """
+        # Try from parsed JSON first (keys already lowercased)
+        if parsed:
+            raw_result = str(parsed.get("result", ""))
+            raw_score = parsed.get("score")
+
+            # Normalize result value
+            if raw_result.lower() in ("match", "true", "yes", "authentic", "same"):
+                eval_result = "match"
+            elif raw_result.lower() in ("mismatch", "false", "no", "fraud", "different", "fabricated"):
+                eval_result = "mismatch"
+            else:
+                eval_result = "match"  # default if unrecognized
+
+            # Normalize score value
+            try:
+                eval_score = int(float(str(raw_score)))
+            except (TypeError, ValueError):
+                eval_score = 0
+
+            return eval_result, eval_score
+
+        # Fallback: extract from raw text when JSON parsing failed entirely
+        text = raw_response.lower()
+
+        # Detect result from text
+        if "mismatch" in text or "fabricat" in text or "fraud" in text:
+            eval_result = "mismatch"
+        else:
+            eval_result = "match"
+
+        # Detect score from text (look for number near "score")
+        eval_score = 0
+        import re
+        score_patterns = [
+            r'score["\s:]*(\d+)',
+            r'(\d+)["\s]*/?\s*100',
+            r'(\d{1,3})\s*(?:out of|/)\s*100',
+        ]
+        for pattern in score_patterns:
+            m = re.search(pattern, text)
+            if m:
+                try:
+                    val = int(m.group(1))
+                    if 0 <= val <= 100:
+                        eval_score = val
+                        break
+                except ValueError:
+                    pass
+
+        return eval_result, eval_score
 
