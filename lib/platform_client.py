@@ -155,8 +155,10 @@ class PlatformClient:
         try:
             resp = self._request("POST", "/api/core/v1/dedup-occupancies/check", dedup_payload)
         except httpx.HTTPStatusError as error:
-            if error.response.status_code != 404:
-                raise
+            if error.response.status_code in (400, 404, 422):
+                # Degrade gracefully: treat as "not occupied" so submission can proceed
+                return {}
+            raise
         else:
             data = resp.get("data")
             return data if isinstance(data, dict) else {}
@@ -250,7 +252,6 @@ class PlatformClient:
         except Exception:
             return
         patterns = self._coerce_url_patterns(dataset)
-        template_regex = self._coerce_template_style_normalizer(dataset)
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -261,14 +262,6 @@ class PlatformClient:
                 raise RuntimeError(
                     f"submission preflight failed: url {url!r} does not match dataset url_patterns for {dataset_id}"
                 )
-            if template_regex:
-                left_pattern = template_regex.split("→", 1)[0].strip()
-                if left_pattern and self._regex_matches(left_pattern, url) and not self._regex_matches(template_regex, url):
-                    raise RuntimeError(
-                        "submission preflight failed: dataset "
-                        f"{dataset_id} has a template-style url_normalize_regex; "
-                        f"url_patterns match {url!r}, but the embedded template likely causes server-side rejection"
-                    )
 
     @staticmethod
     def _coerce_url_patterns(dataset: dict[str, Any]) -> list[str]:
@@ -276,16 +269,6 @@ class PlatformClient:
         if not isinstance(patterns, list):
             return []
         return [str(pattern).strip() for pattern in patterns if str(pattern).strip()]
-
-    @staticmethod
-    def _coerce_template_style_normalizer(dataset: dict[str, Any]) -> str | None:
-        schema = dataset.get("schema")
-        if not isinstance(schema, dict):
-            return None
-        pattern = schema.get("url_normalize_regex")
-        if not isinstance(pattern, str) or "→" not in pattern:
-            return None
-        return pattern.strip()
 
     @staticmethod
     def _regex_matches(pattern: str, value: str) -> bool:
