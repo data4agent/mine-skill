@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from signer import WalletSigner
 
 
+class PlatformApiError(Exception):
+    """Raised when API returns success:false in the response envelope."""
+    def __init__(self, code: str, message: str, category: str, status_code: int, response: Any = None) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.category = category
+        self.status_code = status_code
+        self.response = response
+
+
 class PlatformClient:
     def __init__(
         self,
@@ -301,14 +311,22 @@ class PlatformClient:
                     code = error_obj.get("code", "unknown") if isinstance(error_obj, dict) else "unknown"
                     msg = error_obj.get("message", "") if isinstance(error_obj, dict) else str(error_obj)
                     category = error_obj.get("category", "") if isinstance(error_obj, dict) else ""
-                    # Synthesize an HTTP error for consistent handling
-                    from httpx import Response as _Resp, Request as _Req
-                    fake_resp = response
-                    fake_resp.status_code = 404 if category == "not_found" else 400
-                    raise httpx.HTTPStatusError(
-                        f"{code}: {msg}", request=response.request, response=fake_resp
-                    )
+                    status_map = {"not_found": 404, "authentication": 401, "permission": 403, "rate_limit": 429}
+                    raise PlatformApiError(code, msg, category, status_map.get(category, 400), response)
                 return body
+            except PlatformApiError as api_err:
+                last_error = api_err
+                status_code = api_err.status_code
+                if status_code == 404:
+                    raise httpx.HTTPStatusError(
+                        str(api_err), request=response.request, response=response
+                    ) from api_err
+                if status_code >= 500 and attempt < max_attempts:
+                    time.sleep(0.5 * attempt)
+                    continue
+                raise httpx.HTTPStatusError(
+                    str(api_err), request=response.request, response=response
+                ) from api_err
             except httpx.HTTPStatusError as error:
                 last_error = error
                 status_code = error.response.status_code
@@ -378,8 +396,9 @@ class PlatformClient:
         """GET /api/iam/v1/validator-applications/me — returns {} if no application exists"""
         try:
             resp = self._request("GET", "/api/iam/v1/validator-applications/me", None)
-        except httpx.HTTPStatusError as error:
-            if error.response.status_code == 404:
+        except (httpx.HTTPStatusError, PlatformApiError) as error:
+            sc = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else getattr(error, "status_code", 0)
+            if sc == 404:
                 return {}
             raise
         data = resp.get("data")

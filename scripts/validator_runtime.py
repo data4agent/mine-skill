@@ -120,6 +120,8 @@ class ValidatorRuntime:
             data = json.loads(self._status_file.read_text(encoding="utf-8"))
             prev = data.get("stats", {})
             for key in self._stats:
+                if key == "consecutive_failures":
+                    continue  # reset on fresh start
                 if key in prev and isinstance(prev[key], int):
                     self._stats[key] = prev[key]
             self._last_action = data.get("last_action", "")
@@ -384,6 +386,9 @@ class ValidatorRuntime:
             if msg is None:
                 continue
 
+            # Successful receive — reset WS failure counter
+            consecutive_ws_failures = 0
+
             if msg.type == "evaluation_task":
                 self._stats["tasks_received"] += 1
                 if not self._eligible:
@@ -422,7 +427,13 @@ class ValidatorRuntime:
                 return
             msg = WSMessage({"type": "evaluation_task", "data": claim_data})
             self._stats["tasks_received"] += 1
-            self._handle_evaluation_task(msg, via_http=True)
+            try:
+                self._handle_evaluation_task(msg, via_http=True)
+            except Exception as eval_exc:
+                self._stats["errors"] += 1
+                self._stats["consecutive_failures"] += 1
+                log.error("HTTP fallback eval failed: %s", eval_exc)
+                self._write_status()
         except Exception as exc:
             error_str = str(exc)
             if "404" not in error_str and "409" not in error_str:

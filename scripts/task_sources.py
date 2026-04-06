@@ -305,9 +305,9 @@ class DatasetDiscoverySource:
             # Calculate priority score (higher = more priority)
             score = 0.0
 
-            # Factor 1: Cooldown penalty (datasets in cooldown get deprioritized)
+            # Skip datasets in cooldown entirely
             if dataset_id in cooldowns:
-                score -= 10000  # Heavy penalty for rate-limited datasets
+                continue
 
             # Factor 2: Gap to target (from dataset metadata if available)
             epoch_submitted = int(dataset.get("epoch_submitted") or dataset.get("submitted") or 0)
@@ -339,14 +339,14 @@ def _is_content_url(url: str) -> bool:
     path = parsed.path.lower().rstrip("/")
 
     # Amazon: only product pages (/dp/ASIN or /gp/product/ASIN) are valid content
-    if "amazon." in host:
+    if host.endswith(".amazon.com") or host == "amazon.com" or host.endswith(".amazon.co.uk") or host == "amazon.co.uk" or host.endswith(".amazon.de") or host == "amazon.de":
         import re
         if re.search(r"/(?:dp|gp/product)/[A-Z0-9]{10}", parsed.path, re.IGNORECASE):
             return True
         return False
 
     # Wikipedia: only article pages (/wiki/ArticleName), not special pages
-    if "wikipedia.org" in host:
+    if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
         if path.startswith("/wiki/") and ":" not in path.split("/wiki/", 1)[-1]:
             return True
         return False

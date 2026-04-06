@@ -196,22 +196,18 @@ def call_openclaw(
     except FileNotFoundError as exc:
         raise RuntimeError(f"OpenClaw CLI not found at '{_openclaw_bin}'") from exc
 
-    # Poll with timeout (abortable)
-    deadline = time.monotonic() + timeout
-    while proc.poll() is None:
-        if time.monotonic() > deadline:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            _purge_agent_sessions()
-            raise TimeoutError(f"OpenClaw CLI timeout ({timeout}s)")
-        time.sleep(0.5)
-
-    stdout = proc.stdout.read() if proc.stdout else ""
-    stderr = proc.stderr.read() if proc.stderr else ""
+    # Use communicate() with timeout to avoid pipe deadlock
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+        _purge_agent_sessions()
+        raise TimeoutError(f"OpenClaw CLI timeout ({timeout}s)")
 
     _purge_agent_sessions()
 

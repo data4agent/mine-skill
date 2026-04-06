@@ -39,6 +39,7 @@ from task_sources import (
     BackendClaimSource,
     DatasetDiscoverySource,
     ResumeQueueSource,
+    SkipClaimedTask,
     build_follow_up_items_from_discovery,
     build_report_payload,
     claimed_task_from_payload,
@@ -400,7 +401,10 @@ class AgentWorker:
     def _work_item_from_payload(self, task_type: str, payload: dict[str, Any]) -> WorkItem:
         if task_type.startswith("local_") or task_type == "local_file":
             return task_to_work_item(local_task_from_payload({"task_type": task_type, **payload}))
-        return task_to_work_item(claimed_task_from_payload(task_type, payload, client=self.client))
+        try:
+            return task_to_work_item(claimed_task_from_payload(task_type, payload, client=self.client))
+        except SkipClaimedTask as exc:
+            raise ValueError(str(exc)) from exc
 
     def run_iteration(self, iteration: int) -> dict[str, Any]:
         summary = WorkerIterationSummary(iteration=iteration)
@@ -450,6 +454,7 @@ class AgentWorker:
         """
         iteration = 0
         consecutive_empty = 0
+        wait = interval
         while max_iterations == 0 or iteration < max_iterations:
             iteration += 1
             self._proactive_session_renew()
@@ -544,13 +549,17 @@ class AgentWorker:
             self.state_store.save_session({"last_heartbeat_at": int(time.time())})
         except Exception as exc:
             summary.errors.append(f"miner heartbeat failed: {exc}")
-        # Join miner ready pool (first time only)
-        if not getattr(self, "_miner_ready_pool_joined", False):
+        # Join miner ready pool (with backoff on persistent failure)
+        pool_failures = getattr(self, "_pool_join_failures", 0)
+        if not getattr(self, "_miner_ready_pool_joined", False) and pool_failures < 10:
             try:
                 self.client.join_miner_ready_pool()
                 self._miner_ready_pool_joined = True
+                self._pool_join_failures = 0
             except Exception as exc:
-                summary.errors.append(f"join miner ready pool failed: {exc}")
+                self._pool_join_failures = pool_failures + 1
+                if self._pool_join_failures <= 3:
+                    summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
 
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
@@ -599,6 +608,7 @@ class AgentWorker:
                     merged[allowed.item_id] = allowed
         filtered = list(merged.values())[: self.config.max_parallel]
         summary.discovery_items = len([item for item in filtered if item.source == "dataset_discovery"])
+        summary.resumed_items = len([item for item in filtered if item.source in ("backlog", "resume", "auth_pending")])
         return filtered
 
     def _process_items(self, items: list[WorkItem], summary: WorkerIterationSummary) -> None:
@@ -702,14 +712,15 @@ class AgentWorker:
             error for error in result.errors
             if bool(error.get("retryable")) and str(error.get("error_code") or "") not in AUTH_ERROR_CODES
         ]
-        if retryable_errors:
+        command = self.crawl_mode_planner.choose_command(item)
+
+        # Only retry non-discovery items on retryable errors (discovery is idempotent via follow-ups)
+        if retryable_errors and command != "discover-crawl":
             self.state_store.enqueue_backlog([_clone_item(item, resume=True, output_dir=result.output_dir)])
 
         progress_message = self._build_progress_message(item, result)
         if progress_message:
             summary.messages.append(progress_message)
-
-        command = self.crawl_mode_planner.choose_command(item)
         if command == "discover-crawl":
             followups = build_follow_up_items_from_discovery(item, result.records)
             if followups:
@@ -736,6 +747,8 @@ class AgentWorker:
                     report_result = self.client.report_repeat_crawl_task_result(item.claim_task_id, report_payload)
                 elif item.claim_task_type == "refresh":
                     report_result = self.client.report_refresh_task_result(item.claim_task_id, report_payload)
+                else:
+                    summary.errors.append(f"unknown claim_task_type: {item.claim_task_type} for {item.claim_task_id}")
             except httpx.HTTPStatusError as exc:
                 if self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
                     return

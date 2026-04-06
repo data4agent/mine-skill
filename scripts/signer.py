@@ -62,7 +62,7 @@ def _hash_headers(headers: dict[str, str], signed_headers: tuple[str, ...]) -> s
     return _keccak_hex("\n".join(lines))
 
 
-def _canonical_body(body: Any, content_type: str) -> str | None:
+def _canonical_body(body: Any, content_type: str) -> str | bytes | None:
     if body is None:
         return None
     normalized_type = str(content_type or "").lower()
