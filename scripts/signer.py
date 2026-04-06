@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlsplit
@@ -228,9 +228,8 @@ class WalletSigner:
         verifying_contract: str = DEFAULT_EIP712_VERIFYING_CONTRACT,
     ) -> dict[str, str]:
         now = int(time.time())
-        nonce_uuid = uuid.uuid4()
-        nonce = nonce_uuid.int  # UUID 128-bit 整数作为 EIP-712 uint256 nonce
-        nonce_str = str(nonce_uuid)  # UUID 字符串作为 X-Nonce 头
+        nonce = secrets.randbits(52)  # 52-bit 整数，在所有 JSON 解析器中安全
+        nonce_str = str(nonce)
         typed_data = self.build_typed_data(
             method=method,
             url=url,
