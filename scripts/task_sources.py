@@ -406,6 +406,8 @@ def _discovery_seed_url(domain: str) -> str:
     parsed = urlparse(seed_url)
     host = (parsed.netloc or parsed.path).lower()
     normalized_path = parsed.path.rstrip("/")
-    if host.endswith(".wikipedia.org") and normalized_path in {"", "/"}:
+    if (host == "wikipedia.org" or host.endswith(".wikipedia.org")) and normalized_path in {"", "/"}:
+        if host == "wikipedia.org":
+            host = "en.wikipedia.org"
         return canonicalize_url(f"{parsed.scheme or 'https'}://{host}/wiki/Main_Page")
     return canonicalize_url(seed_url)
