@@ -435,7 +435,7 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
 
     # --- Phase 2: on-chain registration status ---
     try:
-        check = _awp_jsonrpc(base_url, "address.check", {"address": wallet_address})
+        check = _awp_jsonrpc(base_url, "address.check", {"address": wallet_address, "chainId": DEFAULT_EIP712_CHAIN_ID})
     except RuntimeError as exc:
         result["status"] = "status_check_failed"
         result["message"] = str(exc)
@@ -463,8 +463,8 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
         return result
 
     try:
-        registry = _awp_jsonrpc(base_url, "registry.get")
-        nonce_payload = _awp_jsonrpc(base_url, "nonce.get", {"address": wallet_address})
+        registry = _awp_jsonrpc(base_url, "registry.get", {"chainId": DEFAULT_EIP712_CHAIN_ID})
+        nonce_payload = _awp_jsonrpc(base_url, "nonce.get", {"address": wallet_address, "chainId": DEFAULT_EIP712_CHAIN_ID})
         nonce = int(nonce_payload.get("nonce") or 0)
         if nonce < 0:
             raise ValueError("invalid nonce")
@@ -493,7 +493,7 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
                 raise RuntimeError("awp-wallet sign-typed-data returned empty signature")
 
         relay_base_url = base_url.replace("/v2", "")
-        domain = _registration_domain_from_registry(registry)
+        domain = _registration_domain_from_registry(registry, chain_id=DEFAULT_EIP712_CHAIN_ID)
         relay = _awp_post_json(
             relay_base_url,
             "/api/relay/set-recipient",
@@ -514,7 +514,7 @@ def resolve_awp_registration(*, auto_register: bool = False, signer: Any | None 
 
     for attempt in range(AWP_REGISTRATION_POLL_ATTEMPTS):
         try:
-            refreshed = _awp_jsonrpc(base_url, "address.check", {"address": wallet_address})
+            refreshed = _awp_jsonrpc(base_url, "address.check", {"address": wallet_address, "chainId": DEFAULT_EIP712_CHAIN_ID})
         except RuntimeError:
             break
         if _is_awp_registered(refreshed):
