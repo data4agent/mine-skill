@@ -45,7 +45,7 @@ class WSMessage:
 
     @property
     def repeat_crawl_task_id(self) -> str:
-        """repeat_crawl_task 消息中的任务 ID"""
+        """Task ID from repeat_crawl_task message."""
         return str(self.data.get("id") or "")
 
     def __repr__(self) -> str:

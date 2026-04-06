@@ -554,7 +554,7 @@ class AgentWorker:
             self.state_store.save_session({"last_heartbeat_at": int(time.time())})
         except Exception as exc:
             summary.errors.append(f"miner heartbeat failed: {exc}")
-        # 加入矿工就绪池（仅首次或掉线后重新加入）
+        # Join miner ready pool (first time only)
         if not getattr(self, "_miner_ready_pool_joined", False):
             try:
                 self.client.join_miner_ready_pool()
@@ -843,11 +843,11 @@ class AgentWorker:
         data = payload.get("data")
         source = data if isinstance(data, dict) else payload
         update: dict[str, Any] = {"last_heartbeat_at": int(time.time())}
-        # 先从顶层读取（兼容旧格式）
+        # Read from top-level first (legacy format)
         for key in ("credit_score", "credit_tier", "epoch_id", "epoch_submitted", "epoch_target", "epoch_submit_limit", "pow_probability"):
             if key in source:
                 update[key] = source[key]
-        # miner 子对象优先级更高（新格式），覆盖顶层同名字段
+        # Miner sub-object takes precedence (new format), overrides top-level keys
         miner_info = source.get("miner")
         if isinstance(miner_info, dict):
             for key in ("credit", "credit_tier", "epoch_submit_limit", "pow_probability"):
@@ -1286,7 +1286,7 @@ def _export_and_submit_core_submissions_for_task(
             response_path.write_text(json.dumps(response_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return export_path, response_path
     response = client.submit_core_submissions(payload)
-    # 处理 PoW 挑战：如果 admission_status 为 challenge_required，回答挑战后重新提交
+    # Handle PoW challenge: if admission_status is challenge_required, answer and retry
     resp_data = response.get("data") if isinstance(response, dict) else None
     if isinstance(resp_data, dict) and resp_data.get("admission_status") == "challenge_required":
         challenge = resp_data.get("challenge")
@@ -1298,9 +1298,9 @@ def _export_and_submit_core_submissions_for_task(
                     client.answer_pow_challenge(challenge_id, answer)
                     response = client.submit_core_submissions(payload)
                 except UnsupportedChallenge:
-                    pass  # 无法解答的挑战类型，保留原始响应
+                    pass  # Unsupported challenge type, keep original response
                 except Exception:
-                    pass  # PoW 应答或重试失败，保留原始 challenge_required 响应
+                    pass  # PoW answer or retry failed, keep original response
     response_path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return export_path, response_path
 

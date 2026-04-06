@@ -174,7 +174,7 @@ class PrivateKeySigner:
     ) -> dict[str, str]:
         """Build EIP-712 signed auth headers for API request."""
         now = int(time.time())
-        nonce = secrets.randbits(52)  # 52-bit 整数，在所有 JSON 解析器中安全
+        nonce = secrets.randbits(52)  # 52-bit int, safe for all JSON parsers
         nonce_str = str(nonce)
 
         typed_data = self.build_typed_data(

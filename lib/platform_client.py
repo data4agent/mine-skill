@@ -88,7 +88,7 @@ class PlatformClient:
         return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/report", payload)
 
     def reject_repeat_crawl_task(self, task_id: str) -> dict[str, Any]:
-        """POST /api/mining/v1/repeat-crawl-tasks/{id}/reject — 无惩罚拒绝任务"""
+        """POST /api/mining/v1/repeat-crawl-tasks/{id}/reject — reject task without penalty"""
         return self._request("POST", f"/api/mining/v1/repeat-crawl-tasks/{task_id}/reject", {})
 
     def report_refresh_task_result(self, task_id: str, payload: dict[str, Any]) -> None:
@@ -187,15 +187,15 @@ class PlatformClient:
         }
 
     def join_miner_ready_pool(self) -> dict[str, Any]:
-        """POST /api/mining/v1/miners/ready — 加入矿工就绪池以接收 repeat crawl 任务"""
+        """POST /api/mining/v1/miners/ready — join miner ready pool for repeat crawl tasks"""
         return self._request("POST", "/api/mining/v1/miners/ready", {})
 
     def leave_miner_ready_pool(self) -> dict[str, Any]:
-        """POST /api/mining/v1/miners/unready — 离开矿工就绪池"""
+        """POST /api/mining/v1/miners/unready — leave miner ready pool"""
         return self._request("POST", "/api/mining/v1/miners/unready", {})
 
     def check_dedup_by_hash(self, dataset_id: str, dedup_hash: str) -> dict[str, Any]:
-        """GET /api/core/v1/dedup/check — 按 hash 检查去重"""
+        """GET /api/core/v1/dedup/check — check dedup by hash"""
         resp = self._request(
             "GET",
             f"/api/core/v1/dedup/check?dataset_id={quote(dataset_id, safe='')}&dedup_hash={quote(dedup_hash, safe='')}",
@@ -328,7 +328,7 @@ class PlatformClient:
             except httpx.HTTPStatusError as error:
                 last_error = error
                 status_code = error.response.status_code
-                # 解析结构化错误响应
+                # Parse structured error response
                 error_code = ""
                 error_message = ""
                 error_retryable = False
@@ -338,7 +338,7 @@ class PlatformClient:
                 except ValueError:
                     error_payload = {}
                 if isinstance(error_payload, dict):
-                    # 兼容两种错误格式：顶层字段或嵌套 error 对象
+                    # Support two error formats: top-level fields or nested error object
                     error_body = error_payload.get("error")
                     if isinstance(error_body, dict):
                         error_code = str(error_body.get("code") or "")
@@ -369,7 +369,7 @@ class PlatformClient:
                             self._last_wallet_refresh = renew_session(duration_seconds=WALLET_SESSION_DURATION_SECONDS)
                             renewed_session = True
                             continue
-                # 可重试的服务端错误或标记为 retryable 的错误
+                # Retryable server error or explicitly marked as retryable
                 if (status_code >= 500 or error_retryable) and attempt < self._max_retries:
                     time.sleep(0.5 * attempt)
                     continue

@@ -56,7 +56,7 @@ class ValidatorRuntime:
             "tasks_rejected": 0,
             "errors": 0,
         }
-        # 从 heartbeat 响应中动态更新
+        # Dynamically updated from heartbeat response
         self._eligible = True
         self._min_task_interval = 30
 
@@ -75,7 +75,7 @@ class ValidatorRuntime:
 
         log.info("ValidatorRuntime starting (id=%s)", self._validator_id)
 
-        # 检查 validator 申请状态
+        # Check validator application status
         try:
             app = self._platform.get_my_validator_application()
             app_status = str(app.get("status") or "")
@@ -188,12 +188,12 @@ class ValidatorRuntime:
                     self._ws.reconnect_with_backoff()
                 except Exception as exc:
                     log.error("Reconnect error: %s", exc)
-                # 根据重连结果更新计数器
+                # Update counter based on reconnect result
                 if self._ws.connected:
                     consecutive_ws_failures = 0
                 else:
                     consecutive_ws_failures += 1
-                    # WS 连续失败时回退到 HTTP polling
+                    # Fall back to HTTP polling after consecutive WS failures
                     if consecutive_ws_failures >= 3:
                         self._poll_evaluation_task_http()
                     if self._stop_event.wait(timeout=5):
