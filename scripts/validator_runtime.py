@@ -452,6 +452,7 @@ class ValidatorRuntime:
 
         # Step 2: Extract evaluation data from claim payload or fetch via HTTP
         claim_data = msg.data
+        dataset_id = str(claim_data.get("dataset_id") or "")
         cleaned_data = str(claim_data.get("cleaned_data") or "")
         repeat_cleaned_data = str(claim_data.get("repeat_cleaned_data") or "")
         structured_data = claim_data.get("structured_data") or {}
@@ -518,6 +519,7 @@ class ValidatorRuntime:
             "type": "evaluation",
             "task_id": task_id,
             "assignment_id": assignment_id,
+            "dataset_id": dataset_id,
             "result": eval_result.result,
             "score": eval_result.score,
         })

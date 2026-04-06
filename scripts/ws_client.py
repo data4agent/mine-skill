@@ -40,10 +40,6 @@ class WSMessage:
         return str(self.data.get("mode") or "single")
 
     @property
-    def golden(self) -> bool:
-        return bool(self.data.get("golden", False))
-
-    @property
     def repeat_crawl_task_id(self) -> str:
         """Task ID from repeat_crawl_task message."""
         return str(self.data.get("id") or "")

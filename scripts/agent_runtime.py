@@ -30,7 +30,7 @@ from common import (
     resolve_wallet_config,
 )
 from crawl_mode_planner import CrawlModePlanner
-from lib.platform_client import PlatformClient
+from lib.platform_client import PlatformApiError, PlatformClient
 from mine_gateway import resolve_mine_gateway_model_config, write_model_config
 from pow_solver import UnsupportedChallenge, solve_challenge
 from run_artifacts import RunArtifactWriter
@@ -286,6 +286,21 @@ class AgentWorker:
 
     def check_status(self) -> dict[str, Any]:
         session = self.state_store.load_session()
+        # Enrich with self-service stats from platform
+        try:
+            my_stats = self.client.fetch_my_miner_stats()
+            if my_stats:
+                session["miner_stats"] = my_stats
+        except Exception:
+            pass
+        try:
+            current_epoch = self.client.fetch_current_epoch()
+            if current_epoch:
+                session["current_epoch"] = current_epoch
+                if not session.get("epoch_id"):
+                    session["epoch_id"] = current_epoch.get("epoch_id")
+        except Exception:
+            pass
         epoch_submitted = int(session.get("epoch_submitted") or 0)
         epoch_target = int(session.get("epoch_target") or 80)
         epoch_remaining = max(0, epoch_target - epoch_submitted)
@@ -767,6 +782,9 @@ class AgentWorker:
                 summary.submitted_items += 1
                 summary.messages.append(f"processed {item.item_id} in {result.output_dir}; exported core submissions to {export_path}")
             except Exception as exc:
+                if isinstance(exc, PlatformApiError) and exc.code == "address_not_registered":
+                    summary.errors.append(f"address not registered on Base (chainId=8453); run AWP registration first")
+                    return
                 if isinstance(exc, httpx.HTTPStatusError) and self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
                     return
                 self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
@@ -1316,6 +1334,17 @@ def _export_and_submit_core_submissions_for_task(
                     pass  # Unsupported challenge type, keep original response
                 except Exception:
                     pass  # PoW answer or retry failed, keep original response
+    # Check for submission_too_frequent in per-entry rejections
+    if isinstance(resp_data, dict):
+        rejected = resp_data.get("rejected")
+        if isinstance(rejected, list):
+            for entry in rejected:
+                if isinstance(entry, dict) and entry.get("reason") == "submission_too_frequent":
+                    import logging as _log
+                    _log.getLogger("agent.submit").warning(
+                        "submission_too_frequent for %s — back off before next submit",
+                        entry.get("url", "?"),
+                    )
     response_path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return export_path, response_path
 

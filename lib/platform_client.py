@@ -474,11 +474,20 @@ class PlatformClient:
 
     def fetch_my_submissions(self) -> list[dict[str, Any]]:
         """GET /api/mining/v1/miners/me/submissions"""
-        resp = self._request_optional_data("GET", "/api/mining/v1/miners/me/submissions")
-        if isinstance(resp, list):
-            return resp
-        data = resp.get("items") if isinstance(resp, dict) else None
-        return data if isinstance(data, list) else []
+        try:
+            payload = self._request("GET", "/api/mining/v1/miners/me/submissions", None)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                return []
+            raise
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            items = data.get("items")
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
 
     def fetch_current_epoch(self) -> dict[str, Any]:
         """GET /api/core/v1/epochs/current"""
@@ -494,3 +503,49 @@ class PlatformClient:
         return self._request_optional_data(
             "GET", f"/api/core/v1/url/check?dataset_id={quote(dataset_id, safe='')}&url={encoded_url}"
         )
+
+    # === Public info endpoints (v2.1) ===
+
+    def fetch_protocol_info(self) -> dict[str, Any]:
+        """GET /api/public/v1/protocol-info"""
+        return self._request_optional_data("GET", "/api/public/v1/protocol-info")
+
+    def fetch_network_stats(self) -> dict[str, Any]:
+        """GET /api/public/v1/stats"""
+        return self._request_optional_data("GET", "/api/public/v1/stats")
+
+    def list_epochs(self) -> list[dict[str, Any]]:
+        """GET /api/core/v1/epochs"""
+        payload = self._request("GET", "/api/core/v1/epochs", None)
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return []
+
+    def fetch_epoch(self, epoch_id: str) -> dict[str, Any]:
+        """GET /api/core/v1/epochs/:epochID"""
+        return self._request_optional_data("GET", f"/api/core/v1/epochs/{epoch_id}")
+
+    def list_online_miners(self) -> list[dict[str, Any]]:
+        """GET /api/mining/v1/miners/online"""
+        payload = self._request("GET", "/api/mining/v1/miners/online", None)
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return []
+
+    def list_online_validators(self) -> list[dict[str, Any]]:
+        """GET /api/mining/v1/validators/online"""
+        payload = self._request("GET", "/api/mining/v1/validators/online", None)
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return []
+
+    def fetch_epoch_snapshot(self, epoch_id: str) -> dict[str, Any]:
+        """GET /api/mining/v1/epochs/:id/snapshot"""
+        return self._request_optional_data("GET", f"/api/mining/v1/epochs/{epoch_id}/snapshot")
+
+    def fetch_epoch_settlement_results(self, epoch_id: str) -> dict[str, Any]:
+        """GET /api/mining/v1/epochs/:id/settlement-results"""
+        return self._request_optional_data("GET", f"/api/mining/v1/epochs/{epoch_id}/settlement-results")
