@@ -87,12 +87,13 @@ class EvaluationEngine:
                     reason=match_result.get("reason", "M0 and M1 data do not match"),
                 )
 
-        # Phase 1: Consistency Check
+        # Phase 1: Consistency Check — poor quality is still "match" with low score,
+        # not "mismatch". Mismatch means M0 data is fabricated (Phase 0 only).
         consistency_result = self._check_consistency(cleaned_data_str, structured_data)
 
         if not consistency_result["consistent"]:
             return EvaluationResult(
-                result="mismatch",
+                result="match",
                 verdict="rejected",
                 consistent=False,
                 score=0,
