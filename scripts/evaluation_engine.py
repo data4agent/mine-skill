@@ -20,7 +20,6 @@ class EvaluationResult:
     verdict: str  # "accepted" | "rejected"
     consistent: bool
     score: int  # 0-100, meaningful only when result="match"
-    reason: str
 
 
 class EvaluationEngine:
@@ -124,7 +123,7 @@ class EvaluationEngine:
         sections.append("   - Information sufficiency (15%): is obvious information from the source missing?")
         sections.append("")
         sections.append("## Output (strict JSON only, no markdown)")
-        sections.append('{"result": "match" or "mismatch", "score": 0-100, "reason": "brief rationale"}')
+        sections.append('{"result": "match" or "mismatch", "score": 0-100}')
 
         prompt = "\n".join(sections)
 
@@ -139,12 +138,10 @@ class EvaluationEngine:
                     verdict="rejected",
                     consistent=False,
                     score=0,
-                    reason="evaluation parse failed: invalid LLM response",
                 )
 
             eval_result = str(result.get("result", "match"))
             eval_score = int(result.get("score", 0))
-            eval_reason = str(result.get("reason", ""))
 
             if eval_result not in ("match", "mismatch"):
                 eval_result = "match"
@@ -156,7 +153,6 @@ class EvaluationEngine:
                     verdict="rejected",
                     consistent=False,
                     score=0,
-                    reason=eval_reason,
                 )
 
             return EvaluationResult(
@@ -164,7 +160,6 @@ class EvaluationEngine:
                 verdict="accepted" if eval_score > 0 else "rejected",
                 consistent=True,
                 score=eval_score,
-                reason=eval_reason,
             )
 
         except Exception as e:
@@ -174,6 +169,5 @@ class EvaluationEngine:
                 verdict="rejected",
                 consistent=False,
                 score=0,
-                reason=f"evaluation error: {str(e)}",
             )
 

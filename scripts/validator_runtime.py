@@ -490,7 +490,7 @@ class ValidatorRuntime:
             log.info("Evaluation reported: %s", action)
         else:
             self._stats["tasks_rejected"] += 1
-            action = f"mismatch task={task_id} reason={eval_result.reason[:80]}"
+            action = f"mismatch task={task_id}"
             log.info("Evaluation reported: %s", action)
 
         self._record_action(action, {
@@ -506,7 +506,6 @@ class ValidatorRuntime:
             "assignment_id": assignment_id,
             "result": eval_result.result,
             "score": eval_result.score,
-            "reason": eval_result.reason,
         })
         self._write_status()
 
