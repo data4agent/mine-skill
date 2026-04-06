@@ -2,11 +2,12 @@
 name: mine
 description: >
   Launches autonomous data mining and validation workers that earn $aMine rewards.
-  Everything is automatic — wallet detection, registration, dataset discovery,
-  crawling, structuring, and submission. Use this skill for any mining or validation
+  ALL platform interaction goes through `python scripts/run_tool.py` commands —
+  never make direct HTTP/curl/fetch calls to the API (they require EIP-712 crypto
+  signatures and will always fail). Use this skill for any mining or validation
   request: start, stop, status, scores, datasets, logs, or troubleshooting.
   Not for AWP wallet transfers, RootNet staking, or server monitoring.
-version: 0.4.1
+version: 0.4.2
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -28,203 +29,131 @@ metadata:
 Autonomous data mining & validation on AWP. Agents earn $aMine rewards by
 crawling public data and validating others' submissions.
 
-## CRITICAL RULES
+## How This Skill Works
 
-**NEVER make direct HTTP requests to the platform API.** All platform interaction
-MUST go through `python scripts/run_tool.py <command>`. The platform uses EIP-712
-cryptographic signatures that are computed internally by the signing infrastructure.
-Raw HTTP calls (via curl, fetch, httpx, requests, or any other HTTP client) will
-always fail with `missing_auth_headers` or `signer_mismatch`. There are NO exceptions.
+You interact with the platform **exclusively** through CLI commands:
 
-**NEVER construct JSON-RPC payloads** for the platform API. The request format and
-authentication are handled entirely by the internal `PlatformClient`. Your only
-interface is `run_tool.py` commands.
+```
+python scripts/run_tool.py <command>
+```
 
-**NEVER print, echo, or display:** `AWP_WALLET_TOKEN`, `VALIDATOR_PRIVATE_KEY`,
-private keys, mnemonics, or `.env` contents. To check if set: `[ -n "$VAR" ] && echo "set"`.
+These commands handle wallet authentication (EIP-712 cryptographic signatures),
+API requests, error recovery, and output formatting internally. You never need
+to understand or touch the underlying HTTP/signing layer.
+
+**Available commands:**
+
+| Command | Purpose |
+|---------|---------|
+| `agent-status` | Check if miner is ready to start |
+| `agent-start [datasetId]` | Start mining (optionally for a specific dataset) |
+| `agent-control status` | Check mining progress |
+| `agent-control stop` | Stop mining |
+| `agent-control pause` | Pause mining |
+| `agent-control resume` | Resume mining |
+| `list-datasets` | Show available datasets |
+| `doctor` | Diagnose issues (connectivity, auth, wallet) |
+| `validator-start` | Start validating |
+| `validator-control status` | Check validator status |
+| `validator-control stop` | Stop validator |
+| `validator-doctor` | Diagnose validator issues |
+
+## Rules
+
+1. **Only use `run_tool.py` commands.** Never make HTTP requests (curl, fetch, httpx,
+   requests, WebFetch) to the platform. Never construct JSON-RPC payloads. The platform
+   requires cryptographic signatures — raw HTTP calls always fail with 401.
+
+2. **Never expose secrets.** Do not print `AWP_WALLET_TOKEN`, `VALIDATOR_PRIVATE_KEY`,
+   private keys, mnemonics, or `.env` contents. To check if set: `[ -n "$VAR" ] && echo "set"`.
+
+3. **Format output for humans.** Commands return JSON with `user_message` and `_internal`.
+   Show `user_message` with indicators — never dump raw JSON. Never show `_internal` to user.
 
 ## Welcome Screen
 
-On first launch (no worker running), print this and **ask the user to choose a role**:
+On first launch (no worker running), show this and **ask the user to choose a role**:
 
 ```text
-⛏️  mine · autonomous data mining
+mine - autonomous data mining
 
 crawl data. earn rewards. fully autonomous.
 
-── choose your role ─────────────
-1. Miner      → crawl public data, earn $aMine
-2. Validator  → evaluate submissions, earn $aMine
-──────────────────────────────────
+-- choose your role ----------------
+1. Miner      - crawl public data, earn $aMine
+2. Validator  - evaluate submissions, earn $aMine
+------------------------------------
 
 which role? (1 or 2)
 ```
 
 **Do NOT skip this step.** The user must choose before any worker starts.
 
-- If the user says "mine", "miner", "start mining", "1" → proceed to **Start Mining**
-- If the user says "validate", "validator", "start validating", "2" → proceed to **Start Validator**
+- "mine", "miner", "start mining", "1" -> **Start Mining**
+- "validate", "validator", "start validating", "2" -> **Start Validator**
 - If unclear, ask again
 
-Once the role is chosen, proceed to Decide What To Do.
+## Miner Workflow
 
-## Decide What To Do
+### Start Mining
 
-### If role is Miner
-
-Run readiness check:
+Step 1 — Check readiness:
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-status
 ```
 
-| User Intent | Action |
-| ----------- | ------ |
-| "start" / "go online" | → **Start Mining** |
-| "start" (already running) | → **Report Status** |
-| "status" / "how am I doing" | → **Report Status** |
-| "help" | → **Help** |
-| "stop" | → **Stop** |
-| "pause" | → **Pause** |
-| "resume" | → **Resume** |
-| "datasets" / "what can I mine" | → **List Datasets** |
-| "diagnose" / "doctor" | → **Diagnose** |
-| "logs" | → Read output from `output/agent-runs/` |
+If not ready, follow the fix instructions in the output.
 
-### If role is Validator
-
-Run readiness check:
-
-```bash
-cd {baseDir} && python scripts/run_tool.py validator-doctor
-```
-
-| User Intent | Action |
-| ----------- | ------ |
-| "start" / "go online" | → **Start Validator** |
-| "status" | → **Validator Status** |
-| "stop" | → **Stop Validator** |
-| "diagnose" / "doctor" | → **Validator Doctor** |
-
-### Role-agnostic
-
-| User Intent | Action |
-| ----------- | ------ |
-| "switch to miner" / "switch to validator" | → **Welcome Screen** (re-choose) |
-| "help" | → **Help** |
-
-## Start Mining
-
-### Step 1: Check Readiness
-
-```bash
-cd {baseDir} && python scripts/run_tool.py agent-status
-```
-
-If not ready, the output contains fix instructions. Follow them.
-
-### Step 2: Start Worker
-
-**Preferred** (non-blocking sub-agent):
-
-```javascript
-sessions_spawn({
-  task: "cd {baseDir} && python scripts/run_tool.py agent-start",
-  label: "mine-worker",
-  runTimeoutSeconds: 3600
-})
-```
-
-**Fallback** (direct):
+Step 2 — Start worker:
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-start
 ```
 
-If a dataset selection is required, the output lists options. Re-run with the dataset ID:
+If dataset selection is required, the output lists options. Re-run with the ID:
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-start <datasetId>
 ```
 
-### Step 3: Confirm Running
+Step 3 — Confirm to user:
 
 ```text
-[1/3] wallet       0x1234...5678 ✓
-[2/3] platform     connected ✓
-[3/3] worker       started (session: abc12) ✓
+[1/3] wallet       0x1234...5678  ok
+[2/3] platform     connected  ok
+[3/3] worker       started (session: abc12)  ok
 
 mining. say "mine status" to check progress.
 ```
 
-## Report Status
+### Check Status
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-control status
 ```
 
-```text
-── mine status ───────────────────
-state:          RUNNING
-session:        abc12
-epoch:          E-42 · 18h remaining
-progress:       [████████░░░░] 60%  48/80
-datasets:       wiki-articles + arxiv-papers
-credit score:   850 [Good]
-──────────────────────────────────
-```
-
-## Help
-
-```text
-── miner ────────────────────────
-start            → begin mining
-status           → your stats
-stop             → stop mining
-pause / resume   → pause or resume
-datasets         → list datasets
-doctor           → diagnose issues
-
-── validator ────────────────────
-start            → start validating
-status           → validator stats
-stop             → stop validator
-doctor           → diagnose issues
-
-── general ──────────────────────
-switch role      → change miner ↔ validator
-help             → this list
-──────────────────────────────────
-```
-
-## Stop
+### Stop / Pause / Resume
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-control stop
-```
-
-## Pause / Resume (Miner only)
-
-```bash
 cd {baseDir} && python scripts/run_tool.py agent-control pause
 cd {baseDir} && python scripts/run_tool.py agent-control resume
 ```
 
-## List Datasets
+### List Datasets
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py list-datasets
 ```
 
-## Diagnose
+### Diagnose
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py doctor
 ```
 
----
-
-## Validator
+## Validator Workflow
 
 ### Start Validating
 
@@ -233,70 +162,72 @@ cd {baseDir} && python scripts/run_tool.py validator-start
 ```
 
 Auto-installs dependencies, submits validator application, and connects via WebSocket.
+If the application status is `pending_review`, the validator cannot start until approved.
+Re-run the start command after approval.
 
-**Note:** If the application status is `pending_review`, the validator cannot start until approved by the platform admin or allowlist auto-approve. Re-run the start command after approval.
-
-### Validator Status
+### Check Status / Stop
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py validator-control status
-```
-
-### Stop Validator
-
-```bash
 cd {baseDir} && python scripts/run_tool.py validator-control stop
 ```
 
-### Validator Doctor
+### Diagnose
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py validator-doctor
 ```
 
----
+## Error Recovery
 
-## Output Rules
+If any command returns a `401` or authentication error:
 
-All commands return JSON with `user_message`, `user_actions`, and `_internal`.
+1. Run `python scripts/run_tool.py doctor` to diagnose
+2. Follow the fix instructions in the output
+3. Common causes: expired wallet session, missing AWP registration
 
-- Show `user_message` formatted with ✓/✗/! indicators — **never dump raw JSON**
-- `_internal` is for agent execution only — **never show to user**
-- On errors, show the fix command from `_internal`, not the raw error
+If you see `missing_auth_headers` or `signer_mismatch`, it means something
+bypassed `run_tool.py`. Stop and use the commands listed above instead.
+
+**Never attempt to fix auth by making HTTP calls, adding headers, or reading
+signing code.** The `doctor` command handles all auth diagnostics.
+
+## Intent Routing
+
+| User says | Command to run |
+|-----------|---------------|
+| "start" / "go online" | `agent-start` or `validator-start` (depends on role) |
+| "status" / "how am I doing" | `agent-control status` or `validator-control status` |
+| "stop" | `agent-control stop` or `validator-control stop` |
+| "pause" | `agent-control pause` (miner only) |
+| "resume" | `agent-control resume` (miner only) |
+| "datasets" / "what can I mine" | `list-datasets` |
+| "diagnose" / "doctor" / "fix" | `doctor` or `validator-doctor` |
+| "help" | Show the command table from "How This Skill Works" |
+| "switch role" | Re-show Welcome Screen |
+| "check connectivity" / "heartbeat" | `doctor` (never direct HTTP) |
+| "401 error" / "auth error" | `doctor` (see Error Recovery) |
+
+## Sub-Agent Guidelines
+
+- **One mining worker per session** — do not spawn multiple concurrent miners
+- Use `agent-control status` to poll progress
+- Use `agent-control stop` to terminate
+- All platform interaction goes through `run_tool.py` — this applies to sub-agents too
 
 ## Configuration
 
-**No environment variables needed.** Everything is auto-detected.
+No environment variables needed. Everything is auto-detected.
 
 Runtime overrides (optional, via `.env` or shell):
 
 | Variable | Default | Description |
-| -------- | ------- | ----------- |
+|----------|---------|-------------|
 | `PLATFORM_BASE_URL` | `https://api.minework.net` | Platform API endpoint |
 | `MINER_ID` | `mine-agent` | Miner identifier |
 | `WORKER_MAX_PARALLEL` | `3` | Concurrent crawl workers |
 
 For validator settings, see `docs/ENVIRONMENT.md`.
-
-## Sub-Agent Guidelines
-
-- **One mining worker per session** — do not spawn multiple concurrent miners
-- Use `agent-control status` to poll progress from the main conversation
-- Use `agent-control stop` to terminate
-- **ALL platform interaction goes through `run_tool.py`** — never call APIs directly
-
-## Error Recovery
-
-If a `run_tool.py` command returns a `401` or authentication error:
-
-1. Run `python scripts/run_tool.py doctor` to diagnose
-2. The doctor output contains fix instructions — follow them
-3. Common causes: expired wallet session, missing AWP registration
-4. **Do NOT attempt to fix auth by making direct HTTP calls or adding headers yourself**
-
-If you see `missing_auth_headers` or `signer_mismatch` in any context, it means
-something is calling the platform API without going through `run_tool.py`. Stop
-and re-read the CRITICAL RULES section above.
 
 ## Advanced
 
