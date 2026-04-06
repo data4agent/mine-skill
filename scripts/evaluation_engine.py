@@ -25,10 +25,10 @@ class EvaluationResult:
 
 class EvaluationEngine:
     """
-    Two-phase evaluation engine for structured data quality.
+    Single-pass evaluation engine for data quality assessment.
 
-    Phase 1: Consistency Check - Is structured_data consistent with cleaned_data?
-    Phase 2: Quality Scoring - Score on 4 dimensions (completeness, accuracy, type, sufficiency)
+    Uses one LLM call to perform authenticity check (M0 vs M1), consistency check,
+    and quality scoring (completeness, accuracy, type correctness, sufficiency).
     """
 
     def __init__(
@@ -59,11 +59,7 @@ class EvaluationEngine:
         dataset_schema: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """
-        Evaluate structured data quality per protocol.
-
-        Phase 0: Compare M0 (cleaned_data) vs M1 (repeat_cleaned_data) to determine match/mismatch.
-        Phase 1: If match, check consistency of structured_data against cleaned_data.
-        Phase 2: If consistent, score structured_data quality on 4 dimensions.
+        Single-pass evaluation per protocol: authenticity + consistency + quality in one LLM call.
 
         Args:
             cleaned_data: Original miner submission (M0).
@@ -77,209 +73,107 @@ class EvaluationEngine:
         else:
             cleaned_data_str = str(cleaned_data)
 
-        # Phase 0: M0 vs M1 comparison (match/mismatch)
-        if repeat_cleaned_data:
-            match_result = self._compare_m0_m1(cleaned_data_str, str(repeat_cleaned_data))
-            if not match_result["match"]:
-                return EvaluationResult(
-                    result="mismatch",
-                    verdict="rejected",
-                    consistent=False,
-                    score=0,
-                    reason=match_result.get("reason", "M0 and M1 data do not match"),
-                )
-
-        # Phase 1: Consistency Check — poor quality is still "match" with low score,
-        # not "mismatch". Mismatch means M0 data is fabricated (Phase 0 only).
-        consistency_result = self._check_consistency(cleaned_data_str, structured_data)
-
-        if not consistency_result["consistent"]:
-            return EvaluationResult(
-                result="match",
-                verdict="rejected",
-                consistent=False,
-                score=0,
-                reason=consistency_result["reason"],
-            )
-
-        # Phase 2: Quality Scoring
-        try:
-            scoring_result = self._score_quality(
-                cleaned_data_str, structured_data, schema_fields,
-                dataset_schema=dataset_schema,
-            )
-
-            return EvaluationResult(
-                result="match",
-                verdict="accepted",
-                consistent=True,
-                score=scoring_result["final_score"],
-                reason=scoring_result["notes"],
-            )
-        except Exception as e:
-            log.error("scoring phase failed: %s", str(e))
-            return EvaluationResult(
-                result="match",
-                verdict="rejected",
-                consistent=True,
-                score=0,
-                reason=f"scoring failed: {str(e)}",
-            )
-
-    def _compare_m0_m1(self, m0_cleaned: str, m1_cleaned: str) -> dict[str, Any]:
-        """Phase 0: Compare original (M0) vs repeat crawl (M1) data for match/mismatch."""
-        prompt = f"""You are a data authenticity checker. Compare two independently crawled versions of the same URL.
-
-## Original crawl (M0)
-{m0_cleaned[:3000]}
-
-## Re-crawl (M1)
-{m1_cleaned[:3000]}
-
-## Task
-Determine if M0 and M1 represent the same content (match) or significantly different content (mismatch).
-Minor differences (timestamps, ads, layout changes) are normal and should be "match".
-Major content differences (completely different text, missing core content, fabricated data) are "mismatch".
-
-## Output (strict JSON only, no markdown)
-{{"match": true/false, "reason": "brief rationale"}}"""
-
-        try:
-            response = self.llm_call(prompt)
-            result = parse_json_response(response)
-            if not result or "match" not in result:
-                log.error("M0/M1 comparison parse failed: %s", response[:200])
-                return {"match": False, "reason": "comparison parse failed, defaulting to mismatch"}
-            return {"match": result.get("match", False), "reason": result.get("reason", "")}
-        except Exception as e:
-            log.error("M0/M1 comparison failed: %s", str(e))
-            return {"match": False, "reason": f"comparison error: {e}, defaulting to mismatch"}
-
-    def _check_consistency(
-        self, cleaned_data: str, structured_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Phase 1: Check if structured data is consistent with cleaned data.
-
-        Args:
-            cleaned_data: Original cleaned data string.
-            structured_data: Miner-extracted structured data.
-
-        Returns:
-            Dict with 'consistent' (bool) and 'reason' (str).
-        """
-        structured_json = json.dumps(structured_data, ensure_ascii=False, indent=2)
-
-        prompt = f"""You are a data consistency checker. Decide whether the miner's structured data
-is consistent with the original cleaned data.
-
-## Original data (source of truth)
-{cleaned_data}
-
-## Structured data extracted by miner
-{structured_json}
-
-## Criteria
-- Consistent: values in structured data are supported by the original text without fabrication.
-- Inconsistent: structured data adds facts not in the original, or severely distorts meaning.
-
-## Output (strict JSON only, no markdown)
-{{"consistent": true/false, "reason": "brief rationale"}}"""
-
-        try:
-            response = self.llm_call(prompt)
-            result = parse_json_response(response)
-
-            if not result or "consistent" not in result:
-                log.error("consistency check parse failed: %s", response[:200])
-                return {
-                    "consistent": False,
-                    "reason": "consistency check parse failed: invalid LLM response",
-                }
-
-            return {
-                "consistent": result.get("consistent", False),
-                "reason": result.get("reason", "no reason given"),
-            }
-
-        except TimeoutError as e:
-            log.error("consistency check timeout: %s", str(e))
-            return {
-                "consistent": False,
-                "reason": f"consistency check timeout: {str(e)}",
-            }
-        except Exception as e:
-            log.error("consistency check failed: %s", str(e))
-            return {
-                "consistent": False,
-                "reason": f"consistency check error: {str(e)}",
-            }
-
-    def _score_quality(
-        self,
-        cleaned_data: str,
-        structured_data: dict[str, Any],
-        schema_fields: list[str],
-        dataset_schema: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Phase 2: Score data quality on multiple dimensions.
-
-        Args:
-            cleaned_data: Original cleaned data string.
-            structured_data: Miner-extracted structured data.
-            schema_fields: List of field names from schema.
-            dataset_schema: Full schema definition with types and required fields.
-
-        Returns:
-            Dict with dimension scores and final_score.
-        """
         structured_json = json.dumps(structured_data, ensure_ascii=False, indent=2)
         if dataset_schema:
             schema_json = json.dumps(dataset_schema, ensure_ascii=False, indent=2)
         else:
             schema_json = json.dumps({"fields": schema_fields}, ensure_ascii=False, indent=2)
 
-        prompt = f"""You are a data quality scorer. Score the miner's structured extraction.
+        has_repeat = bool(repeat_cleaned_data and repeat_cleaned_data.strip())
 
-## Schema
-{schema_json}
+        # Build single prompt covering all evaluation phases
+        sections = []
+        sections.append("You are a data quality evaluator for a decentralized data mining network.")
+        sections.append("")
 
-## Original data
-{cleaned_data}
+        if has_repeat:
+            sections.append("## Step 1: Authenticity Check (M0 vs M1)")
+            sections.append("Compare the original crawl (M0) with the independent re-crawl (M1).")
+            sections.append("Minor differences (timestamps, ads, layout) are normal — report match.")
+            sections.append("Major content differences (fabricated data, wrong page, missing core content) — report mismatch.")
+            sections.append("")
+            sections.append("### Original crawl (M0)")
+            sections.append(cleaned_data_str[:4000])
+            sections.append("")
+            sections.append("### Re-crawl (M1)")
+            sections.append(str(repeat_cleaned_data)[:4000])
+        else:
+            sections.append("## Original data")
+            sections.append(cleaned_data_str[:4000])
 
-## Structured data extracted by miner
-{structured_json}
+        sections.append("")
+        sections.append("## Structured data extracted by miner")
+        sections.append(structured_json)
+        sections.append("")
+        sections.append("## Dataset schema")
+        sections.append(schema_json)
 
-## Dimensions
-1. Completeness (30%): are required fields present?
-2. Accuracy (40%): are extracted values correct?
-3. Type correctness (15%): do values match schema types?
-4. Information sufficiency (15%): is critical information missing?
+        sections.append("")
+        sections.append("## Evaluation instructions")
+        if has_repeat:
+            sections.append("1. Determine `result`: \"match\" if M0 and M1 represent the same content, \"mismatch\" if not.")
+            sections.append("   If mismatch, set score to 0 and skip quality scoring.")
+            sections.append("2. If match, score structured_data quality (0-100) based on:")
+        else:
+            sections.append("Set result to \"match\" (no re-crawl data to compare).")
+            sections.append("Score structured_data quality (0-100) based on:")
 
-## Output (strict JSON only, no markdown)
-{{"completeness": 0-100, "accuracy": 0-100, "type_correctness": 0-100, "sufficiency": 0-100, "final_score": 0-100, "notes": "scoring notes"}}"""
+        sections.append("   - Completeness (30%): are all required schema fields present and non-empty?")
+        sections.append("   - Accuracy (40%): do values correctly reflect the original data?")
+        sections.append("   - Type correctness (15%): do values match their schema-defined types?")
+        sections.append("   - Information sufficiency (15%): is obvious information from the source missing?")
+        sections.append("")
+        sections.append("## Output (strict JSON only, no markdown)")
+        sections.append('{"result": "match" or "mismatch", "score": 0-100, "reason": "brief rationale"}')
+
+        prompt = "\n".join(sections)
 
         try:
             response = self.llm_call(prompt)
             result = parse_json_response(response)
 
-            if not result or "final_score" not in result:
-                log.error("quality scoring parse failed: %s", response[:200])
-                raise ValueError("quality scoring parse failed: invalid LLM response")
+            if not result or "result" not in result:
+                log.error("evaluation parse failed: %s", response[:200])
+                return EvaluationResult(
+                    result="mismatch" if has_repeat else "match",
+                    verdict="rejected",
+                    consistent=False,
+                    score=0,
+                    reason="evaluation parse failed: invalid LLM response",
+                )
 
-            return {
-                "completeness": result.get("completeness", 0),
-                "accuracy": result.get("accuracy", 0),
-                "type_correctness": result.get("type_correctness", 0),
-                "sufficiency": result.get("sufficiency", 0),
-                "final_score": result.get("final_score", 0),
-                "notes": result.get("notes", "no scoring notes"),
-            }
+            eval_result = str(result.get("result", "match"))
+            eval_score = int(result.get("score", 0))
+            eval_reason = str(result.get("reason", ""))
 
-        except TimeoutError as e:
-            log.error("quality scoring timeout: %s", str(e))
-            raise ValueError(f"quality scoring timeout: {str(e)}")
+            if eval_result not in ("match", "mismatch"):
+                eval_result = "match"
+            eval_score = max(0, min(100, eval_score))
+
+            if eval_result == "mismatch":
+                return EvaluationResult(
+                    result="mismatch",
+                    verdict="rejected",
+                    consistent=False,
+                    score=0,
+                    reason=eval_reason,
+                )
+
+            return EvaluationResult(
+                result="match",
+                verdict="accepted" if eval_score > 0 else "rejected",
+                consistent=True,
+                score=eval_score,
+                reason=eval_reason,
+            )
+
         except Exception as e:
-            log.error("quality scoring failed: %s", str(e))
-            raise ValueError(f"quality scoring error: {str(e)}")
+            log.error("evaluation failed: %s", str(e))
+            return EvaluationResult(
+                result="mismatch" if has_repeat else "match",
+                verdict="rejected",
+                consistent=False,
+                score=0,
+                reason=f"evaluation error: {str(e)}",
+            )
+
