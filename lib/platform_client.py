@@ -217,8 +217,12 @@ class PlatformClient:
     def _claim(self, path: str) -> dict[str, Any] | None:
         try:
             payload = self._request("POST", path, {})
+        except PlatformApiError as api_err:
+            if api_err.status_code in (404, 409):
+                return None
+            raise
         except httpx.HTTPStatusError as error:
-            if error.response.status_code == 404:
+            if error.response.status_code in (404, 409):
                 return None
             raise
         data = payload.get("data")
@@ -231,8 +235,12 @@ class PlatformClient:
     def _request_optional_data(self, method: str, path: str) -> dict[str, Any]:
         try:
             payload = self._request(method, path, None)
+        except PlatformApiError as api_err:
+            if api_err.status_code in (404, 409):
+                return {}
+            raise
         except httpx.HTTPStatusError as error:
-            if error.response.status_code == 404:
+            if error.response.status_code in (404, 409):
                 return {}
             raise
         data = payload.get("data")
@@ -317,16 +325,10 @@ class PlatformClient:
             except PlatformApiError as api_err:
                 last_error = api_err
                 status_code = api_err.status_code
-                if status_code == 404:
-                    raise httpx.HTTPStatusError(
-                        str(api_err), request=response.request, response=response
-                    ) from api_err
                 if status_code >= 500 and attempt < max_attempts:
                     time.sleep(0.5 * attempt)
                     continue
-                raise httpx.HTTPStatusError(
-                    str(api_err), request=response.request, response=response
-                ) from api_err
+                raise
             except httpx.HTTPStatusError as error:
                 last_error = error
                 status_code = error.response.status_code
@@ -394,15 +396,7 @@ class PlatformClient:
 
     def get_my_validator_application(self) -> dict[str, Any]:
         """GET /api/iam/v1/validator-applications/me — returns {} if no application exists"""
-        try:
-            resp = self._request("GET", "/api/iam/v1/validator-applications/me", None)
-        except (httpx.HTTPStatusError, PlatformApiError) as error:
-            sc = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else getattr(error, "status_code", 0)
-            if sc == 404:
-                return {}
-            raise
-        data = resp.get("data")
-        return data if isinstance(data, dict) else {}
+        return self._request_optional_data("GET", "/api/iam/v1/validator-applications/me")
 
     def join_ready_pool(self) -> dict[str, Any]:
         """POST /api/mining/v1/validators/ready"""
