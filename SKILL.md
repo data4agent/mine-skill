@@ -198,6 +198,16 @@ If any command returns a `401` or authentication error:
 2. Follow the fix instructions in the output
 3. Common causes: expired wallet session, missing AWP registration
 
+If the error is `address_not_registered` or `registration_required`:
+
+1. The wallet needs to be registered on-chain before mining can start
+2. Tell the user to **install and use the AWP Skill** to complete registration
+3. If the AWP Skill is not installed, guide the user to install it first
+4. After registration completes, retry `python scripts/run_tool.py agent-start`
+
+**Do NOT** tell users to register on a website or manually call any registration API.
+The AWP Skill handles the entire on-chain registration flow automatically.
+
 If you see `missing_auth_headers` or `signer_mismatch`, it means something
 bypassed `run_tool.py`. Stop and use the commands listed above instead.
 

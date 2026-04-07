@@ -666,8 +666,8 @@ def run_diagnosis() -> str:
                         lines.append("    → Session token expired")
                         lines.append("    Fix: refresh the wallet session with awp-wallet unlock --duration 3600")
                     elif error_code == "WALLET_NOT_REGISTERED":
-                        lines.append("    → This wallet is not registered on the platform")
-                        lines.append("    Fix: Register your wallet at the platform website")
+                        lines.append("    → This wallet is not registered on-chain")
+                        lines.append("    Fix: Install and use the AWP Skill to complete registration, then retry")
                     elif error_code == "WALLET_BANNED":
                         lines.append("    → This wallet has been banned")
                         lines.append("    Contact: Platform support")
@@ -982,13 +982,13 @@ def run_agent_start(dataset_arg: str = "") -> str:
     except RuntimeError as exc:
         return json.dumps({
             "state": "error",
-            "user_message": "Registration failed. Please check your network connection and try again.",
-            "user_actions": ["Run diagnostics", "Retry"],
+            "user_message": "Wallet not registered on-chain. Please install and use the AWP Skill to complete registration, then retry.",
+            "user_actions": ["Install AWP Skill", "Retry"],
             "_internal": {
                 "error": "registration_required",
                 "detail": str(exc),
                 "action_map": {
-                    "Run diagnostics": "python scripts/run_tool.py doctor",
+                    "Install AWP Skill": "Install the AWP Skill from the skill marketplace to complete on-chain registration",
                     "Retry": "python scripts/run_tool.py agent-start",
                 },
             },

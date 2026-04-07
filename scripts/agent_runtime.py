@@ -768,7 +768,7 @@ class AgentWorker:
                     summary.errors.append(f"unknown claim_task_type: {item.claim_task_type} for {item.claim_task_id}")
             except PlatformApiError as api_exc:
                 if api_exc.code == "address_not_registered":
-                    summary.errors.append("address not registered on Base (chainId=8453); run AWP registration first")
+                    summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     return
                 summary.errors.append(f"report failed for {item.item_id}: {api_exc}")
             except httpx.HTTPStatusError as exc:
@@ -790,7 +790,7 @@ class AgentWorker:
                 summary.messages.append(f"processed {item.item_id} in {result.output_dir}; exported core submissions to {export_path}")
             except Exception as exc:
                 if isinstance(exc, PlatformApiError) and exc.code == "address_not_registered":
-                    summary.errors.append(f"address not registered on Base (chainId=8453); run AWP registration first")
+                    summary.errors.append(f"Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     return
                 if isinstance(exc, httpx.HTTPStatusError) and self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
                     return
@@ -821,7 +821,7 @@ class AgentWorker:
                 )
             except PlatformApiError as api_exc:
                 if api_exc.code == "address_not_registered":
-                    summary.errors.append("address not registered; dropping submit-pending item")
+                    summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     self.state_store.clear_submit_pending(item.item_id)
                 continue
             except Exception:
