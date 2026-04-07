@@ -40,6 +40,14 @@ class LLMSchemaExtractor:
         resource_type: str,
         canonical_url: str,
     ) -> tuple[StructuredFields | None, dict[str, Any] | None]:
+        # Truncate to avoid exceeding LLM context window
+        _MAX_LLM_CHARS = 30000
+        if plain_text and len(plain_text) > _MAX_LLM_CHARS:
+            plain_text = plain_text[:_MAX_LLM_CHARS]
+        if markdown and len(markdown) > _MAX_LLM_CHARS:
+            markdown = markdown[:_MAX_LLM_CHARS]
+        if cleaned_html and len(cleaned_html) > _MAX_LLM_CHARS:
+            cleaned_html = cleaned_html[:_MAX_LLM_CHARS]
         result = self.execute(
             {
                 "platform": platform,

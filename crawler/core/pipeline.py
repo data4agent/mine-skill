@@ -278,6 +278,8 @@ async def _run_new_pipeline_async(config: CrawlerConfig) -> tuple[list[dict], li
         if callable(previous) and previous not in (signal.SIG_DFL, signal.SIG_IGN):
             previous(sig, frame)
             return
+        if sig == signal.SIGTERM:
+            raise SystemExit(0)
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _flush_and_delegate)

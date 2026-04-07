@@ -536,7 +536,7 @@ def _extract_wikipedia(record: dict, fetched: dict) -> dict:
     title = page.get("title") or record.get("title")
     plain_text = page.get("extract") or ""
     markdown = f"# {title}\n\n{plain_text}".strip()
-    fullurl = page.get("fullurl") or fetched["url"]
+    fullurl = page.get("fullurl") or fetched.get("url") or ""
     wiki_host = _extract_wiki_host(fullurl)
     extlinks = [item.get("*", "").strip() for item in page.get("extlinks", []) if item.get("*", "").strip()]
     linked_titles = [item.get("title", "").strip() for item in page.get("links", []) if item.get("title", "").strip()]

@@ -40,9 +40,7 @@ class RateLimiter:
 
     def _get_lock(self, platform: str) -> asyncio.Lock:
         """Return (or create) the asyncio.Lock for a platform."""
-        if platform not in self._locks:
-            self._locks[platform] = asyncio.Lock()
-        return self._locks[platform]
+        return self._locks.setdefault(platform, asyncio.Lock())
 
     async def acquire(self, platform: str) -> None:
         """Wait until the next request is allowed for *platform*."""

@@ -172,7 +172,7 @@ def extract_html_with_crawl4ai(
                 platform=platform,
                 resource_type=resource_type,
             )
-            if not fit_html:
+            if not fit_html and not cleaned_html:
                 return fallback_result
             if _has_heading(fallback_result.html) and not _has_heading(post_processed.html):
                 return fallback_result

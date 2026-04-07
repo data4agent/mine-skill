@@ -92,7 +92,8 @@ DECORATION_IDS = {
 def _load_cookie_map(storage_state_path: str | None) -> dict[str, str]:
     if storage_state_path is None:
         return {}
-    payload = json.loads(open(storage_state_path, "r", encoding="utf-8").read())
+    with open(storage_state_path, "r", encoding="utf-8") as fh:
+        payload = json.loads(fh.read())
     cookies = payload.get("cookies", []) if isinstance(payload, dict) else []
     return {item.get("name"): item.get("value") for item in cookies if isinstance(item, dict)}
 
@@ -253,7 +254,7 @@ def _fetch_linkedin_api(record: dict, discovered: dict, storage_state_path: str 
         try:
             response = _fetch_linkedin_json(
                 canonical_url=canonical_url,
-                endpoint=_build_profile_lookup_endpoint(record["public_identifier"]),
+                endpoint=_build_profile_lookup_endpoint(record.get("public_identifier") or ""),
                 storage_state_path=storage_state_path,
                 discovered=discovered,
             )
@@ -283,7 +284,7 @@ def _fetch_linkedin_api(record: dict, discovered: dict, storage_state_path: str 
         try:
             response = _fetch_linkedin_json(
                 canonical_url=canonical_url,
-                endpoint=_build_company_lookup_endpoint(record["company_slug"]),
+                endpoint=_build_company_lookup_endpoint(record.get("company_slug") or ""),
                 storage_state_path=storage_state_path,
                 discovered=discovered,
             )

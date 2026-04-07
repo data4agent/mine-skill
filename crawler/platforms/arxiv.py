@@ -82,7 +82,9 @@ def _extract_versions(raw_arxiv_id: str) -> list[str]:
 
 
 def _fetch_arxiv_api(record: dict, discovered: dict, storage_state_path: str | None) -> dict:
-    arxiv_id = discovered["fields"]["arxiv_id"]
+    arxiv_id = discovered.get("fields", {}).get("arxiv_id", "")
+    if not arxiv_id:
+        raise ValueError(f"arXiv record missing arxiv_id: {discovered.get('canonical_url', '?')}")
     endpoint = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
     return fetch_api_get(
         canonical_url=discovered["canonical_url"],

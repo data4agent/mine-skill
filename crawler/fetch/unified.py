@@ -32,10 +32,9 @@ def _get_or_create_engine(session_root: Path) -> FetchEngine:
     # Close old engine if session root changed
     if _engine is not None:
         try:
-            asyncio.get_running_loop()
-            # We're in async context, can't close synchronously
+            loop = asyncio.get_running_loop()
+            loop.create_task(_engine.close())
         except RuntimeError:
-            # No running loop, safe to close
             asyncio.run(_engine.close())
 
     _engine = FetchEngine(session_root)

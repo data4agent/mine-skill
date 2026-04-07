@@ -67,6 +67,7 @@ class FetchEngine:
             self._started = False
 
     async def __aenter__(self) -> FetchEngine:
+        await self.start()
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
@@ -139,6 +140,8 @@ class FetchEngine:
                     last_fetch_error.error_code if last_fetch_error else "UNKNOWN",
                     exc,
                 )
+                if last_fetch_error and not last_fetch_error.retryable:
+                    break  # non-retryable error — stop trying other backends
                 if last_fetch_error and last_fetch_error.retryable:
                     backoff_seconds = self._rate_limiter.get_backoff_seconds(platform, attempt)
                     await self._circuit_breaker.record_failure_safe(platform, last_fetch_error, backoff_seconds)
