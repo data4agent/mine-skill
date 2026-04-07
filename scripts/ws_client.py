@@ -80,6 +80,7 @@ class ValidatorWSClient:
         self._reconnect_attempt = 0
         self._max_backoff = 60
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._closed = False
 
     @property
@@ -110,17 +111,21 @@ class ValidatorWSClient:
         """Allow reconnections after close() — used when restarting the receive loop."""
         self._closed = False
         self._connected = False
+        self._stop_event.clear()
 
     def close(self) -> None:
         """Close the WebSocket connection."""
-        self._closed = True
-        self._connected = False
-        if self._ws is not None:
+        self._stop_event.set()
+        with self._lock:
+            self._closed = True
+            self._connected = False
+            ws = self._ws
+            self._ws = None
+        if ws is not None:
             try:
-                self._ws.close()
+                ws.close()
             except Exception:
                 pass
-            self._ws = None
 
     def send_ack_eval(self, assignment_id: str) -> None:
         """Send evaluation task acknowledgment. Must be called within 30s of receiving task."""
@@ -142,10 +147,12 @@ class ValidatorWSClient:
         Receive next message from WebSocket.
         Returns None on timeout, raises WSDisconnected on connection loss.
         """
-        if not self._connected or self._ws is None:
-            raise WSDisconnected("not connected")
+        with self._lock:
+            if not self._connected or self._ws is None:
+                raise WSDisconnected("not connected")
+            ws = self._ws
         try:
-            raw = self._ws.recv(timeout=timeout)
+            raw = ws.recv(timeout=timeout)
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8")
             data = json.loads(raw)
@@ -176,9 +183,8 @@ class ValidatorWSClient:
             delay,
             self._reconnect_attempt,
         )
-        time.sleep(delay)
-        if self._closed:
-            return
+        if self._stop_event.wait(timeout=delay):
+            return  # stop requested during backoff
 
         # Refresh auth headers if callback provided
         if self._on_auth_refresh is not None:
@@ -194,10 +200,13 @@ class ValidatorWSClient:
             log.warning("Reconnect attempt %d failed", self._reconnect_attempt)
 
     def _send(self, data: dict[str, Any]) -> None:
-        if not self._connected or self._ws is None:
-            raise WSDisconnected("not connected")
+        with self._lock:
+            if not self._connected or self._ws is None:
+                raise WSDisconnected("not connected")
+            ws = self._ws
         try:
-            self._ws.send(json.dumps(data))
+            ws.send(json.dumps(data))
         except Exception as exc:
-            self._connected = False
+            with self._lock:
+                self._connected = False
             raise WSDisconnected(f"send failed: {exc}") from exc

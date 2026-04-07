@@ -450,10 +450,11 @@ class ValidatorRuntime:
                 self._inc_stat("tasks_received")
                 with self._lock:
                     eligible = self._eligible
+                    paused = self._paused
                 if not eligible:
                     log.info("Not eligible — ignoring evaluation_task %s", msg.assignment_id)
                     continue
-                if self._paused:
+                if paused:
                     log.info("Paused — ignoring evaluation_task %s", msg.assignment_id)
                     continue
                 try:
@@ -475,15 +476,14 @@ class ValidatorRuntime:
                 log.debug("Ignoring message type=%s", msg.type)
 
         log.info("Main loop exited")
-        with self._lock:
-            self._running = False
         self._write_status()
 
     def _poll_evaluation_task_http(self) -> None:
         """HTTP polling fallback when WS is unavailable."""
         with self._lock:
             eligible = self._eligible
-        if not eligible or self._paused:
+            paused = self._paused
+        if not eligible or paused:
             return
         try:
             with self._platform_lock:

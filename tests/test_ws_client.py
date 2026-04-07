@@ -280,21 +280,19 @@ class TestValidatorWSClientSendRejectRepeatCrawl:
 class TestValidatorWSClientReconnectWithBackoff:
     """reconnect_with_backoff() 测试。"""
 
-    @patch("ws_client.time.sleep")
-    def test_exponential_delay(self, mock_sleep: MagicMock) -> None:
-        """延迟应按指数增长: 1s, 2s, 4s, 8s...，最大 60s。"""
+    def test_exponential_delay(self) -> None:
+        """Delay should grow exponentially: 1s, 2s, 4s, 8s..., max 60s."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
-        # 模拟 connect 总是失败
         with patch.object(client, "connect", side_effect=WSDisconnected("fail")):
-            expected_delays = [1, 2, 4, 8, 16, 32, 60, 60]
-            for expected in expected_delays:
-                client.reconnect_with_backoff()
-                actual = mock_sleep.call_args[0][0]
-                assert actual == expected, f"expected delay {expected}, got {actual}"
+            with patch.object(client._stop_event, "wait", return_value=False) as mock_wait:
+                expected_delays = [1, 2, 4, 8, 16, 32, 60, 60]
+                for expected in expected_delays:
+                    client.reconnect_with_backoff()
+                    actual = mock_wait.call_args[1]["timeout"]
+                    assert actual == expected, f"expected delay {expected}, got {actual}"
 
-    @patch("ws_client.time.sleep")
-    def test_auth_refresh_callback(self, mock_sleep: MagicMock) -> None:
-        """提供 on_auth_refresh 时应在重连前刷新 auth headers。"""
+    def test_auth_refresh_callback(self) -> None:
+        """When on_auth_refresh is provided, should refresh auth headers before reconnecting."""
         new_headers = {"Authorization": "Bearer new-token"}
         refresh_fn = MagicMock(return_value=new_headers)
         client = ValidatorWSClient(
@@ -303,25 +301,21 @@ class TestValidatorWSClientReconnectWithBackoff:
             on_auth_refresh=refresh_fn,
         )
         with patch.object(client, "connect", side_effect=WSDisconnected("fail")):
-            client.reconnect_with_backoff()
+            with patch.object(client._stop_event, "wait", return_value=False):
+                client.reconnect_with_backoff()
 
         refresh_fn.assert_called_once()
         assert client._auth_headers == new_headers
 
-    @patch("ws_client.time.sleep")
-    def test_closed_check_after_sleep(self, mock_sleep: MagicMock) -> None:
-        """sleep 之后如果 _closed 为 True，应直接返回不尝试连接。"""
+    def test_closed_check_after_sleep(self) -> None:
+        """If stop_event fires during backoff, should return without connecting."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
 
-        # sleep 执行后设置 _closed = True
-        def set_closed(delay: float) -> None:
-            client._closed = True
-
-        mock_sleep.side_effect = set_closed
-
-        connect_mock = MagicMock()
-        with patch.object(client, "connect", connect_mock):
-            client.reconnect_with_backoff()
+        # Simulate stop_event being set during wait
+        with patch.object(client._stop_event, "wait", return_value=True):
+            connect_mock = MagicMock()
+            with patch.object(client, "connect", connect_mock):
+                client.reconnect_with_backoff()
 
         # connect 不应被调用，因为 _closed 在 sleep 后为 True
         connect_mock.assert_not_called()
@@ -332,11 +326,9 @@ class TestValidatorWSClientReconnectWithBackoff:
         client._closed = True
 
         connect_mock = MagicMock()
-        with patch.object(client, "connect", connect_mock), \
-             patch("ws_client.time.sleep") as mock_sleep:
+        with patch.object(client, "connect", connect_mock):
             client.reconnect_with_backoff()
 
-        mock_sleep.assert_not_called()
         connect_mock.assert_not_called()
 
 

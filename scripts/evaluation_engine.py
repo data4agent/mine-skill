@@ -201,7 +201,8 @@ class EvaluationEngine:
                     pass
                 return EvaluationEngine._extract_result_and_score(None, raw_response, has_repeat)
             else:
-                eval_result = "match"
+                # Ambiguous verdict — fall back to raw text extraction
+                return EvaluationEngine._extract_result_and_score(None, raw_response, has_repeat)
 
             # Normalize score value
             try:
