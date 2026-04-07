@@ -1425,6 +1425,10 @@ def _resolve_existing_submission_response(
     if callable(fetch_core_submission):
         try:
             submission = fetch_core_submission(submission_id)
+        except PlatformApiError as api_err:
+            if api_err.status_code != 404:
+                raise
+            return None
         except httpx.HTTPStatusError as error:
             if error.response.status_code != 404:
                 raise

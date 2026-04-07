@@ -239,7 +239,8 @@ class ValidatorRuntime:
 
         # Check validator application status
         try:
-            app = self._platform.get_my_validator_application()
+            with self._platform_lock:
+                app = self._platform.get_my_validator_application()
             app_status = str(app.get("status") or "")
             if app_status == "pending_review":
                 log.warning("Validator application is pending review, cannot start yet")
@@ -253,7 +254,8 @@ class ValidatorRuntime:
                 return self.status()
             if not app_status:
                 log.info("No validator application found, submitting one")
-                self._platform.submit_validator_application()
+                with self._platform_lock:
+                    self._platform.submit_validator_application()
                 log.info("Validator application submitted, waiting for approval")
                 with self._lock:
                     self._running = False
