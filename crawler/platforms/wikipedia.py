@@ -22,7 +22,7 @@ from .base import (
     strategy_extractor,
 )
 
-FETCH_PLAN = PlatformFetchPlan(default_backend="api", fallback_backends=("http", "playwright"))
+FETCH_PLAN = PlatformFetchPlan(default_backend="api", fallback_backends=("http",))
 EXTRACT_PLAN = PlatformExtractPlan(strategy="article_html")
 NORMALIZE_PLAN = PlatformNormalizePlan(hook_name="wikipedia")
 ENRICH_PLAN = PlatformEnrichmentPlan(
