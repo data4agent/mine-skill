@@ -13,7 +13,7 @@ description: >
   `python scripts/run_tool.py` — never make direct HTTP calls (they require
   EIP-712 signatures and will always fail). Not for AWP wallet transfers,
   RootNet staking, smart contract deployment, or general server monitoring.
-version: 0.9.3
+version: 0.9.4
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
