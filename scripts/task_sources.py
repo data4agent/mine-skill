@@ -352,7 +352,7 @@ class DatasetDiscoverySource:
                     paper_urls = _arxiv_recent_papers(count=10)
                     for url in paper_urls:
                         platform, resource_type, inferred_fields = infer_platform_task(url)
-                        record = {"url": url, "platform": platform, "resource_type": resource_type}
+                        record = {"canonical_url": url, "url": url, "platform": platform, "resource_type": resource_type}
                         record.update(inferred_fields)
                         items.append(
                             WorkItem(
@@ -377,7 +377,7 @@ class DatasetDiscoverySource:
                     random_urls = _wikipedia_random_articles(wiki_host, count=10)
                     for url in random_urls:
                         platform, resource_type, inferred_fields = infer_platform_task(url)
-                        record = {"url": url, "platform": platform, "resource_type": resource_type}
+                        record = {"canonical_url": url, "url": url, "platform": platform, "resource_type": resource_type}
                         record.update(inferred_fields)
                         items.append(
                             WorkItem(

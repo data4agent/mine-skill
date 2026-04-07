@@ -71,9 +71,16 @@ class WorkerStateStore:
         remaining: list[dict[str, Any]] = []
         for entry in payload:
             available_at = int(entry.get("available_at") or 0)
-            if available_at <= current and not entry.get("in_flight") and len(due) < limit:
-                # Mark as in-flight rather than removing — cleared by caller via clear_auth_pending
+            in_flight = entry.get("in_flight")
+            in_flight_since = int(entry.get("in_flight_since") or 0)
+            # Recover stuck in-flight items after 10 minutes
+            if in_flight and in_flight_since and (current - in_flight_since) > 600:
+                entry["in_flight"] = False
+                in_flight = False
+            if available_at <= current and not in_flight and len(due) < limit:
+                # Mark as in-flight with timestamp — cleared by caller via clear_auth_pending
                 entry["in_flight"] = True
+                entry["in_flight_since"] = current
                 due.append(entry)
             remaining.append(entry)
         self._write_json(self._auth_pending_path, remaining)

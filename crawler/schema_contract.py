@@ -947,26 +947,30 @@ FIELD_RESOLVERS: dict[str, Resolver] = {
         _structured(record).get("coupon_available"),
     ),
     "arxiv_id": lambda record: _first(record.get("arxiv_id"), _structured(record).get("arxiv_id")),
-    "DOI": lambda record: _first(record.get("DOI"), _structured(record).get("DOI"), record.get("doi"), _structured(record).get("doi")),
+    "doi": lambda record: _first(record.get("doi"), _structured(record).get("doi"), record.get("DOI"), _structured(record).get("DOI")),
     "submission_comments": lambda record: _first(
         record.get("submission_comments"),
         _structured(record).get("submission_comments"),
         record.get("comment"),
         _structured(record).get("comment"),
     ),
-    "submission_date": lambda record: _first(
+    "published_date": lambda record: _first(
+        record.get("published_date"),
+        _structured(record).get("published_date"),
         record.get("submission_date"),
         _structured(record).get("submission_date"),
         record.get("published"),
         _structured(record).get("published"),
     ),
-    "update_date": lambda record: _first(
+    "updated_date": lambda record: _first(
+        record.get("updated_date"),
+        _structured(record).get("updated_date"),
         record.get("update_date"),
         _structured(record).get("update_date"),
         record.get("updated"),
         _structured(record).get("updated"),
     ),
-    "PDF_url": lambda record: _first(record.get("PDF_url"), _structured(record).get("PDF_url"), record.get("pdf_url"), _structured(record).get("pdf_url")),
+    "pdf_url": lambda record: _first(record.get("pdf_url"), _structured(record).get("pdf_url"), record.get("PDF_url"), _structured(record).get("PDF_url")),
     "primary_category": lambda record: _first(
         record.get("primary_category"),
         _structured(record).get("primary_category"),
@@ -977,7 +981,9 @@ FIELD_RESOLVERS: dict[str, Resolver] = {
         record.get("num_pages"),
         _structured(record).get("num_pages"),
     ),
-    "num_figures": lambda record: _first(
+    "figures_count": lambda record: _first(
+        record.get("figures_count"),
+        _structured(record).get("figures_count"),
         record.get("num_figures"),
         _structured(record).get("num_figures"),
         record.get("figure_count"),
@@ -1254,11 +1260,11 @@ FIELD_RESOLVERS: dict[str, Resolver] = {
         record.get("links_count"),
         _structured(record).get("links_count"),
     )),
-    "images_count": lambda record: _to_int(_first(
-        record.get("images_count"),
-        _structured(record).get("images_count"),
+    "image_count": lambda record: _to_int(_first(
         record.get("image_count"),
         _structured(record).get("image_count"),
+        record.get("images_count"),
+        _structured(record).get("images_count"),
     )),
     "first_paragraph": lambda record: _first(
         record.get("first_paragraph"),

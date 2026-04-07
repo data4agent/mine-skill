@@ -1528,8 +1528,9 @@ def _augment_submission_payload_for_dataset(
         if not isinstance(original_structured_data, dict):
             original_structured_data = {}
         schema_properties = schema.get("properties", {})
-        if not isinstance(schema_properties, dict):
-            schema_properties = {}
+        if not isinstance(schema_properties, dict) or not schema_properties:
+            # No schema properties available — keep original structured_data as-is
+            continue
         structured_data: dict[str, Any] = {
             field_name: original_structured_data[field_name]
             for field_name in schema_properties
