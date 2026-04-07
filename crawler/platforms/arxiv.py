@@ -62,7 +62,7 @@ ARXIV_ENRICHMENT_GROUPS = (
     "arxiv_cross_dataset_linkable_ids",
 )
 
-FETCH_PLAN = PlatformFetchPlan(default_backend="api", fallback_backends=("http", "playwright"))
+FETCH_PLAN = PlatformFetchPlan(default_backend="api", fallback_backends=("http",))
 EXTRACT_PLAN = PlatformExtractPlan(strategy="paper_metadata")
 NORMALIZE_PLAN = PlatformNormalizePlan(hook_name="arxiv")
 ENRICH_PLAN = PlatformEnrichmentPlan(

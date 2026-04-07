@@ -37,7 +37,7 @@ class FetchEngine:
         session_root: Path,
         *,
         max_retries: int = 2,
-        http_timeout: float = 20.0,
+        http_timeout: float = 30.0,
     ) -> None:
         self._session_root = session_root
         self._max_retries = max_retries
