@@ -10,7 +10,7 @@ description: >
   casual phrases like "go online", "start earning", "check my submissions",
   "how many submissions do I have", or "why is my miner not working". NOT for
   AWP wallet transfers, RootNet staking, or general server monitoring.
-version: 0.9.5
+version: 0.9.6
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -275,11 +275,16 @@ The AWP Skill handles the entire on-chain registration flow automatically.
 
 If the validator returns `403`, `permission denied`, or `insufficient_stake`:
 
-1. **Validator requires a minimum stake of 10,000 AWP** allocated to this subnet
-2. Tell the user to **install and use the AWP Skill** to:
-   - Stake at least 10,000 AWP
-   - Allocate the stake to the ocDATA subnet
-3. After staking completes, retry `python scripts/run_tool.py validator-start`
+1. **Validator requires a minimum of 10,000 AWP staked on the Mine Worknet**
+2. There are two ways to meet this requirement:
+   - **Option A (agent stakes):** The agent stakes its own AWP and allocates
+     the stake to the Mine Worknet. Use the AWP Skill to do this.
+   - **Option B (user delegates):** The user stakes AWP themselves and
+     delegates the stake to the agent on the Mine Worknet.
+3. Staking is only a participation requirement — **rewards are NOT affected by
+   who staked**. All mining/validation rewards go to the agent's designated
+   reward address, same as miner rewards.
+4. After staking completes, retry `python scripts/run_tool.py validator-start`
 
 **Do NOT** suggest the user is "pending review" or needs manual approval when the
 error is 403 — it means insufficient stake, not a review issue.
