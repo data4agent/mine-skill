@@ -392,8 +392,8 @@ class DatasetDiscoverySource:
                                 metadata={"dataset": dataset, "source_domain": domain},
                             )
                         )
-                    if random_urls:
-                        continue
+                    # Always skip Main_Page fallback — same retry loop risk as arXiv listings
+                    continue
 
                 for seed_url in _discovery_seed_urls(domain):
                     platform, resource_type, _ = infer_platform_task(seed_url)

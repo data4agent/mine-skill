@@ -798,6 +798,15 @@ class AgentWorker:
             summary.discovered_followups += len(followups)
             summary.processed_items += 1
             summary.messages.append(f"discovered {len(followups)} follow-up URLs from {item.url}")
+            # If discover-crawl produced no followups and had errors, cooldown the dataset
+            # to prevent immediate retry of the same failing seed URL
+            if not followups and result.errors and item.dataset_id:
+                self.state_store.mark_dataset_cooldown(
+                    item.dataset_id,
+                    retry_after_seconds=300,
+                    reason="discover-crawl produced no results",
+                )
+                summary.messages.append(f"dataset {item.dataset_id} cooled down 5min after failed discover-crawl")
             return
 
         if not result.records:
