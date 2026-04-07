@@ -282,6 +282,17 @@ class ValidatorRuntime:
                     self._running = False
                 return self.status()
         except Exception as exc:
+            exc_str = str(exc)
+            # 403 = insufficient stake — validator requires minimum 10,000 AWP staked to this subnet
+            if "403" in exc_str or "permission" in exc_str.lower() or "forbidden" in exc_str.lower():
+                log.error(
+                    "Validator requires a minimum stake of 10,000 AWP allocated to this subnet. "
+                    "Please use the AWP Skill to stake at least 10,000 AWP and assign it to this subnet, then retry."
+                )
+                with self._lock:
+                    self._running = False
+                return {**self.status(), "error": "insufficient_stake",
+                        "message": "Validator requires minimum 10,000 AWP staked to this subnet. Use the AWP Skill to stake and allocate, then retry."}
             log.warning("Validator application check failed: %s (proceeding anyway)", exc)
 
         try:
@@ -294,6 +305,18 @@ class ValidatorRuntime:
                 self._platform.join_ready_pool()
             log.info("Joined validator ready pool")
         except Exception as exc:
+            exc_str = str(exc)
+            if "403" in exc_str or "permission" in exc_str.lower() or "forbidden" in exc_str.lower():
+                log.error(
+                    "Failed to join validator ready pool — insufficient stake. "
+                    "Validator requires minimum 10,000 AWP staked to this subnet. "
+                    "Use the AWP Skill to stake and allocate, then retry."
+                )
+                with self._lock:
+                    self._running = False
+                self._ws.close()
+                return {**self.status(), "error": "insufficient_stake",
+                        "message": "Validator requires minimum 10,000 AWP staked to this subnet. Use the AWP Skill to stake and allocate, then retry."}
             log.warning("join_ready_pool failed: %s", exc)
 
         self._heartbeat_thread = threading.Thread(
