@@ -1,0 +1,66 @@
+{
+  "wikipedia": {
+    "article": {
+      "title": ["title", "page_title", "article_title", "post_id"],
+      "language_code": ["language_code", "lang", "locale"]
+    }
+  },
+  "arxiv": {
+    "paper": {
+      "arxiv_id": ["arxiv_id", "paper_id", "id", "post_id"],
+      "version": ["version"]
+    }
+  },
+  "amazon": {
+    "product": {
+      "asin": ["asin", "product_id", "id", "post_id"],
+      "marketplace": ["marketplace", "country_code", "storefront"]
+    },
+    "seller": {
+      "seller_id": ["seller_id", "merchant_id", "user_id"]
+    },
+    "search": {
+      "query": ["query", "keyword", "search_term", "screen_name"]
+    }
+  },
+  "base": {
+    "address": {
+      "address": ["address", "wallet", "wallet_address", "account", "post_id"]
+    },
+    "transaction": {
+      "tx_hash": ["tx_hash", "txhash", "transaction_hash", "hash", "post_id"]
+    },
+    "token": {
+      "contract_address": ["contract_address", "token_address", "contract", "post_id"]
+    },
+    "contract": {
+      "contract_address": ["contract_address", "address", "contract", "post_id"]
+    }
+  },
+  "linkedin": {
+    "search": {
+      "query": ["query", "keyword", "keywords", "search_term", "screen_name"],
+      "search_type": ["search_type", "entity_type", "result_type"]
+    },
+    "profile": {
+      "public_identifier": ["public_identifier", "vanity_name", "username", "screen_name"],
+      "member_id": ["member_id", "profile_id", "user_id", "linkedin_id"]
+    },
+    "company": {
+      "company_slug": ["company_slug", "universal_name", "company_name_slug", "screen_name"],
+      "company_id": ["company_id", "organization_id", "user_id"]
+    },
+    "post": {
+      "activity_urn": ["activity_urn", "urn", "activity_id", "post_id"],
+      "author_slug": ["author_slug", "screen_name", "public_identifier"]
+    },
+    "job": {
+      "job_id": ["job_id", "job_posting_id", "post_id"]
+    }
+  },
+  "generic": {
+    "page": {
+      "url": ["url", "canonical_url", "source_url"]
+    }
+  }
+}

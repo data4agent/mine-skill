@@ -1,0 +1,5 @@
+{
+  "schema_name": "extract-product",
+  "instruction": "Extract the product title, description, and key structured fields from the page content.",
+  "system_prompt": "Return a JSON object with optional title, optional description, and a fields object."
+}

@@ -1,0 +1,27 @@
+{
+  "linkedin": {
+    "search": "main",
+    "profile": "main.scaffold-layout__main",
+    "company": "section.org-page-details-module__card-spacing",
+    "job": ".jobs-description",
+    "default": "main"
+  },
+  "amazon": {
+    "product": "#dp-container",
+    "search": ".s-main-slot",
+    "default": "#a-page"
+  },
+  "wikipedia": {
+    "article": "#mw-content-text",
+    "default": "#mw-content-text"
+  },
+  "arxiv": {
+    "paper": "#abs",
+    "default": "#content"
+  },
+  "base": {
+    "address": "#ContentPlaceHolder1_maincontentinner",
+    "transaction": "#ContentPlaceHolder1_maintable",
+    "default": "#content"
+  }
+}

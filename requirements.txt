@@ -1,0 +1,3 @@
+-r requirements-core.txt
+-r requirements-browser.txt
+-r requirements-dev.txt

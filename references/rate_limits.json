@@ -1,0 +1,44 @@
+{
+  "defaults": {
+    "requests_per_minute": 30,
+    "max_retries": 3,
+    "backoff_seconds": [2, 5, 10],
+    "browser_concurrency": 1,
+    "http_concurrency": 2
+  },
+  "wikipedia": {
+    "requests_per_minute": 60,
+    "max_retries": 2,
+    "preferred_backend": "http",
+    "fallback_backend": "playwright"
+  },
+  "arxiv": {
+    "requests_per_minute": 30,
+    "max_retries": 2,
+    "preferred_backend": "http",
+    "fallback_backend": "playwright",
+    "document_parser": "unstructured"
+  },
+  "amazon": {
+    "requests_per_minute": 12,
+    "max_retries": 4,
+    "preferred_backend": "playwright",
+    "fallback_backend": "camoufox",
+    "browser_concurrency": 1
+  },
+  "base": {
+    "requests_per_minute": 24,
+    "max_retries": 3,
+    "preferred_backend": "http",
+    "fallback_backend": "playwright"
+  },
+  "linkedin": {
+    "requests_per_minute": 6,
+    "max_retries": 4,
+    "preferred_backend": "playwright",
+    "fallback_backend": "camoufox",
+    "browser_concurrency": 1,
+    "requires_auth": true,
+    "session_reuse_required": true
+  }
+}

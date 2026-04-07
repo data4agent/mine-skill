@@ -1,0 +1,21 @@
+# Build / cache
+__pycache__/
+*.egg-info/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtualenvs
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime output
+output/
+.sessions/
+.mine-setup.json

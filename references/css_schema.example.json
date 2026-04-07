@@ -1,0 +1,21 @@
+{
+  "title": {
+    "selector": ".hero-title"
+  },
+  "description": {
+    "selector": ".hero-subtitle"
+  },
+  "fields": {
+    "price": {
+      "selector": ".price"
+    },
+    "features": {
+      "selector": ".feature",
+      "multiple": true
+    },
+    "checkout_url": {
+      "selector": ".cta",
+      "attribute": "href"
+    }
+  }
+}

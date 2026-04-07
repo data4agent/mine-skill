@@ -1,0 +1,9 @@
+{
+  "provider": "openai_compatible",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "REPLACE_WITH_YOUR_KEY",
+  "model": "gpt-4o-mini",
+  "max_tokens": 768,
+  "temperature": 0.1,
+  "timeout": 120.0
+}

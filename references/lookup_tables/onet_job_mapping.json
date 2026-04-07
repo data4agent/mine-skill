@@ -1,0 +1,188 @@
+{
+  "Software Engineer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Senior Software Engineer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "senior",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Staff Software Engineer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "lead",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Principal Software Engineer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "lead",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Frontend Developer": {
+    "standardized_job_title": "Web Developers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1254.00"
+  },
+  "Backend Developer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Full Stack Developer": {
+    "standardized_job_title": "Web Developers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1254.00"
+  },
+  "Data Scientist": {
+    "standardized_job_title": "Data Scientists",
+    "seniority_level": "mid",
+    "job_function_category": "research",
+    "onet_code": "15-2051.00"
+  },
+  "Senior Data Scientist": {
+    "standardized_job_title": "Data Scientists",
+    "seniority_level": "senior",
+    "job_function_category": "research",
+    "onet_code": "15-2051.00"
+  },
+  "Machine Learning Engineer": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "DevOps Engineer": {
+    "standardized_job_title": "Computer Network Architects",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1241.00"
+  },
+  "Product Manager": {
+    "standardized_job_title": "Project Management Specialists",
+    "seniority_level": "mid",
+    "job_function_category": "product",
+    "onet_code": "13-1082.00"
+  },
+  "Senior Product Manager": {
+    "standardized_job_title": "Project Management Specialists",
+    "seniority_level": "senior",
+    "job_function_category": "product",
+    "onet_code": "13-1082.00"
+  },
+  "UX Designer": {
+    "standardized_job_title": "Web and Digital Interface Designers",
+    "seniority_level": "mid",
+    "job_function_category": "design",
+    "onet_code": "15-1255.00"
+  },
+  "UI/UX Designer": {
+    "standardized_job_title": "Web and Digital Interface Designers",
+    "seniority_level": "mid",
+    "job_function_category": "design",
+    "onet_code": "15-1255.00"
+  },
+  "Engineering Manager": {
+    "standardized_job_title": "Computer and Information Systems Managers",
+    "seniority_level": "director",
+    "job_function_category": "engineering",
+    "onet_code": "11-3021.00"
+  },
+  "VP of Engineering": {
+    "standardized_job_title": "Computer and Information Systems Managers",
+    "seniority_level": "vp",
+    "job_function_category": "engineering",
+    "onet_code": "11-3021.00"
+  },
+  "CTO": {
+    "standardized_job_title": "Chief Technology Officers",
+    "seniority_level": "c_level",
+    "job_function_category": "executive",
+    "onet_code": "11-1021.00"
+  },
+  "CEO": {
+    "standardized_job_title": "Chief Executives",
+    "seniority_level": "c_level",
+    "job_function_category": "executive",
+    "onet_code": "11-1011.00"
+  },
+  "Data Engineer": {
+    "standardized_job_title": "Database Administrators",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1242.00"
+  },
+  "QA Engineer": {
+    "standardized_job_title": "Software Quality Assurance Analysts and Testers",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1253.00"
+  },
+  "Security Engineer": {
+    "standardized_job_title": "Information Security Analysts",
+    "seniority_level": "mid",
+    "job_function_category": "engineering",
+    "onet_code": "15-1212.00"
+  },
+  "Cloud Architect": {
+    "standardized_job_title": "Computer Network Architects",
+    "seniority_level": "senior",
+    "job_function_category": "engineering",
+    "onet_code": "15-1241.00"
+  },
+  "Solutions Architect": {
+    "standardized_job_title": "Computer Network Architects",
+    "seniority_level": "senior",
+    "job_function_category": "engineering",
+    "onet_code": "15-1241.00"
+  },
+  "Technical Lead": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "lead",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Intern": {
+    "standardized_job_title": "Software Developers",
+    "seniority_level": "intern",
+    "job_function_category": "engineering",
+    "onet_code": "15-1252.00"
+  },
+  "Marketing Manager": {
+    "standardized_job_title": "Marketing Managers",
+    "seniority_level": "mid",
+    "job_function_category": "marketing",
+    "onet_code": "11-2021.00"
+  },
+  "Sales Manager": {
+    "standardized_job_title": "Sales Managers",
+    "seniority_level": "mid",
+    "job_function_category": "sales",
+    "onet_code": "11-2022.00"
+  },
+  "HR Manager": {
+    "standardized_job_title": "Human Resources Managers",
+    "seniority_level": "mid",
+    "job_function_category": "hr",
+    "onet_code": "11-3121.00"
+  },
+  "Financial Analyst": {
+    "standardized_job_title": "Financial Analysts",
+    "seniority_level": "mid",
+    "job_function_category": "finance",
+    "onet_code": "13-2051.00"
+  },
+  "Research Scientist": {
+    "standardized_job_title": "Computer and Information Research Scientists",
+    "seniority_level": "mid",
+    "job_function_category": "research",
+    "onet_code": "15-1221.00"
+  }
+}

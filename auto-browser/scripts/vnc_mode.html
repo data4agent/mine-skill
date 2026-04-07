@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VRD</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root { --stage-w:1280; --stage-h:720; }
+html, body { width:100%; height:100%; overflow:hidden; background:#020617; color:#e2e8f0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+body { display:flex; align-items:center; justify-content:center;
+  background: radial-gradient(circle at top,rgba(59,130,246,.16),transparent 30%),
+              radial-gradient(circle at bottom,rgba(15,23,42,.92),rgba(2,6,23,1)); }
+
+/* ── stage ── */
+.stage-shell { width:100vw; height:100vh; padding:12px;
+  display:flex; align-items:center; justify-content:center; }
+.stage { position:relative; border-radius:18px; overflow:hidden;
+  background:#000; box-shadow:0 20px 80px rgba(0,0,0,.45);
+  width:  min(calc(100vw - 24px), calc((100vh - 24px) * (var(--stage-w) / var(--stage-h))));
+  height: min(calc(100vh - 24px), calc((100vw - 24px) * (var(--stage-h) / var(--stage-w))));
+  max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); }
+iframe { width:100%; height:100%; border:0; display:block; background:#000; }
+
+/* ── status bar ── */
+.statusbar { position:absolute; top:12px; left:12px; z-index:900;
+  display:flex; align-items:center; gap:6px;
+  padding:5px 10px; border-radius:999px;
+  background:rgba(15,23,42,.75); backdrop-filter:blur(10px);
+  font-size:12px; color:#94a3b8; pointer-events:none; }
+.dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.dot-health { background:#22c55e; }
+.dot-health.bad { background:#ef4444; animation:blink 1.2s infinite; }
+.dot-rec { background:#ef4444; animation:blink 1.2s infinite; display:none; }
+.dot-rec.on { display:inline-block; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── observer badge ── */
+.obs-badge { position:absolute; top:12px; right:12px; z-index:900;
+  padding:5px 11px; border-radius:999px;
+  background:rgba(234,179,8,.12); border:1px solid rgba(234,179,8,.35);
+  font-size:12px; color:#fbbf24; pointer-events:none; display:none; }
+
+/* ── guide banner ── */
+.guide { position:absolute; top:0; left:0; right:0; z-index:950;
+  display:flex; align-items:flex-start; gap:9px; padding:10px 14px;
+  font-size:13px; line-height:1.5;
+  transform:translateY(-110%); transition:transform .28s ease;
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+.guide.show { transform:translateY(0); }
+.guide.info   { background:rgba(29,78,216,.88);  border-bottom:1px solid rgba(96,165,250,.25); }
+.guide.warn   { background:rgba(120,53,15,.88);  border-bottom:1px solid rgba(251,191,36,.25); }
+.guide.action { background:rgba(6,78,59,.88);    border-bottom:1px solid rgba(52,211,153,.25); }
+.guide-icon { font-size:16px; flex-shrink:0; margin-top:1px; }
+.guide-text { flex:1; color:#f1f5f9; }
+.guide-close { flex-shrink:0; background:none; border:none; color:#94a3b8;
+  cursor:pointer; font-size:16px; line-height:1; padding:2px; }
+.guide-close:hover { color:#f1f5f9; }
+
+/* ── gate modal ── */
+.gate-overlay { position:absolute; inset:0; z-index:9800;
+  background:rgba(0,0,0,.72); backdrop-filter:blur(5px);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity .22s; }
+.gate-overlay.show { opacity:1; pointer-events:auto; }
+.gate-card { background:#0f172a; border:1px solid rgba(51,65,85,.8);
+  border-radius:16px; padding:28px 24px; max-width:340px; width:90%;
+  box-shadow:0 24px 64px rgba(0,0,0,.55); text-align:center; }
+.gate-card h3 { font-size:17px; font-weight:600; color:#f8fafc; margin-bottom:10px; }
+.gate-card p  { font-size:14px; color:#94a3b8; margin-bottom:22px; line-height:1.65; }
+.gate-btns { display:flex; gap:10px; }
+.gate-btns button { flex:1; padding:10px; border-radius:10px; border:none;
+  font-size:14px; font-weight:600; cursor:pointer; transition:background .12s; }
+.btn-approve { background:#16a34a; color:#fff; }
+.btn-approve:hover { background:#15803d; }
+.btn-reject  { background:#dc2626; color:#fff; }
+.btn-reject:hover  { background:#b91c1c; }
+
+/* ── FAB ── */
+.fab { position:absolute; bottom:16px; right:16px; z-index:9000;
+  display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+.fab-toast { font-size:11px; color:#cbd5e1;
+  background:rgba(15,23,42,.75); border-radius:12px;
+  padding:3px 10px; pointer-events:none; max-width:220px; text-align:right;
+  transition:opacity .3s; }
+.btn-continue { display:flex; align-items:center; gap:6px;
+  padding:9px 16px; border-radius:20px; border:none;
+  background:rgba(22,163,74,.82); color:#fff; font-size:13px; font-weight:600;
+  cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,.4);
+  backdrop-filter:blur(6px); transition:background .12s, opacity .2s; opacity:.55; }
+.btn-continue:hover { background:rgba(22,163,74,1); opacity:1; }
+
+/* menu button */
+.fab-menu { position:relative; }
+.fab-toggle { width:36px; height:36px; border-radius:50%; border:none;
+  background:rgba(55,65,81,.8); color:#e2e8f0; font-size:17px;
+  cursor:pointer; backdrop-filter:blur(6px);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.4); transition:opacity .2s, background .12s; opacity:.42; }
+.fab-toggle:hover, .fab-menu.open .fab-toggle { opacity:1; background:rgba(55,65,81,.96); }
+
+/* panel */
+.fab-panel { position:absolute; bottom:46px; right:0; min-width:210px;
+  background:rgba(15,23,42,.94); backdrop-filter:blur(14px);
+  border:1px solid rgba(51,65,85,.55); border-radius:14px; padding:6px;
+  transform-origin:bottom right; transform:scale(.88); opacity:0; pointer-events:none;
+  transition:transform .14s, opacity .14s; }
+.fab-menu.open .fab-panel { transform:scale(1); opacity:1; pointer-events:auto; }
+
+.fab-item { display:flex; align-items:center; gap:8px;
+  width:100%; padding:8px 11px; border-radius:9px; border:none;
+  background:transparent; color:#cbd5e1; font-size:13px;
+  cursor:pointer; text-align:left; transition:background .1s; }
+.fab-item:hover { background:rgba(51,65,85,.55); color:#f1f5f9; }
+.fab-icon { font-size:14px; width:18px; text-align:center; flex-shrink:0; }
+.fab-sep { height:1px; background:rgba(51,65,85,.45); margin:4px 8px; }
+
+/* preset list inside panel */
+.preset-section { padding:0 4px; }
+.preset-label { font-size:10px; color:#475569; font-weight:600;
+  letter-spacing:.05em; text-transform:uppercase;
+  padding:6px 10px 3px; }
+.preset-btn { display:flex; align-items:baseline; gap:6px;
+  width:100%; padding:6px 10px; border-radius:8px; border:none;
+  background:transparent; color:#94a3b8; font-size:12px;
+  cursor:pointer; text-align:left; transition:background .1s; }
+.preset-btn:hover { background:rgba(51,65,85,.55); color:#f1f5f9; }
+.preset-btn.active { color:#60a5fa; }
+.preset-vp { font-size:10px; color:#475569; }
+
+/* ── popups ── */
+.popup { position:absolute; bottom:66px; right:16px; z-index:9500;
+  background:rgba(15,23,42,.96); backdrop-filter:blur(14px);
+  border:1px solid rgba(51,65,85,.55); border-radius:14px; padding:14px;
+  transform-origin:bottom right; transform:scale(.88); opacity:0; pointer-events:none;
+  transition:transform .14s, opacity .14s; }
+.popup.show { transform:scale(1); opacity:1; pointer-events:auto; }
+.popup-title { font-size:10px; color:#475569; font-weight:600;
+  letter-spacing:.05em; text-transform:uppercase; margin-bottom:9px; }
+.popup-btn { width:100%; padding:8px; border-radius:8px; border:none;
+  background:#1d4ed8; color:#fff; font-size:13px; font-weight:600;
+  cursor:pointer; margin-top:8px; transition:background .12s; }
+.popup-btn:hover { background:#1e40af; }
+
+/* clipboard popup */
+.clip-popup { min-width:260px; }
+.clip-popup textarea { width:100%; height:80px; background:rgba(30,41,59,.8);
+  border:1px solid rgba(51,65,85,.55); border-radius:8px;
+  color:#e2e8f0; font-size:13px; padding:8px; resize:vertical; font-family:inherit; }
+.clip-popup textarea:focus { outline:none; border-color:rgba(96,165,250,.5); }
+
+/* files popup */
+.files-popup { min-width:280px; max-width:340px; }
+.files-cats { display:flex; gap:4px; margin-bottom:9px; }
+.files-cat { flex:1; padding:5px 4px; border-radius:7px; border:none;
+  background:transparent; color:#64748b; font-size:11px; cursor:pointer;
+  transition:background .1s; }
+.files-cat.active, .files-cat:hover { background:rgba(51,65,85,.65); color:#e2e8f0; }
+.file-list { max-height:180px; overflow-y:auto; }
+.file-list::-webkit-scrollbar { width:4px; }
+.file-list::-webkit-scrollbar-thumb { background:rgba(51,65,85,.6); border-radius:2px; }
+.file-item { display:flex; align-items:center; gap:8px;
+  padding:6px 4px; border-radius:6px; }
+.file-item:hover { background:rgba(51,65,85,.35); }
+.file-name { flex:1; font-size:12px; color:#cbd5e1;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.file-size { font-size:11px; color:#475569; flex-shrink:0; }
+.files-empty { font-size:12px; color:#475569; text-align:center; padding:16px; }
+</style>
+</head>
+<body>
+<div class="stage-shell">
+  <div class="stage" id="stage">
+
+    <!-- status bar -->
+    <div class="statusbar">
+      <span class="dot dot-health" id="healthDot"></span>
+      <span class="dot dot-rec"    id="recDot"></span>
+      <span id="statusText">Connecting…</span>
+    </div>
+
+    <!-- observer badge -->
+    <div class="obs-badge" id="obsBadge">👁 Observer mode</div>
+
+    <!-- guide banner -->
+    <div class="guide info" id="guide">
+      <span class="guide-icon" id="guideIcon">ℹ️</span>
+      <span class="guide-text" id="guideText"></span>
+      <button class="guide-close" id="guideClose" title="Close">✕</button>
+    </div>
+
+    <!-- noVNC iframe (src set by JS) -->
+    <iframe id="vnc"></iframe>
+
+    <!-- gate modal -->
+    <div class="gate-overlay" id="gateOverlay">
+      <div class="gate-card">
+        <h3>⚠️ Awaiting confirmation</h3>
+        <p id="gatePrompt"></p>
+        <div class="gate-btns">
+          <button class="btn-approve" id="gateApprove">✅ Confirm</button>
+          <button class="btn-reject"  id="gateReject">✗ Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FAB area -->
+    <div class="fab">
+      <span class="fab-toast" id="toast" style="opacity:0"></span>
+      <button class="btn-continue" id="continueBtn">✅ Done, continue</button>
+      <div class="fab-menu" id="fabMenu">
+        <button class="fab-toggle" id="fabToggle" title="More">⋯</button>
+        <div class="fab-panel" id="fabPanel">
+          <button class="fab-item" id="clipBtn">
+            <span class="fab-icon">📋</span>Inject clipboard
+          </button>
+          <button class="fab-item" id="filesBtn">
+            <span class="fab-icon">📁</span>Files
+          </button>
+          <div class="fab-sep"></div>
+          <button class="fab-item" id="recordBtn">
+            <span class="fab-icon" id="recIcon">⏺</span><span id="recLabel">Start recording</span>
+          </button>
+          <div class="fab-sep"></div>
+          <div class="preset-section">
+            <div class="preset-label">Device presets</div>
+            <div id="presetList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- clipboard popup -->
+    <div class="popup clip-popup" id="clipPopup">
+      <div class="popup-title">📋 Inject remote clipboard</div>
+      <textarea id="clipText" placeholder="Text to inject…"></textarea>
+      <button class="popup-btn" id="clipSubmit">Inject</button>
+    </div>
+
+    <!-- files popup -->
+    <div class="popup files-popup" id="filesPopup">
+      <div class="popup-title">📁 Files</div>
+      <div class="files-cats">
+        <button class="files-cat active" data-cat="downloads">Downloads</button>
+        <button class="files-cat"        data-cat="screenshots">Screenshots</button>
+        <button class="files-cat"        data-cat="workspace">Workspace</button>
+      </div>
+      <div class="file-list" id="fileList"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* Parameter parsing */
+  var P         = new URLSearchParams(location.search);
+  var switchApi = P.get('switch_api') || '';
+  var token     = P.get('token')      || '';
+  var viewOnly  = P.get('view_only') === '1';
+  var apiBase   = '';
+
+  function isCfUrl(u) {
+    try { return /\.trycloudflare\.com$/i.test(new URL(u).hostname); }
+    catch (e) { return false; }
+  }
+  if (switchApi && isCfUrl(switchApi)) apiBase = switchApi.replace(/\/+$/, '');
+
+  /* noVNC iframe */
+  var vo = viewOnly ? '1' : '0';
+  document.getElementById('vnc').src =
+    '/vnc.html?autoconnect=true&resize=scale&quality=6&compression=2&view_only=' + vo;
+
+  /* observer badge */
+  if (viewOnly) document.getElementById('obsBadge').style.display = '';
+
+  /* helpers */
+  function apiUrl(path, extra) {
+    if (!apiBase || !token) return null;
+    return apiBase + path + '?token=' + encodeURIComponent(token) + (extra || '');
+  }
+
+  function apiFetch(path, opts, extra) {
+    var url = apiUrl(path, extra);
+    if (!url) return Promise.reject(new Error('no api'));
+    return fetch(url, Object.assign({ mode: 'cors', cache: 'no-store' }, opts || {}))
+      .then(function (r) { return r.json(); });
+  }
+
+  var _toastTimer;
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg; el.style.opacity = '1';
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(function () { el.style.opacity = '0'; }, 4000);
+  }
+
+  function applyRatio(geom) {
+    var m = /^(\d+)x(\d+)$/.exec(String(geom || ''));
+    if (!m) return;
+    document.documentElement.style.setProperty('--stage-w', m[1]);
+    document.documentElement.style.setProperty('--stage-h', m[2]);
+  }
+
+  /* status polling */
+  var _recActive = false;
+  var _curMode   = '';
+
+  function refreshStatus() {
+    if (!apiBase || !token) {
+      document.getElementById('statusText').textContent = 'Missing control link';
+      return;
+    }
+    apiFetch('/status').then(function (d) {
+      applyRatio(d.viewer_geom || d.geom);
+      var mode = d.mode || 'desktop';
+      var vp   = d.viewport_geom ? ' ' + d.viewport_geom : '';
+      var dpr  = (d.dpr && d.dpr !== '1') ? ' @' + d.dpr + 'x' : '';
+      var exp  = d.export === 'browser-window' ? ' · Window' : ' · Full screen';
+      document.getElementById('statusText').textContent = mode + vp + dpr + exp;
+      document.getElementById('healthDot').className = 'dot dot-health' + (d.health === false ? ' bad' : '');
+      setRecording(d.recording);
+      updateActivePreset(mode);
+    }).catch(function () {
+      document.getElementById('statusText').textContent = 'Status unavailable';
+    });
+  }
+  refreshStatus();
+  setInterval(refreshStatus, 5000);
+
+  /* guide banner */
+  var _guideTs       = 0;
+  var _guideClosed   = false;
+  var _guideClosedTs = 0;
+  var ICONS = { info: 'ℹ️', warn: '⚠️', action: '✅' };
+
+  document.getElementById('guideClose').onclick = function () {
+    _guideClosed   = true;
+    _guideClosedTs = _guideTs;
+    document.getElementById('guide').classList.remove('show');
+  };
+
+  function pollGuide() {
+    var url = apiBase
+      ? (apiBase + '/guide' + (token ? '?token=' + encodeURIComponent(token) : ''))
+      : null;
+    if (!url) return;
+    fetch(url, { mode: 'cors', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var g = document.getElementById('guide');
+        if (!d.text) { g.classList.remove('show'); return; }
+        if (_guideClosed && d.ts <= _guideClosedTs) { g.classList.remove('show'); return; }
+        if (d.ts !== _guideTs) _guideClosed = false;
+        _guideTs = d.ts;
+        document.getElementById('guideText').textContent = d.text;
+        document.getElementById('guideIcon').textContent = ICONS[d.kind] || 'ℹ️';
+        g.className = 'guide ' + (d.kind || 'info') + ' show';
+      })
+      .catch(function () {});
+  }
+  pollGuide();
+  setInterval(pollGuide, 3000);
+
+  /* gate polling */
+  var _gateId = '';
+  document.getElementById('gateApprove').onclick = function () {
+    apiFetch('/gate/respond', { method: 'POST', body: JSON.stringify({ approved: true }) })
+      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('Confirmed ✅'); })
+      .catch(function () { toast('Action failed'); });
+  };
+  document.getElementById('gateReject').onclick = function () {
+    apiFetch('/gate/respond', { method: 'POST', body: JSON.stringify({ approved: false }) })
+      .then(function () { document.getElementById('gateOverlay').classList.remove('show'); toast('Cancelled'); })
+      .catch(function () { toast('Action failed'); });
+  };
+
+  function pollGate() {
+    var url = apiBase ? (apiBase + '/gate?token=' + encodeURIComponent(token)) : null;
+    if (!url) return;
+    fetch(url, { mode: 'cors', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var ov = document.getElementById('gateOverlay');
+        if (d.id && d.id !== _gateId && d.approved === null) {
+          _gateId = d.id;
+          document.getElementById('gatePrompt').textContent = d.prompt || '';
+          ov.classList.add('show');
+        } else if (!d.id || d.approved !== null) {
+          ov.classList.remove('show');
+        }
+      })
+      .catch(function () {});
+  }
+  if (apiBase && token) { pollGate(); setInterval(pollGate, 2000); }
+
+  /* continue button */
+  document.getElementById('continueBtn').onclick = function () {
+    apiFetch('/continue', { method: 'POST' })
+      .then(function () { toast('Notified AI to continue ✅'); })
+      .catch(function () { toast('Notify failed; check connection'); });
+  };
+
+  /* FAB menu toggle */
+  var fabMenu = document.getElementById('fabMenu');
+  document.getElementById('fabToggle').onclick = function (e) {
+    e.stopPropagation();
+    fabMenu.classList.toggle('open');
+    if (fabMenu.classList.contains('open')) {
+      hidePopups();
+    }
+  };
+  document.getElementById('fabPanel').addEventListener('click', function (e) { e.stopPropagation(); });
+  document.addEventListener('click', function () {
+    fabMenu.classList.remove('open');
+    hidePopups();
+  });
+
+  /* recording */
+  function setRecording(active) {
+    _recActive = !!active;
+    document.getElementById('recDot').className   = 'dot dot-rec' + (active ? ' on' : '');
+    document.getElementById('recIcon').textContent  = active ? '⏹' : '⏺';
+    document.getElementById('recLabel').textContent = active ? 'Stop recording' : 'Start recording';
+  }
+  document.getElementById('recordBtn').onclick = function () {
+    var path = _recActive ? '/record/stop' : '/record/start';
+    var body = _recActive ? undefined : JSON.stringify({ interval: 3 });
+    apiFetch(path, { method: 'POST', body: body }).then(function (d) {
+      if (d.ok) {
+        toast(_recActive ? ('Recording stopped, ' + (d.count || 0) + ' frames') : 'Recording started');
+        setRecording(!_recActive);
+      } else {
+        toast('Recording failed: ' + (d.error || ''));
+      }
+    }).catch(function () { toast('Recording action failed'); });
+  };
+
+  /* clipboard popup */
+  var clipPopup  = document.getElementById('clipPopup');
+  var filesPopup = document.getElementById('filesPopup');
+
+  function hidePopups() {
+    clipPopup.classList.remove('show');
+    filesPopup.classList.remove('show');
+  }
+
+  document.getElementById('clipBtn').onclick = function (e) {
+    e.stopPropagation();
+    filesPopup.classList.remove('show');
+    clipPopup.classList.toggle('show');
+  };
+  clipPopup.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  document.getElementById('clipSubmit').onclick = function () {
+    var text = document.getElementById('clipText').value;
+    if (!text) return;
+    apiFetch('/clipboard', { method: 'POST', body: JSON.stringify({ text: text }) })
+      .then(function (d) {
+        toast(d.ok ? 'Clipboard injected ✅' : ('Injection failed: ' + (d.error || '')));
+        if (d.ok) { clipPopup.classList.remove('show'); document.getElementById('clipText').value = ''; }
+      })
+      .catch(function () { toast('Injection failed'); });
+  };
+
+  /* files popup */
+  var _filesCat = 'downloads';
+
+  document.getElementById('filesBtn').onclick = function (e) {
+    e.stopPropagation();
+    clipPopup.classList.remove('show');
+    filesPopup.classList.toggle('show');
+    if (filesPopup.classList.contains('show')) loadFiles(_filesCat);
+  };
+  filesPopup.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  document.querySelectorAll('.files-cat').forEach(function (btn) {
+    btn.onclick = function () {
+      _filesCat = this.dataset.cat;
+      document.querySelectorAll('.files-cat').forEach(function (b) { b.classList.remove('active'); });
+      this.classList.add('active');
+      loadFiles(_filesCat);
+    };
+  });
+
+  function fmtSize(b) {
+    if (b < 1024) return b + 'B';
+    if (b < 1048576) return (b / 1024).toFixed(1) + 'KB';
+    return (b / 1048576).toFixed(1) + 'MB';
+  }
+
+  function loadFiles(cat) {
+    document.getElementById('fileList').innerHTML = '<div class="files-empty">Loading…</div>';
+    apiFetch('/files', null, '&dir=' + encodeURIComponent(cat)).then(function (d) {
+      if (!d.files || !d.files.length) {
+        document.getElementById('fileList').innerHTML = '<div class="files-empty">No files</div>';
+        return;
+      }
+      var fl = document.getElementById('fileList');
+      fl.textContent = '';
+      d.files.forEach(function (f) {
+        var row = document.createElement('div');
+        row.className = 'file-item';
+        var nameEl = document.createElement('span');
+        nameEl.className = 'file-name';
+        nameEl.title = f.path;
+        nameEl.textContent = f.name;
+        var sizeEl = document.createElement('span');
+        sizeEl.className = 'file-size';
+        sizeEl.textContent = fmtSize(f.size);
+        row.appendChild(nameEl);
+        row.appendChild(sizeEl);
+        fl.appendChild(row);
+      });
+    }).catch(function () {
+      document.getElementById('fileList').innerHTML = '<div class="files-empty">Load failed</div>';
+    });
+  }
+
+  /* device preset list */
+  function updateActivePreset(mode) {
+    _curMode = mode;
+    document.querySelectorAll('.preset-btn').forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  }
+
+  function loadPresets() {
+    if (!apiBase || !token) return;
+    apiFetch('/presets').then(function (d) {
+      var container = document.getElementById('presetList');
+      container.textContent = '';
+      Object.keys(d).forEach(function (k) {
+        var btn = document.createElement('button');
+        btn.className = 'preset-btn';
+        btn.dataset.mode = k;
+        var labelSpan = document.createElement('span');
+        labelSpan.textContent = d[k].label || k;
+        var vpSpan = document.createElement('span');
+        vpSpan.className = 'preset-vp';
+        vpSpan.textContent = d[k].viewport || '';
+        btn.appendChild(labelSpan);
+        btn.appendChild(vpSpan);
+        btn.onclick = function (e) { e.stopPropagation(); doSwitch(k); };
+        container.appendChild(btn);
+      });
+      updateActivePreset(_curMode);
+    }).catch(function () {});
+  }
+  loadPresets();
+
+  var _switching = false;
+  function doSwitch(mode) {
+    if (_switching) return;
+    _switching = true;
+    toast('Switching… ' + mode);
+    apiFetch('/switch', { method: 'POST' }, '&mode=' + encodeURIComponent(mode))
+      .then(function (d) {
+        if (d.status === 'ok') {
+          applyRatio(d.viewer_geom || d.geom);
+          toast('Switched: ' + (d.label || mode));
+          refreshStatus();
+        } else {
+          toast('Switch failed: ' + (d.error || ''));
+        }
+      })
+      .catch(function () { toast('Service unreachable'); })
+      .finally(function () { _switching = false; fabMenu.classList.remove('open'); });
+  }
+})();
+</script>
+</body>
+</html>

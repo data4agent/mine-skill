@@ -1,0 +1,48 @@
+{
+  "linkedin": [
+    ".global-nav",
+    ".feed-identity-module",
+    ".ad-banner-container",
+    ".msg-overlay-list-bubble",
+    ".scaffold-layout__aside",
+    ".artdeco-toasts",
+    ".authentication-outlet",
+    ".share-box-feed-entry",
+    ".feed-shared-update-v2__control-menu"
+  ],
+  "amazon": [
+    "#nav-main",
+    "#rhf",
+    ".a-carousel",
+    "#navFooter",
+    "#nav-subnav",
+    "#nav-tools",
+    ".sponsored-products-truncator-truncate",
+    "#ad-endcap-1",
+    "#percolate-ui-ilm_div"
+  ],
+  "wikipedia": [
+    "#mw-navigation",
+    "#mw-panel",
+    "#footer",
+    ".mw-editsection",
+    ".navbox",
+    ".sistersitebox",
+    ".noprint",
+    ".mw-indicators",
+    "#catlinks",
+    ".mw-jump-link"
+  ],
+  "arxiv": [
+    "#header",
+    "#footer",
+    ".extra-services",
+    ".endorsers"
+  ],
+  "base": [
+    ".header-container",
+    ".footer-container",
+    "#sidebar",
+    ".ad-container"
+  ]
+}
