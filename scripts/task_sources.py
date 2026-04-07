@@ -250,6 +250,30 @@ class DatasetDiscoverySource:
             if not dataset_id:
                 continue
             for domain in _dataset_domains(dataset):
+                host = domain.strip().lower()
+                # Wikipedia: use MediaWiki Random API for direct article URLs
+                if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
+                    wiki_host = "en.wikipedia.org" if host == "wikipedia.org" else host
+                    random_urls = _wikipedia_random_articles(wiki_host, count=10)
+                    for url in random_urls:
+                        platform, resource_type, _ = infer_platform_task(url)
+                        items.append(
+                            WorkItem(
+                                item_id=f"discovery:{dataset_id}:{url}",
+                                source="dataset_discovery",
+                                url=url,
+                                dataset_id=dataset_id,
+                                platform=platform,
+                                resource_type=resource_type,
+                                record={"url": url, "platform": platform, "resource_type": resource_type},
+                                crawler_command="run",
+                                metadata={"dataset": dataset, "source_domain": domain},
+                            )
+                        )
+                    if random_urls:
+                        self.state_store.mark_dataset_scheduled(dataset_id)
+                    continue
+
                 seed_url = _discovery_seed_url(domain)
                 platform, resource_type, _ = infer_platform_task(seed_url)
                 items.append(
@@ -387,6 +411,36 @@ def _dataset_domains(dataset: dict[str, Any]) -> list[str]:
     if isinstance(domains, str):
         return [chunk.strip() for chunk in domains.split(",") if chunk.strip()]
     return []
+
+
+def _wikipedia_random_articles(wiki_host: str, count: int = 10) -> list[str]:
+    """Fetch random article URLs from MediaWiki API.
+
+    Uses the MediaWiki list=random API to get article titles, then constructs
+    full URLs. Much faster and more reliable than discover-crawl on Main_Page.
+    """
+    import urllib.request
+    import urllib.error
+
+    api_url = (
+        f"https://{wiki_host}/w/api.php"
+        f"?action=query&list=random&rnnamespace=0&rnlimit={count}&format=json"
+    )
+    try:
+        req = urllib.request.Request(api_url, headers={"User-Agent": "mine-agent/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import json
+            data = json.loads(resp.read())
+        pages = data.get("query", {}).get("random", [])
+        urls = []
+        for page in pages:
+            title = page.get("title", "")
+            if title:
+                encoded = title.replace(" ", "_")
+                urls.append(f"https://{wiki_host}/wiki/{encoded}")
+        return urls
+    except Exception:
+        return []
 
 
 def _discovery_seed_url(domain: str) -> str:
