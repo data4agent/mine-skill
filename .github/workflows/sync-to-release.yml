@@ -7,6 +7,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SYNC_BRANCH: sync/latest
 
 jobs:
   sync:
@@ -44,7 +45,7 @@ jobs:
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "sha_full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Push sync branch and create PR
+      - name: Sync to fork and manage PR
         env:
           GH_TOKEN: ${{ secrets.FORK_PAT }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
@@ -55,27 +56,17 @@ jobs:
             exit 0
           fi
 
-          BRANCH="sync/${SOURCE_SHA}"
-
-          # Check for existing PR
-          EXISTING=$(gh pr list --repo awp-worknet/mine-skill --head "data4agent:${BRANCH}" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
-          if [ -n "$EXISTING" ]; then
-            echo "PR #${EXISTING} already exists, skipping"
-            exit 0
-          fi
-
-          # Clone the fork (which shares history with upstream)
+          # Clone the fork
           cd /tmp
           rm -rf pr-repo
           git clone "https://x-access-token:${GH_TOKEN}@github.com/data4agent/mine-skill.git" pr-repo
           cd pr-repo
 
-          # Ensure we have upstream history
           git remote add upstream https://github.com/awp-worknet/mine-skill.git
           git fetch upstream main
 
-          # Create branch from upstream/main so PR has common history
-          git checkout -b "$BRANCH" upstream/main
+          # Create or reset the fixed sync branch from upstream/main
+          git checkout -B "$SYNC_BRANCH" upstream/main
 
           # Replace all files with release staging
           git rm -rf . > /dev/null 2>&1 || true
@@ -91,14 +82,27 @@ jobs:
           fi
 
           git commit -m "sync: update from data4agent/mine-skill main@${SOURCE_SHA}"
-          git push origin "$BRANCH" --force
+          git push origin "$SYNC_BRANCH" --force
 
-          # Create PR from fork to upstream
-          gh pr create \
-            --repo awp-worknet/mine-skill \
-            --base main \
-            --head "data4agent:${BRANCH}" \
-            --title "sync: update @${SOURCE_SHA}" \
-            --body "Automated sync from [data4agent/mine-skill@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine-skill/commit/${SOURCE_SHA_FULL}).
+          # Check if an open PR already exists for this branch
+          EXISTING=$(gh pr list --repo awp-worknet/mine-skill --head "data4agent:${SYNC_BRANCH}" --state open --json number,url -q '.[0]' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            PR_NUM=$(echo "$EXISTING" | jq -r '.number')
+            # Add a comment noting the update
+            gh pr comment "$PR_NUM" --repo awp-worknet/mine-skill \
+              --body "Updated to [data4agent/mine-skill@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine-skill/commit/${SOURCE_SHA_FULL})."
+            echo "Updated existing PR #${PR_NUM}"
+          else
+            # Create new PR
+            gh pr create \
+              --repo awp-worknet/mine-skill \
+              --base main \
+              --head "data4agent:${SYNC_BRANCH}" \
+              --title "sync: latest from data4agent/mine-skill" \
+              --body "Automated sync from [data4agent/mine-skill](https://github.com/data4agent/mine-skill).
+
+          Latest: [\`${SOURCE_SHA}\`](https://github.com/data4agent/mine-skill/commit/${SOURCE_SHA_FULL})
 
           Excludes dev-only files: tests/, evals/, mine-workspace/, example-worker.py, pyproject.toml, dev docs."
+            echo "Created new PR"
+          fi
