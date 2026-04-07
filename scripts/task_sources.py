@@ -347,7 +347,7 @@ class DatasetDiscoverySource:
                 continue
             for domain in _dataset_domains(dataset):
                 host = domain.strip().lower()
-                # arXiv: 用 API 直接获取最新论文 URL，跳过 HTML discovery
+                # arXiv: use API to get paper URLs directly, skip HTML listing discovery
                 if host == "arxiv.org" or host.endswith(".arxiv.org"):
                     paper_urls = _arxiv_recent_papers(count=10)
                     for url in paper_urls:
@@ -367,8 +367,9 @@ class DatasetDiscoverySource:
                                 metadata={"dataset": dataset, "source_domain": domain},
                             )
                         )
-                    if paper_urls:
-                        continue
+                    # Always skip listing fallback for arXiv — listing pages fail on servers
+                    # and cause infinite retry loops. API is the only reliable source.
+                    continue
 
                 # Wikipedia: use MediaWiki Random API for direct article URLs
                 if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
