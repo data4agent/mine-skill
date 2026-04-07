@@ -130,6 +130,22 @@ def _kill(pid) -> None:
         except ProcessLookupError: pass
     except Exception: pass
 
+_log_handles: list = []  # track open log file handles for cleanup
+
+def _logfile(name: str, mode: str = "a"):
+    """Open a log file, track it for cleanup."""
+    fh = open(LOGDIR / name, mode)
+    _log_handles.append(fh)
+    return fh
+
+def _close_log_handles() -> None:
+    for fh in _log_handles:
+        try:
+            fh.close()
+        except Exception:
+            pass
+    _log_handles.clear()
+
 def _sh(cmd: str, **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
 
@@ -455,10 +471,13 @@ def _start_x11vnc(dn: str, rfb: str, log: str, wid: str = "") -> tuple[str, str]
     mode = "display"
     if wid:
         cmd += ["-id", str(wid)]; mode = "browser-window"
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     time.sleep(0.4)
     r = _run(["pgrep", "-f", f"x11vnc.*:{dn}.*{rfb}"])
     pid = r.stdout.strip().split("\n")[0] if r.stdout.strip() else ""
+    if not pid:
+        import logging
+        logging.getLogger("vrd").warning("x11vnc failed to start (rfbport=%s, display=:%s)", rfb, dn)
     return pid, mode
 
 def _restart_display(env: dict, geom: str) -> None:
@@ -473,7 +492,7 @@ def _restart_display(env: dict, geom: str) -> None:
         except FileNotFoundError: pass
     xvfb = subprocess.Popen(
         ["Xvfb", f":{dn}", "-screen", "0", f"{geom}x{depth}"],
-        stdout=open(LOGDIR / "xvfb.log", "a"), stderr=subprocess.STDOUT,
+        stdout=_logfile("xvfb.log"), stderr=subprocess.STDOUT,
     )
     time.sleep(1.5)
     if xvfb.poll() is not None:
@@ -482,7 +501,7 @@ def _restart_display(env: dict, geom: str) -> None:
                 "GEOM": geom, "CHROME_WINDOW_ID": "", "VNC_EXPORT_MODE": "display"})
     if env.get("ENABLE_WM", "0") == "1":
         fe = dict(os.environ, DISPLAY=f":{dn}")
-        fx = subprocess.Popen(["icewm"], stdout=open(LOGDIR / "icewm.log", "a"),
+        fx = subprocess.Popen(["icewm"], stdout=_logfile("icewm.log"),
                               stderr=subprocess.STDOUT, env=fe)
         env["WM_PID"] = str(fx.pid)
 
@@ -528,7 +547,7 @@ def _restart_chrome(env: dict, cfg: dict) -> None:
     if cfg.get("touch"): args.append("--touch-events=enabled")
     args.append(f"--app={url}" if url else "about:blank")
     ce = dict(os.environ, DISPLAY=f":{dn}")
-    proc = subprocess.Popen(args, stdout=open(LOGDIR / "chrome.log", "a"),
+    proc = subprocess.Popen(args, stdout=_logfile("chrome.log"),
                             stderr=subprocess.STDOUT, env=ce)
     env["CHROME_PID"] = str(proc.pid)
     if only:
@@ -547,7 +566,7 @@ def _start_tunnel(origin: str, log_file: str) -> tuple[str, str]:
     """Start cloudflared tunnel; returns (pid, url)."""
     proc = subprocess.Popen(
         ["cloudflared", "tunnel", "--url", origin, "--no-autoupdate"],
-        stdout=open(log_file, "w"), stderr=subprocess.STDOUT,
+        stdout=_logfile(Path(log_file).name, "w"), stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     time.sleep(1)
@@ -864,7 +883,7 @@ def _start_windows_local_mode() -> None:
         ]
         proc = subprocess.Popen(
             args,
-            stdout=open(LOGDIR / "chrome.log", "a"),
+            stdout=_logfile("chrome.log"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -873,7 +892,7 @@ def _start_windows_local_mode() -> None:
 
     serve_proc = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "serve", "--port", sw_port],
-        stdout=open(LOGDIR / "serve.log", "a"),
+        stdout=_logfile("serve.log"),
         stderr=subprocess.STDOUT,
         env=dict(os.environ, WORKDIR=str(WORKDIR)),
         start_new_session=True,
@@ -970,7 +989,7 @@ def cmd_start() -> None:
     # ── Xvfb ──
     xvfb = subprocess.Popen(
         ["Xvfb", f":{dn}", "-screen", "0", f"{geom}x{depth}"],
-        stdout=open(LOGDIR / "xvfb.log", "a"), stderr=subprocess.STDOUT,
+        stdout=_logfile("xvfb.log"), stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     time.sleep(1)
@@ -980,7 +999,7 @@ def cmd_start() -> None:
     wm_pid = ""
     if enable_wm == "1":
         wm_proc = subprocess.Popen(
-            ["icewm"], stdout=open(LOGDIR / "icewm.log", "a"),
+            ["icewm"], stdout=_logfile("icewm.log"),
             stderr=subprocess.STDOUT, env=dict(os.environ, DISPLAY=f":{dn}"),
             start_new_session=True,
         )
@@ -989,7 +1008,7 @@ def cmd_start() -> None:
     # ── websockify ──
     ws = subprocess.Popen(
         ["websockify", "--web", novnc_web, f"{bind}:{vnc_port}", f"127.0.0.1:{rfb_port}"],
-        stdout=open(LOGDIR / "novnc.log", "a"), stderr=subprocess.STDOUT,
+        stdout=_logfile("novnc.log"), stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     time.sleep(1)
@@ -1011,7 +1030,7 @@ def cmd_start() -> None:
         if os.getuid() == 0: c_args.append("--no-sandbox")
         c_args.append(f"--app={auto_url}" if auto_url else "about:blank")
         cp = subprocess.Popen(
-            c_args, stdout=open(LOGDIR / "chrome.log", "a"), stderr=subprocess.STDOUT,
+            c_args, stdout=_logfile("chrome.log"), stderr=subprocess.STDOUT,
             env=dict(os.environ, DISPLAY=f":{dn}"), start_new_session=True,
         )
         chrome_pid = str(cp.pid)
@@ -1027,7 +1046,7 @@ def cmd_start() -> None:
     # ── serve (HTTP control plane; subprocess) ──
     serve_proc = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "serve", "--port", sw_port],
-        stdout=open(LOGDIR / "serve.log", "a"), stderr=subprocess.STDOUT,
+        stdout=_logfile("serve.log"), stderr=subprocess.STDOUT,
         env=dict(os.environ, WORKDIR=str(WORKDIR)), start_new_session=True,
     )
     time.sleep(1)
@@ -1130,6 +1149,7 @@ def cmd_stop(quiet: bool = False) -> None:
     for p in (f"/tmp/.X{dn}-lock", f"/tmp/.X11-unix/X{dn}"):
         try: os.unlink(p)
         except FileNotFoundError: pass
+    _close_log_handles()
     if not quiet: print("Stopped.")
 
 # ════════════════════════════════════════════════════════════════════════

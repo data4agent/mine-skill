@@ -254,8 +254,18 @@ class AutoBrowserAuthBridge:
         if not self.script_path.exists():
             raise RuntimeError(f"auto-browser script not found: {self.script_path}")
 
+    _ENV_ALLOWLIST = {
+        "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "SHELL",
+        "DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+        "TMPDIR", "TMP", "TEMP",
+        # Python/Node
+        "PYTHONPATH", "VIRTUAL_ENV", "NODE_PATH", "NVM_DIR",
+        # Project-specific
+        "WORKDIR", "GEOM", "DEPTH", "DISPLAY_NUM",
+    }
+
     def _base_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        env = os.environ.copy()
+        env = {k: v for k, v in os.environ.items() if k in self._ENV_ALLOWLIST or k.startswith("VRD_")}
         env["WORKDIR"] = str(self.workdir)
         if extra:
             env.update(extra)
@@ -471,7 +481,12 @@ class AutoBrowserAuthBridge:
             )
             after = float(payload.get("ts", after) or after)
             if payload.get("signaled") is True:
-                self._try_export_existing_session(platform, session_path)
+                exported = self._try_export_existing_session(platform, session_path)
+                if not exported:
+                    import logging
+                    logging.getLogger("browser_auth").warning(
+                        "User signaled done but session export failed for %s", platform
+                    )
                 return
         raise AutoBrowserAuthError(
             "Timed out waiting for user to finish login",
