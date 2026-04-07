@@ -27,10 +27,14 @@ def canonicalize_url(url: str) -> str:
         if not key.lower().startswith("utm_") and key.lower() not in TRACKING_QUERY_KEYS
     ]
 
-    if host == "en.wikipedia.org" and path.startswith("/wiki/"):
+    # Wikipedia: all language subdomains (xx.wikipedia.org) — strip query, preserve host+path
+    if host.endswith(".wikipedia.org") and "." not in host.removesuffix(".wikipedia.org") and path.startswith("/wiki/"):
         return urlunsplit(("https", host, path, "", ""))
+    # arXiv: strip version suffix (v1, v2, ...) for consistent dedup
     if (host == "arxiv.org" or host.endswith(".arxiv.org")) and path.startswith("/abs/"):
-        return urlunsplit(("https", "arxiv.org", "/" + path.strip("/"), "", ""))
+        import re as _re
+        clean_path = _re.sub(r"v\d+/?$", "", "/" + path.strip("/"))
+        return urlunsplit(("https", "arxiv.org", clean_path, "", ""))
     if host == "www.linkedin.com":
         normalized = "/" + path.strip("/")
         if normalized.startswith(("/in/", "/company/")) and not normalized.endswith("/"):
