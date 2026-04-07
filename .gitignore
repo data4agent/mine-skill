@@ -27,10 +27,8 @@ output/
 .omx/
 .tmp-debug*/
 
-# ── Dev artifacts (tests, drafts, temp output) ──
+# ── Dev artifacts (drafts, temp output) ──
 .dev/
-tests/
-crawler/tests/
 test_data/
 test_output/
 local_tasks/

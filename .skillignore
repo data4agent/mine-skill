@@ -1,0 +1,22 @@
+# Files excluded from skill package (kept in git for development)
+tests/
+evals/
+mine-workspace/
+example-worker.py
+pyproject.toml
+requirements-dev.txt
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.env
+.env.*
+!.env.example
+output/
+
+# Dev-only docs (not referenced by SKILL.md)
+docs/frontend-skill-development-guide-en.md
+docs/SCHEMA_LAYERING_4PLATFORMS.md
+docs/Subnet_protocol_v2.0.md
+docs/FIELD_ALIGNMENT_GUIDE.md
+docs/OPENCLAW_HOST_INTEGRATION.md
