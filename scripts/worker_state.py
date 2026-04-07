@@ -223,7 +223,7 @@ class WorkerStateStore:
             "wallet_addr": None,
             "active_datasets": [],
             "reward_summary": {},
-            "stop_conditions": [],
+            "stop_conditions": {},
             "stop_reason": None,
             "session_totals": {
                 "processed_items": 0,
@@ -255,12 +255,10 @@ class WorkerStateStore:
             else:
                 merged[key] = list(merged[key])
         stop_conditions = merged.get("stop_conditions")
-        if isinstance(stop_conditions, list):
-            merged["stop_conditions"] = list(stop_conditions)
-        elif isinstance(stop_conditions, dict):
-            merged["stop_conditions"] = []
+        if isinstance(stop_conditions, dict):
+            merged["stop_conditions"] = dict(stop_conditions)
         else:
-            merged["stop_conditions"] = []
+            merged["stop_conditions"] = {}
         for key in ("last_summary", "settlement", "reward_summary"):
             if not isinstance(merged.get(key), dict):
                 merged[key] = {}

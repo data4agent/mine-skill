@@ -6,6 +6,7 @@
     "review_id": { "type": "string" },
     "asin": { "type": "string" },
     "title": { "type": "string" },
+    "review_text": { "type": "string", "description": "Review body text" },
     "rating": { "type": "number" },
     "date_posted": { "type": "string" },
     "verified_purchase": { "type": "boolean" },

@@ -502,6 +502,8 @@ def _is_content_url(url: str) -> bool:
 
 
 def build_follow_up_items_from_discovery(parent: WorkItem, records: list[dict[str, Any]]) -> list[WorkItem]:
+    if not parent.dataset_id:
+        return []  # no dataset_id → followups cannot be submitted, skip
     items: list[WorkItem] = []
     for record in records:
         canonical_url = optional_string(record.get("canonical_url"))
