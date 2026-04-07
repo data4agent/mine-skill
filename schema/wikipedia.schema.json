@@ -3,11 +3,11 @@
   "title": "Wikipedia Article",
   "type": "object",
   "properties": {
-    "page_id": { "type": "integer", "description": "MediaWiki page ID" },
+    "page_id": { "type": ["integer", "string"], "description": "MediaWiki page ID" },
     "title": { "type": "string", "description": "Article title" },
     "language": { "type": "string", "description": "ISO 639-1 language code" },
     "canonical_url": { "type": "string", "format": "uri" },
-    "dedup_key": { "type": "string", "description": "Deduplication key (language:page_id)" },
+    "dedup_key": { "type": "string", "description": "Deduplication key (page_id:language)" },
     "categories": { "type": "array", "items": { "type": "string" } },
     "references_count": { "type": "integer" },
     "external_links_count": { "type": "integer" },

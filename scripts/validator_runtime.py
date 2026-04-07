@@ -25,8 +25,11 @@ from common import (
     resolve_validator_id,
 )
 from evaluation_engine import EvaluationEngine, EvaluationResult
+import httpx
 from lib.platform_client import PlatformApiError
 from ws_client import ValidatorWSClient, WSDisconnected, WSMessage
+
+_HTTPStatusError = httpx.HTTPStatusError
 
 log = logging.getLogger("validator.runtime")
 
@@ -282,8 +285,9 @@ class ValidatorRuntime:
                 with self._lock:
                     self._running = False
                 return self.status()
-        except PlatformApiError as api_err:
-            if api_err.status_code == 403:
+        except (PlatformApiError, _HTTPStatusError) as err:
+            status = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
+            if status == 403:
                 log.error(
                     "Validator requires a minimum stake of 10,000 AWP allocated to this subnet. "
                     "Please use the AWP Skill to stake at least 10,000 AWP and assign it to this subnet, then retry."
@@ -292,7 +296,7 @@ class ValidatorRuntime:
                     self._running = False
                 return {**self.status(), "error": "insufficient_stake",
                         "message": "Validator requires minimum 10,000 AWP staked to this subnet. Use the AWP Skill to stake and allocate, then retry."}
-            log.warning("Validator application check failed: %s (proceeding anyway)", api_err)
+            log.warning("Validator application check failed: %s (proceeding anyway)", err)
         except Exception as exc:
             log.warning("Validator application check failed: %s (proceeding anyway)", exc)
 
@@ -305,8 +309,9 @@ class ValidatorRuntime:
             with self._platform_lock:
                 self._platform.join_ready_pool()
             log.info("Joined validator ready pool")
-        except PlatformApiError as api_err:
-            if api_err.status_code == 403:
+        except (PlatformApiError, _HTTPStatusError) as err:
+            status = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
+            if status == 403:
                 log.error(
                     "Failed to join validator ready pool — insufficient stake. "
                     "Validator requires minimum 10,000 AWP staked to this subnet. "
@@ -317,7 +322,7 @@ class ValidatorRuntime:
                 self._ws.close()
                 return {**self.status(), "error": "insufficient_stake",
                         "message": "Validator requires minimum 10,000 AWP staked to this subnet. Use the AWP Skill to stake and allocate, then retry."}
-            log.warning("join_ready_pool failed: %s", api_err)
+            log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
             log.warning("join_ready_pool failed: %s", exc)
 
