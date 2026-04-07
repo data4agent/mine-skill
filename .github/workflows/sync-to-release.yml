@@ -50,25 +50,35 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           SOURCE_SHA_FULL: ${{ steps.source.outputs.sha_full }}
         run: |
-          # Check if PAT is configured
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::FORK_PAT secret not configured. Skipping sync."
             exit 0
           fi
 
+          BRANCH="sync/${SOURCE_SHA}"
+
           # Check for existing PR
-          EXISTING=$(gh pr list --repo awp-worknet/mine-skill --head "data4agent:sync/${SOURCE_SHA}" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          EXISTING=$(gh pr list --repo awp-worknet/mine-skill --head "data4agent:${BRANCH}" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
             echo "PR #${EXISTING} already exists, skipping"
             exit 0
           fi
 
-          # Create temp repo with release files
+          # Clone the fork (which shares history with upstream)
           cd /tmp
           rm -rf pr-repo
-          git init pr-repo -b "sync/${SOURCE_SHA}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/data4agent/mine-skill.git" pr-repo
           cd pr-repo
 
+          # Ensure we have upstream history
+          git remote add upstream https://github.com/awp-worknet/mine-skill.git
+          git fetch upstream main
+
+          # Create branch from upstream/main so PR has common history
+          git checkout -b "$BRANCH" upstream/main
+
+          # Replace all files with release staging
+          git rm -rf . > /dev/null 2>&1 || true
           cp -a /tmp/release-staging/. ./
 
           git config user.name "github-actions[bot]"
@@ -81,14 +91,13 @@ jobs:
           fi
 
           git commit -m "sync: update from data4agent/mine-skill main@${SOURCE_SHA}"
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/data4agent/mine-skill.git"
-          git push origin "sync/${SOURCE_SHA}" --force
+          git push origin "$BRANCH" --force
 
-          # Create PR
+          # Create PR from fork to upstream
           gh pr create \
             --repo awp-worknet/mine-skill \
             --base main \
-            --head "data4agent:sync/${SOURCE_SHA}" \
+            --head "data4agent:${BRANCH}" \
             --title "sync: update @${SOURCE_SHA}" \
             --body "Automated sync from [data4agent/mine-skill@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine-skill/commit/${SOURCE_SHA_FULL}).
 
