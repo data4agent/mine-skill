@@ -28,12 +28,12 @@
     {
       "match": {"platform": "wikipedia"},
       "initial_backend": "api",
-      "fallback_chain": ["http", "playwright"]
+      "fallback_chain": ["http"]
     },
     {
       "match": {"platform": "arxiv"},
       "initial_backend": "api",
-      "fallback_chain": ["http", "playwright"]
+      "fallback_chain": ["http"]
     },
     {
       "match": {"platform": "generic"},
