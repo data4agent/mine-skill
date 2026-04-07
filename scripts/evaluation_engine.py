@@ -69,15 +69,15 @@ class EvaluationEngine:
             dataset_schema: Full dataset schema definition with types and required fields.
         """
         if isinstance(cleaned_data, dict):
-            cleaned_data_str = json.dumps(cleaned_data, ensure_ascii=False, indent=2)
+            cleaned_data_str = json.dumps(cleaned_data, ensure_ascii=False, separators=(",", ":"))
         else:
             cleaned_data_str = str(cleaned_data)
 
-        structured_json = json.dumps(structured_data, ensure_ascii=False, indent=2)
+        structured_json = json.dumps(structured_data, ensure_ascii=False, separators=(",", ":"))
         if dataset_schema:
-            schema_json = json.dumps(dataset_schema, ensure_ascii=False, indent=2)
+            schema_json = json.dumps(dataset_schema, ensure_ascii=False, separators=(",", ":"))
         else:
-            schema_json = json.dumps({"fields": schema_fields}, ensure_ascii=False, indent=2)
+            schema_json = json.dumps({"fields": schema_fields}, ensure_ascii=False, separators=(",", ":"))
 
         has_repeat = bool(repeat_cleaned_data and repeat_cleaned_data.strip())
 
