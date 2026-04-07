@@ -935,10 +935,22 @@ def render_agent_status() -> str:
             },
         }, ensure_ascii=False, indent=2)
 
+    # Check LLM availability (non-blocking warning)
+    warnings: list[str] = []
+    try:
+        from mine_gateway import resolve_mine_gateway_model_config
+        gateway_cfg = resolve_mine_gateway_model_config()
+        if not gateway_cfg:
+            warnings.append("No LLM API key configured. Structured data enrichment will be limited. Set ANTHROPIC_API_KEY or OPENAI_API_KEY for better quality.")
+    except Exception:
+        pass
+
     if readiness["can_mine"]:
         user_msg = "Mining environment is ready. You can start mining now."
     else:
         user_msg = "Mining environment is ready. Registration will complete automatically on start."
+    if warnings:
+        user_msg += " Warning: " + " ".join(warnings)
     return json.dumps({
         "ready": readiness["can_start"],
         "state": readiness["state"],

@@ -15,7 +15,13 @@ if TYPE_CHECKING:
     from signer import WalletSigner
 
 from auth_orchestrator import AUTH_ERROR_CODES, AuthOrchestrator
-from canonicalize import normalize_url
+try:
+    from canonicalize import normalize_url
+except ImportError:
+    # Fallback if PYTHONPATH resolves lib/canonicalize instead of scripts/canonicalize
+    from lib.canonicalize import canonicalize_url as _canon
+    def normalize_url(url: str, regex_pattern: str | None = None) -> str:  # type: ignore[misc]
+        return _canon(url)
 from common import (
     DEFAULT_EIP712_CHAIN_ID,
     DEFAULT_EIP712_DOMAIN_NAME,
@@ -1477,9 +1483,12 @@ def _augment_submission_payload_for_dataset(
         original_structured_data = entry.get("structured_data")
         if not isinstance(original_structured_data, dict):
             original_structured_data = {}
+        schema_properties = schema.get("properties", {})
+        if not isinstance(schema_properties, dict):
+            schema_properties = {}
         structured_data: dict[str, Any] = {
             field_name: original_structured_data[field_name]
-            for field_name in schema
+            for field_name in schema_properties
             if field_name in original_structured_data and original_structured_data[field_name] not in (None, "")
         }
         entry["structured_data"] = structured_data

@@ -1,21 +1,41 @@
-# Build / cache
+# ── Build / cache ──
 __pycache__/
 *.egg-info/
-*.pyc
+dist/
+.coverage
+htmlcov/
+.pytest-tmp/
 .pytest_cache/
+pytest-cache-files-*/
+.tmp-openclaw-test/
 .mypy_cache/
 .ruff_cache/
 
-# Local virtualenvs
+# ── Local virtualenvs ──
 .venv/
 venv/
+.mine-setup.json
 
-# Secrets
+# ── Secrets (see .env.example) ──
 .env
 .env.*
 !.env.example
 
-# Runtime output
+# ── Runtime output ──
 output/
 .sessions/
-.mine-setup.json
+.omx/
+.tmp-debug*/
+
+# ── Dev artifacts (drafts, temp output) ──
+.dev/
+test_data/
+test_output/
+local_tasks/
+
+# ── Docs not needed in production ──
+docs/TEST_REPORT_*.md
+docs/superpowers/
+
+mine-workspace/
+example-worker.py
