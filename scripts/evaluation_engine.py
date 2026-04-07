@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -79,6 +80,11 @@ class EvaluationEngine:
             schema_json = json.dumps({"fields": schema_fields}, ensure_ascii=False, indent=2)
 
         has_repeat = bool(repeat_cleaned_data and repeat_cleaned_data.strip())
+
+        # Pre-LLM optimization: reduce M0 and M1 with identical rules
+        cleaned_data_str = _optimize_for_eval(cleaned_data_str)
+        if has_repeat:
+            repeat_cleaned_data = _optimize_for_eval(str(repeat_cleaned_data))
 
         # Build single prompt covering all evaluation phases
         sections = []
@@ -215,7 +221,6 @@ class EvaluationEngine:
 
         # Detect score from text (look for number near "score")
         eval_score = 0
-        import re
         score_patterns = [
             r'score["\s:]*(\d+)',
             r'(\d+)["\s]*/?\s*100',
@@ -233,4 +238,68 @@ class EvaluationEngine:
                     pass
 
         return eval_result, eval_score
+
+
+# Max chars for each M0/M1 text sent to LLM (~5000 tokens)
+_EVAL_MAX_CHARS = 20000
+
+_LOW_VALUE_HEADING = re.compile(
+    r"(?im)^#{1,3}\s*("
+    r"references|bibliography|citations|notes|footnotes|"
+    r"see also|further reading|external links|sources|"
+    r"related articles|related pages|navigation|categories|"
+    r"disclaimers?|copyright"
+    r")\s*$"
+)
+_CITATION_RE = re.compile(r"\[\s*(?:\d+|note\s+\d+|citation needed)\s*\]")
+_MULTI_BLANK_RE = re.compile(r"\n{3,}")
+
+
+def _optimize_for_eval(text: str) -> str:
+    """Reduce M0/M1 text before sending to LLM.
+
+    Applies identical rules to both sides so comparison remains fair.
+    """
+    if not text or len(text) <= _EVAL_MAX_CHARS:
+        text = _CITATION_RE.sub("", text)
+        text = _MULTI_BLANK_RE.sub("\n\n", text)
+        return text.strip()
+
+    lines = text.split("\n")
+    result = []
+    skip = False
+    skip_level = 0
+    for line in lines:
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            if _LOW_VALUE_HEADING.match(f"{'#' * level} {heading_match.group(2).strip()}"):
+                skip = True
+                skip_level = level
+                continue
+            if skip and level <= skip_level:
+                skip = False
+        if not skip:
+            result.append(line)
+    text = "\n".join(result)
+
+    text = _CITATION_RE.sub("", text)
+
+    paragraphs = re.split(r"\n{2,}", text)
+    seen: set[str] = set()
+    unique = []
+    for para in paragraphs:
+        key = re.sub(r"\s+", " ", para.strip().lower())
+        if len(key) < 20 or key not in seen:
+            if len(key) >= 20:
+                seen.add(key)
+            unique.append(para)
+    text = "\n\n".join(unique)
+
+    text = _MULTI_BLANK_RE.sub("\n\n", text).strip()
+
+    if len(text) > _EVAL_MAX_CHARS:
+        text = text[:_EVAL_MAX_CHARS].rsplit("\n", 1)[0] + "\n..."
+
+    return text
 
