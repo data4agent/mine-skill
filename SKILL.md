@@ -1,18 +1,15 @@
 ---
 name: mine
 description: >
-  Autonomous data mining and validation on the ocDATA / aMine platform. Use this
-  skill whenever the user mentions: mining, miner, validator, validating, aMine,
-  ocDATA, data mining rewards, crawling for rewards, earning tokens by crawling,
-  mining status, mining start/stop/pause/resume, dataset selection, repeat crawl,
-  evaluation tasks, mining diagnostics, doctor, mining errors, 401/auth errors
-  related to mining, submission scores, epoch rewards, credit tier, or anything
-  about running autonomous data collection workers. Also trigger when the user
-  asks to "go online", "start earning", "check my submissions", or troubleshoot
-  platform connectivity issues. ALL platform interaction goes through
-  `python scripts/run_tool.py` — never make direct HTTP calls (they require
-  EIP-712 signatures and will always fail). Not for AWP wallet transfers,
-  RootNet staking, smart contract deployment, or general server monitoring.
+  Start, stop, and manage autonomous data mining and validation workers that
+  earn $aMine token rewards on the ocDATA platform. Use this skill when the user
+  wants to: start or stop mining, check mining/validator status, select datasets,
+  diagnose mining errors (401, auth, connectivity), view submission scores or
+  epoch rewards, become a validator, or do anything related to aMine, ocDATA,
+  data crawling for rewards, or autonomous data collection. Trigger even for
+  casual phrases like "go online", "start earning", "check my submissions",
+  "how many submissions do I have", or "why is my miner not working". NOT for
+  AWP wallet transfers, RootNet staking, or general server monitoring.
 version: 0.9.4
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
