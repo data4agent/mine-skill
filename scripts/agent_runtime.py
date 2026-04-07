@@ -1414,6 +1414,32 @@ def _export_and_submit_core_submissions_for_task(
         if response_data is not None:
             response_path.write_text(json.dumps(response_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return export_path, response_path
+
+    # Pre-submit dedup check: verify structured_data hash is not already occupied
+    dataset_id = optional_string(item.dataset_id)
+    entries = payload.get("entries")
+    if dataset_id and isinstance(entries, list):
+        dedup_blocked: list[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_url = str(entry.get("url") or "")
+            structured = entry.get("structured_data")
+            if isinstance(structured, dict) and structured:
+                try:
+                    occupancy = client.check_url_occupancy(dataset_id, entry_url, structured_data=structured)
+                    if occupancy.get("occupied"):
+                        dedup_blocked.append(entry_url)
+                except Exception:
+                    pass  # dedup check is best-effort, don't block submission on failure
+        if dedup_blocked and len(dedup_blocked) == len(entries):
+            import logging as _log
+            _log.getLogger("agent.submit").info(
+                "all entries blocked by dedup hash check: %s", dedup_blocked
+            )
+            response_path.write_text(json.dumps({"data": {"rejected": [{"url": u, "reason": "dedup_hash_conflict"} for u in dedup_blocked]}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return export_path, response_path
+
     response = client.submit_core_submissions(payload)
     # Handle PoW challenge: if admission_status is challenge_required, answer and retry
     resp_data = response.get("data") if isinstance(response, dict) else None
