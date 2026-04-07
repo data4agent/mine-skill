@@ -84,7 +84,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "sync: update from data4agent/mine-skill@${SOURCE_SHA}"
+          git commit -m "sync: update from data4agent/mine-skill main@${SOURCE_SHA}"
 
           git remote add origin "https://x-access-token:${{ secrets.FORK_PAT }}@github.com/data4agent/mine-skill.git"
           git push origin "$BRANCH" --force

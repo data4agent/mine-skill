@@ -27,7 +27,7 @@ requires:
     - py
 metadata:
   emoji: "⛏️"
-  homepage: https://github.com/data4agent/mine
+  homepage: https://github.com/data4agent/mine-skill
 ---
 
 # Mine
