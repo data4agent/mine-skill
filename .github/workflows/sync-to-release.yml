@@ -1,4 +1,4 @@
-name: Sync to release repo
+name: Sync to upstream release
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source repo
+      - name: Checkout dev repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -17,14 +17,15 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p /tmp/release-staging
-
           cp -a . /tmp/release-staging/
           cd /tmp/release-staging
           rm -rf .git .github
 
+          # Remove dev-only files
           rm -rf tests/ evals/ mine-workspace/ __pycache__/
           rm -f example-worker.py pyproject.toml requirements-dev.txt .skillignore
 
+          # Remove dev-only docs
           rm -f docs/frontend-skill-development-guide-en.md
           rm -f docs/SCHEMA_LAYERING_4PLATFORMS.md
           rm -f docs/Subnet_protocol_v2.0.md
@@ -42,62 +43,68 @@ jobs:
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "sha_full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout fork (data4agent/mine-skill)
-        uses: actions/checkout@v4
-        with:
-          repository: data4agent/mine-skill
-          token: ${{ secrets.FORK_PAT }}
-          path: fork-repo
-          fetch-depth: 0
+      - name: Check for existing PR
+        id: check_pr
+        env:
+          GH_TOKEN: ${{ secrets.FORK_PAT }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          EXISTING=$(gh pr list --repo awp-worknet/mine-skill --head "data4agent:sync/${SOURCE_SHA}" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "PR #${EXISTING} already exists, skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Sync files to fork branch
+      - name: Push sync branch to origin (data4agent/mine-skill)
+        if: steps.check_pr.outputs.skip != 'true'
         id: sync
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
-          cd fork-repo
-
           BRANCH="sync/${SOURCE_SHA}"
-          git checkout -b "$BRANCH"
 
-          # Remove all tracked files except .git
-          git ls-files -z | xargs -0 rm -f 2>/dev/null || true
+          # Create a temp repo with only release files
+          cd /tmp
+          rm -rf pr-repo
+          git init pr-repo -b "$BRANCH"
+          cd pr-repo
 
-          # Copy release files in
           cp -a /tmp/release-staging/. ./
 
-          # Check for changes
-          if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to sync"
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-            git status --short | head -30
+            echo "No changes"
+            exit 0
           fi
 
-      - name: Push fork branch and create PR to upstream
-        if: steps.sync.outputs.has_changes == 'true'
+          git commit -m "sync: update from data4agent/mine-skill@${SOURCE_SHA}"
+
+          git remote add origin "https://x-access-token:${{ secrets.FORK_PAT }}@github.com/data4agent/mine-skill.git"
+          git push origin "$BRANCH" --force
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Create PR to upstream
+        if: steps.check_pr.outputs.skip != 'true' && steps.sync.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.FORK_PAT }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           SOURCE_SHA_FULL: ${{ steps.source.outputs.sha_full }}
           BRANCH: ${{ steps.sync.outputs.branch }}
         run: |
-          cd fork-repo
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add -A
-          git commit -m "sync: update from data4agent/mine@${SOURCE_SHA}"
-          git push origin "$BRANCH"
-
           gh pr create \
             --repo awp-worknet/mine-skill \
             --base main \
             --head "data4agent:${BRANCH}" \
             --title "sync: update @${SOURCE_SHA}" \
-            --body "Automated sync from [data4agent/mine@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine/commit/${SOURCE_SHA_FULL}).
+            --body "Automated sync from [data4agent/mine-skill@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine-skill/commit/${SOURCE_SHA_FULL}).
 
           Excludes dev-only files: tests/, evals/, mine-workspace/, example-worker.py, pyproject.toml, dev docs."
