@@ -49,7 +49,7 @@ def _solve_content_understanding(challenge: dict[str, Any]) -> str:
 
 
 def _extract_answer_from_prompt(prompt: str) -> str | None:
-    """从 PoW prompt 中提取直接给出的答案关键词（如 "输出 generic-ready 作为..."）。"""
+    """Extract the answer keyword given directly in a PoW prompt (e.g. "输出 generic-ready 作为...")."""
     import re as _re
     m = _re.search(r"输出\s+(\S+)\s+作为", prompt)
     if m:

@@ -121,8 +121,8 @@ class EnrichPipeline:
             structured=StructuredFields(fields=document.get("structured", {}) if isinstance(document.get("structured"), dict) else (document.get("structured").platform_fields if hasattr(document.get("structured"), "platform_fields") else {})),
         )
 
-        # 第一遍：同步处理缓存命中、未知 group、llm_schema、提取型 field_group。
-        # 需要 LLM 的 generative field_group 收集起来，之后并行执行。
+        # First pass: synchronously handle cache hits, unknown groups, llm_schema, and extractive field groups.
+        # Generative field groups that need LLM are collected and executed in parallel afterwards.
         deferred_specs: list[FieldGroupSpec] = []
 
         for group_name in field_groups:
@@ -153,7 +153,7 @@ class EnrichPipeline:
                 self._write_cached_result(document, result)
                 record.merge_field_group_result(result)
 
-        # 第二遍：并行执行所有 generative field_group
+        # Second pass: execute all generative field groups in parallel
         if deferred_specs:
             async def _run_and_cache(s: FieldGroupSpec) -> FieldGroupResult:
                 r = await self._run_field_group(s, document, model_capabilities)
