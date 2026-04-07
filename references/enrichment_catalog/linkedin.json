@@ -1,0 +1,210 @@
+{
+  "dataset": "LinkedIn",
+  "support_status": "planned",
+  "source_document": "Dataset_Product_Catalog_v2.md",
+  "subdatasets": [
+    {
+      "name": "LinkedIn Profiles Dataset",
+      "source_hint": "1.1 LinkedIn Profiles Dataset",
+      "field_groups": [
+        {"group_name": "Identity", "fields": [
+          {"name": "name_gender_inference", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "name_ethnicity_estimation", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "profile_language_detected", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+        ]},
+        {"group_name": "Current Role", "fields": [
+          {"name": "standardized_job_title", "type": "string", "source_hint": "Current Role", "support_status": "planned"},
+          {"name": "seniority_level", "type": "string", "source_hint": "Current Role", "support_status": "planned"},
+          {"name": "job_function_category", "type": "string", "source_hint": "Current Role", "support_status": "planned"}
+        ]},
+        {"group_name": "About", "fields": [
+          {"name": "about_summary", "type": "string", "source_hint": "About", "support_status": "planned"},
+          {"name": "about_topics", "type": "array<string>", "source_hint": "About", "support_status": "planned"},
+          {"name": "about_sentiment", "type": "string", "source_hint": "About", "support_status": "planned"},
+          {"name": "career_narrative_type", "type": "string", "source_hint": "About", "support_status": "planned"}
+        ]},
+        {"group_name": "Experience", "fields": [
+          {"name": "experience_structured", "type": "array<object>", "source_hint": "Experience", "support_status": "planned", "subfields": ["company", "title", "start_date", "end_date", "duration_months", "responsibilities_extracted", "technologies_mentioned", "achievements_quantified", "industry_standardized"]}
+        ]},
+        {"group_name": "Education", "fields": [
+          {"name": "education_structured", "type": "array<object>", "source_hint": "Education", "support_status": "planned", "subfields": ["institution", "degree_type", "field_of_study_standardized", "graduation_year", "institution_ranking_tier"]}
+        ]},
+        {"group_name": "Skills", "fields": [
+          {"name": "skills_extracted", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "skill_categories", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "skill_proficiency_inferred", "type": "string", "source_hint": "Skills", "support_status": "planned"}
+        ]},
+        {"group_name": "Social", "fields": [
+          {"name": "influence_score", "type": "number", "source_hint": "Social", "support_status": "planned"},
+          {"name": "engagement_rate", "type": "number", "source_hint": "Social", "support_status": "planned"},
+          {"name": "content_creator_tier", "type": "string", "source_hint": "Social", "support_status": "planned"}
+        ]},
+        {"group_name": "Network", "fields": [
+          {"name": "professional_cluster", "type": "string", "source_hint": "Network", "support_status": "planned"},
+          {"name": "career_trajectory_vector", "type": "array<number>", "source_hint": "Network", "support_status": "planned"}
+        ]},
+        {"group_name": "Certifications", "fields": [
+          {"name": "certification_validity", "type": "string", "source_hint": "Certifications", "support_status": "planned"},
+          {"name": "language_proficiency_level", "type": "string", "source_hint": "Certifications", "support_status": "planned"}
+        ]},
+        {"group_name": "Metadata", "fields": [
+          {"name": "profile_completeness_score", "type": "number", "source_hint": "Metadata", "support_status": "planned"},
+          {"name": "last_active_estimate", "type": "string", "source_hint": "Metadata", "support_status": "planned"},
+          {"name": "profile_freshness_grade", "type": "string", "source_hint": "Metadata", "support_status": "planned"}
+        ]},
+        {"group_name": "Multimodal", "fields": [
+          {"name": "avatar_quality_assessment", "type": "object", "source_hint": "Multimodal", "support_status": "planned", "subfields": ["is_professional_headshot", "face_detected", "lighting_quality", "background_type"]},
+          {"name": "banner_content_analysis", "type": "object", "source_hint": "Multimodal", "support_status": "planned", "subfields": ["depicts", "brand_alignment_score", "text_extracted_from_banner"]}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "one_line_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "recruiter_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "investor_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "full_profile_narrative", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Behavioral Signals", "fields": [
+          {"name": "writing_style_profile", "type": "object", "source_hint": "Behavioral Signals", "support_status": "planned", "subfields": ["formality_level", "vocabulary_richness", "jargon_density", "persuasion_style"]},
+          {"name": "job_change_signal_strength", "type": "number", "source_hint": "Behavioral Signals", "support_status": "planned"},
+          {"name": "culture_fit_indicators", "type": "object", "source_hint": "Behavioral Signals", "support_status": "planned", "subfields": ["work_style_inferred", "values_expressed", "communication_style"]}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["github_urls", "personal_website_url", "twitter_handle", "orcid_id", "google_scholar_url", "arxiv_author_query_hint", "company_domains_mentioned", "patent_numbers_mentioned", "publication_titles_mentioned"]}
+        ]}
+      ]
+    },
+    {
+      "name": "LinkedIn Company Dataset",
+      "source_hint": "1.2 LinkedIn Company Dataset",
+      "field_groups": [
+        {"group_name": "Basic", "fields": [
+          {"name": "company_legal_name_inferred", "type": "string", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "parent_company", "type": "string", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "subsidiary_tree", "type": "array<string>", "source_hint": "Basic", "support_status": "planned"}
+        ]},
+        {"group_name": "Profile", "fields": [
+          {"name": "about_summary", "type": "string", "source_hint": "Profile", "support_status": "planned"},
+          {"name": "core_business_extracted", "type": "string", "source_hint": "Profile", "support_status": "planned"},
+          {"name": "value_proposition", "type": "string", "source_hint": "Profile", "support_status": "planned"},
+          {"name": "target_market_inferred", "type": "string", "source_hint": "Profile", "support_status": "planned"},
+          {"name": "industry_standardized", "type": "string", "source_hint": "Profile", "support_status": "planned"}
+        ]},
+        {"group_name": "Scale", "fields": [
+          {"name": "employee_growth_trend", "type": "string", "source_hint": "Scale", "support_status": "planned"},
+          {"name": "hiring_velocity", "type": "string", "source_hint": "Scale", "support_status": "planned"},
+          {"name": "attrition_signal", "type": "string", "source_hint": "Scale", "support_status": "planned"},
+          {"name": "department_distribution_estimated", "type": "object", "source_hint": "Scale", "support_status": "planned"}
+        ]},
+        {"group_name": "Content", "fields": [
+          {"name": "content_strategy_analysis", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "posting_frequency", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "top_topics", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+          {"name": "brand_voice_profile", "type": "string", "source_hint": "Content", "support_status": "planned"}
+        ]},
+        {"group_name": "Tech", "fields": [
+          {"name": "tech_stack_inferred", "type": "array<string>", "source_hint": "Tech", "support_status": "planned"},
+          {"name": "engineering_team_size_estimated", "type": "number", "source_hint": "Tech", "support_status": "planned"}
+        ]},
+        {"group_name": "Financials", "fields": [
+          {"name": "funding_stage_inferred", "type": "string", "source_hint": "Financials", "support_status": "planned"},
+          {"name": "revenue_range_estimated", "type": "string", "source_hint": "Financials", "support_status": "planned"},
+          {"name": "business_model_type", "type": "string", "source_hint": "Financials", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "elevator_pitch", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "investor_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "competitor_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["website_domain", "amazon_seller_search_hint", "wikipedia_entity_hint", "github_org_url", "crunchbase_hint", "base_contract_deployer_hint"]}
+        ]}
+      ]
+    },
+    {
+      "name": "LinkedIn Jobs Dataset",
+      "source_hint": "1.3 LinkedIn Jobs Dataset",
+      "field_groups": [
+        {"group_name": "Basic", "fields": [
+          {"name": "job_title_standardized", "type": "string", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "remote_policy", "type": "string", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "location_parsed", "type": "object", "source_hint": "Basic", "support_status": "planned", "subfields": ["city", "state", "country"]}
+        ]},
+        {"group_name": "Content", "fields": [
+          {"name": "responsibilities_extracted", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+          {"name": "requirements_extracted", "type": "array<object>", "source_hint": "Content", "support_status": "planned", "subfields": ["skill", "required_or_preferred", "years_experience"]},
+          {"name": "salary_range_inferred", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "benefits_extracted", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+          {"name": "team_size_hint", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "reporting_to_level", "type": "string", "source_hint": "Content", "support_status": "planned"}
+        ]},
+        {"group_name": "Classification", "fields": [
+          {"name": "role_category_fine_grained", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+          {"name": "industry_vertical", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+          {"name": "visa_sponsorship_signal", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+          {"name": "equity_compensation_signal", "type": "string", "source_hint": "Classification", "support_status": "planned"}
+        ]},
+        {"group_name": "Skills", "fields": [
+          {"name": "required_skills", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "preferred_skills", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "tools_and_platforms", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "programming_languages", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"},
+          {"name": "frameworks", "type": "array<string>", "source_hint": "Skills", "support_status": "planned"}
+        ]},
+        {"group_name": "Market", "fields": [
+          {"name": "competition_level", "type": "string", "source_hint": "Market", "support_status": "planned"},
+          {"name": "days_to_fill_estimated", "type": "number", "source_hint": "Market", "support_status": "planned"},
+          {"name": "urgency_signal", "type": "string", "source_hint": "Market", "support_status": "planned"},
+          {"name": "reposting_frequency", "type": "string", "source_hint": "Market", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "candidate_facing_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "hiring_manager_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Domain-specific", "fields": [
+          {"name": "red_flags_detected", "type": "array<string>", "source_hint": "Domain-specific", "support_status": "planned"},
+          {"name": "culture_signals_extracted", "type": "object", "source_hint": "Domain-specific", "support_status": "planned", "subfields": ["management_style_hints", "growth_opportunity_signals", "work_life_balance_indicators"]},
+          {"name": "tech_stack_full_picture", "type": "object", "source_hint": "Domain-specific", "support_status": "planned", "subfields": ["must_have", "nice_to_have", "infrastructure", "methodology"]}
+        ]}
+      ]
+    },
+    {
+      "name": "LinkedIn Posts Dataset",
+      "source_hint": "1.4 LinkedIn Posts Dataset",
+      "field_groups": [
+        {"group_name": "Content", "fields": [
+          {"name": "post_topic_tags", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+          {"name": "post_type", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "key_claims_extracted", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+          {"name": "entities_mentioned", "type": "array<object>", "source_hint": "Content", "support_status": "planned", "subfields": ["name", "type", "sentiment"]}
+        ]},
+        {"group_name": "Engagement", "fields": [
+          {"name": "engagement_quality_score", "type": "number", "source_hint": "Engagement", "support_status": "planned"},
+          {"name": "comment_sentiment_distribution", "type": "object", "source_hint": "Engagement", "support_status": "planned"},
+          {"name": "viral_coefficient_estimated", "type": "number", "source_hint": "Engagement", "support_status": "planned"},
+          {"name": "controversial_flag", "type": "boolean", "source_hint": "Engagement", "support_status": "planned"}
+        ]},
+        {"group_name": "Author", "fields": [
+          {"name": "author_authority_score", "type": "number", "source_hint": "Author", "support_status": "planned"},
+          {"name": "author_industry", "type": "string", "source_hint": "Author", "support_status": "planned"},
+          {"name": "is_corporate_voice", "type": "boolean", "source_hint": "Author", "support_status": "planned"}
+        ]},
+        {"group_name": "Temporal", "fields": [
+          {"name": "trending_topic_relevance", "type": "number", "source_hint": "Temporal", "support_status": "planned"},
+          {"name": "news_event_linkage", "type": "string", "source_hint": "Temporal", "support_status": "planned"}
+        ]},
+        {"group_name": "Multimodal", "fields": [
+          {"name": "post_image_analysis", "type": "array<object>", "source_hint": "Multimodal", "support_status": "planned", "subfields": ["image_type", "text_extracted_from_image", "chart_data_described", "visual_sentiment"]},
+          {"name": "shared_link_content_summary", "type": "string", "source_hint": "Multimodal", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "post_one_liner", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "post_takeaway", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Behavioral", "fields": [
+          {"name": "thought_leadership_depth", "type": "string", "source_hint": "Behavioral", "support_status": "planned"},
+          {"name": "self_promotion_score", "type": "number", "source_hint": "Behavioral", "support_status": "planned"},
+          {"name": "argument_structure", "type": "string", "source_hint": "Behavioral", "support_status": "planned"}
+        ]}
+      ]
+    }
+  ]
+}

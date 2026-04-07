@@ -1,0 +1,18 @@
+{
+  "patterns": [
+    {"pattern": "\\b(Python|Java|JavaScript|TypeScript|Go|Rust|C\\+\\+|C#|Ruby|Swift|Kotlin|Scala|R|MATLAB|PHP|Perl|Shell|Bash)\\b", "category": "programming_language", "label": "Programming Languages"},
+    {"pattern": "\\b(React|Angular|Vue|Next\\.js|Svelte|Django|Flask|FastAPI|Spring|Express|Rails|Laravel)\\b", "category": "framework", "label": "Web Frameworks"},
+    {"pattern": "\\b(AWS|Azure|GCP|Google Cloud|Amazon Web Services|Kubernetes|Docker|Terraform|Ansible|Jenkins|CircleCI|GitHub Actions)\\b", "category": "cloud_devops", "label": "Cloud & DevOps"},
+    {"pattern": "\\b(PostgreSQL|MySQL|MongoDB|Redis|Elasticsearch|DynamoDB|Cassandra|Neo4j|SQLite|Oracle|SQL Server)\\b", "category": "database", "label": "Databases"},
+    {"pattern": "\\b(Machine Learning|Deep Learning|NLP|Computer Vision|TensorFlow|PyTorch|scikit-learn|Keras|Hugging Face|LLM|GPT|BERT|Transformers)\\b", "category": "ml_ai", "label": "ML/AI"},
+    {"pattern": "\\b(Agile|Scrum|Kanban|CI/CD|DevOps|Microservices|REST|GraphQL|gRPC|API Design)\\b", "category": "methodology", "label": "Methodologies"},
+    {"pattern": "\\b(Project Management|Product Management|Team Lead|Technical Writing|Public Speaking|Mentoring|Strategic Planning)\\b", "category": "soft_skill", "label": "Soft Skills"},
+    {"pattern": "\\b(Figma|Sketch|Adobe XD|Photoshop|Illustrator|InDesign|Premiere|After Effects)\\b", "category": "design_tool", "label": "Design Tools"},
+    {"pattern": "\\b(Tableau|Power BI|Looker|Apache Spark|Hadoop|Kafka|Airflow|dbt|Snowflake|BigQuery|Databricks)\\b", "category": "data_engineering", "label": "Data Engineering"},
+    {"pattern": "\\b(Solidity|Web3|Blockchain|Smart Contracts|Ethereum|DeFi|NFT|Layer 2)\\b", "category": "blockchain", "label": "Blockchain"},
+    {"pattern": "\\b(Linux|Unix|Windows Server|macOS|iOS|Android|Embedded|RTOS|ARM)\\b", "category": "platform", "label": "Platforms"},
+    {"pattern": "\\b(Git|GitHub|GitLab|Bitbucket|SVN|Jira|Confluence|Notion|Slack)\\b", "category": "tool", "label": "Development Tools"},
+    {"pattern": "\\b(PMP|AWS Certified|CKA|CKAD|CISSP|CISM|CEH|CompTIA|Google Cloud Certified|Azure Certified|Scrum Master|SAFe)\\b", "category": "certification", "label": "Certifications"},
+    {"pattern": "\\b(English|Chinese|Mandarin|Spanish|French|German|Japanese|Korean|Portuguese|Arabic|Hindi|Russian)\\b", "category": "language", "label": "Languages"}
+  ]
+}

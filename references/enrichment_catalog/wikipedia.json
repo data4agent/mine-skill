@@ -1,0 +1,89 @@
+{
+  "dataset": "Wikipedia",
+  "support_status": "planned",
+  "source_document": "Dataset_Product_Catalog_v2.md",
+  "field_groups": [
+    {"group_name": "Identity", "fields": [
+      {"name": "title_disambiguated", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+      {"name": "canonical_entity_name", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+      {"name": "entity_type", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+      {"name": "wikidata_id", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+    ]},
+    {"group_name": "Content", "fields": [
+      {"name": "sections_structured", "type": "array<object>", "source_hint": "Content", "support_status": "planned", "subfields": ["heading", "content", "section_type"]},
+      {"name": "table_of_contents", "type": "array<string>", "source_hint": "Content", "support_status": "planned"},
+      {"name": "article_summary", "type": "string", "source_hint": "Content", "support_status": "planned"},
+      {"name": "reading_level", "type": "string", "source_hint": "Content", "support_status": "planned"}
+    ]},
+    {"group_name": "Tables", "fields": [
+      {"name": "tables_structured", "type": "array<object>", "source_hint": "Tables", "support_status": "planned", "subfields": ["table_title", "headers", "rows", "table_topic", "data_type"]}
+    ]},
+    {"group_name": "Infobox", "fields": [
+      {"name": "infobox_structured", "type": "object", "source_hint": "Infobox", "support_status": "planned"}
+    ]},
+    {"group_name": "Categories", "fields": [
+      {"name": "categories_cleaned", "type": "array<string>", "source_hint": "Categories", "support_status": "planned"},
+      {"name": "topic_hierarchy", "type": "array<string>", "source_hint": "Categories", "support_status": "planned"},
+      {"name": "domain", "type": "string", "source_hint": "Categories", "support_status": "planned"},
+      {"name": "subject_tags", "type": "array<string>", "source_hint": "Categories", "support_status": "planned"}
+    ]},
+    {"group_name": "Entities", "fields": [
+      {"name": "entities_extracted", "type": "array<object>", "source_hint": "Entities", "support_status": "planned", "subfields": ["name", "type", "wikidata_id", "first_mention_context", "relation_to_subject"]}
+    ]},
+    {"group_name": "Facts", "fields": [
+      {"name": "structured_facts", "type": "array<object>", "source_hint": "Facts", "support_status": "planned", "subfields": ["subject", "predicate", "object", "confidence_score", "temporal_scope", "source_sentence"]}
+    ]},
+    {"group_name": "Timeline", "fields": [
+      {"name": "temporal_events", "type": "array<object>", "source_hint": "Timeline", "support_status": "planned", "subfields": ["date", "event_description", "event_type", "participants"]}
+    ]},
+    {"group_name": "Relations", "fields": [
+      {"name": "related_entities", "type": "array<object>", "source_hint": "Relations", "support_status": "planned", "subfields": ["entity", "relation_type", "bidirectional"]},
+      {"name": "external_links_classified", "type": "array<object>", "source_hint": "Relations", "support_status": "planned", "subfields": ["url", "source_type", "reliability_tier"]}
+    ]},
+    {"group_name": "Quality", "fields": [
+      {"name": "article_quality_class", "type": "string", "source_hint": "Quality", "support_status": "planned"},
+      {"name": "neutrality_score", "type": "number", "source_hint": "Quality", "support_status": "planned"},
+      {"name": "citation_density", "type": "number", "source_hint": "Quality", "support_status": "planned"},
+      {"name": "last_major_edit", "type": "string", "source_hint": "Quality", "support_status": "planned"},
+      {"name": "edit_controversy_score", "type": "number", "source_hint": "Quality", "support_status": "planned"}
+    ]},
+    {"group_name": "Multi-lingual", "fields": [
+      {"name": "cross_language_links", "type": "object", "source_hint": "Multi-lingual", "support_status": "planned"},
+      {"name": "translation_coverage_score", "type": "number", "source_hint": "Multi-lingual", "support_status": "planned"},
+      {"name": "entity_name_translations", "type": "object", "source_hint": "Multi-lingual", "support_status": "planned"}
+    ]},
+    {"group_name": "Embeddings", "fields": [
+      {"name": "article_embedding", "type": "array<number>", "source_hint": "Embeddings", "support_status": "planned"},
+      {"name": "section_embeddings", "type": "array<array<number>>", "source_hint": "Embeddings", "support_status": "planned"}
+    ]},
+    {"group_name": "Multimodal Images", "fields": [
+      {"name": "images_annotated", "type": "array<object>", "source_hint": "Multimodal (Images)", "support_status": "planned", "subfields": ["url", "caption_generated", "depicts", "image_type", "spatial_description", "historical_period_depicted", "scientific_annotation"]}
+    ]},
+    {"group_name": "Multi-level Summary", "fields": [
+      {"name": "one_line_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "eli5_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "standard_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "academic_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "key_takeaways", "type": "array<string>", "source_hint": "Multi-level Summary", "support_status": "planned"}
+    ]},
+    {"group_name": "Educational", "fields": [
+      {"name": "prerequisite_concepts", "type": "array<object>", "source_hint": "Educational", "support_status": "planned", "subfields": ["concept_name", "wikipedia_title_hint", "why_needed"]},
+      {"name": "difficulty_level", "type": "string", "source_hint": "Educational", "support_status": "planned"},
+      {"name": "quiz_questions_generated", "type": "array<object>", "source_hint": "Educational", "support_status": "planned", "subfields": ["question", "answer", "difficulty", "question_type", "distractor_answers"]},
+      {"name": "common_misconceptions", "type": "array<object>", "source_hint": "Educational", "support_status": "planned", "subfields": ["misconception", "correction", "evidence_from_article"]}
+    ]},
+    {"group_name": "Bias & Neutrality", "fields": [
+      {"name": "bias_detection", "type": "array<object>", "source_hint": "Bias & Neutrality", "support_status": "planned", "subfields": ["section_heading", "bias_type", "evidence_quote_location", "severity", "suggested_neutral_framing"]},
+      {"name": "missing_perspectives", "type": "array<string>", "source_hint": "Bias & Neutrality", "support_status": "planned"},
+      {"name": "weasel_words_detected", "type": "array<object>", "source_hint": "Bias & Neutrality", "support_status": "planned", "subfields": ["phrase", "location", "issue"]}
+    ]},
+    {"group_name": "Content Freshness", "fields": [
+      {"name": "information_freshness_score", "type": "number", "source_hint": "Content Freshness", "support_status": "planned"},
+      {"name": "potentially_outdated_claims", "type": "array<object>", "source_hint": "Content Freshness", "support_status": "planned", "subfields": ["claim", "date_context", "reason_suspect"]},
+      {"name": "temporal_coverage_gap", "type": "string", "source_hint": "Content Freshness", "support_status": "planned"}
+    ]},
+    {"group_name": "Cross-dataset Linkable IDs", "fields": [
+      {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["arxiv_paper_hints", "linkedin_person_hints", "amazon_product_hints", "base_onchain_hints", "external_database_ids"]}
+    ]}
+  ]
+}

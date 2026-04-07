@@ -1,0 +1,113 @@
+{
+  "wikipedia": {
+    "article": {
+      "canonical_template": "https://en.wikipedia.org/wiki/{title}",
+      "required_fields": ["title"],
+      "optional_fields": ["language_code"],
+      "notes": "Title should be URL-safe with spaces converted to underscores."
+    }
+  },
+  "arxiv": {
+    "paper": {
+      "canonical_template": "https://arxiv.org/abs/{arxiv_id}",
+      "artifact_templates": {
+        "pdf_url": "https://arxiv.org/pdf/{arxiv_id}.pdf"
+      },
+      "required_fields": ["arxiv_id"],
+      "optional_fields": ["version"],
+      "notes": "The abstract page is the canonical record URL; PDF is a secondary artifact."
+    }
+  },
+  "amazon": {
+    "product": {
+      "canonical_template": "https://www.amazon.com/dp/{asin}",
+      "required_fields": ["asin"],
+      "optional_fields": ["marketplace"],
+      "notes": "Marketplace-specific host switching can be added later via config."
+    },
+    "seller": {
+      "canonical_template": "https://www.amazon.com/sp?seller={seller_id}",
+      "required_fields": ["seller_id"],
+      "optional_fields": [],
+      "notes": "Seller storefront discovery is useful for brand and manufacturer linking."
+    },
+    "review": {
+      "canonical_template": "https://www.amazon.com/gp/customer-reviews/{review_id}",
+      "required_fields": ["review_id"],
+      "optional_fields": ["asin"],
+      "notes": "Review detail pages carry reviewer text, rating, media, and seller response signals."
+    },
+    "search": {
+      "canonical_template": "https://www.amazon.com/s?k={query}",
+      "required_fields": ["query"],
+      "optional_fields": [],
+      "notes": "Search pages are crawlable seeds, not stable entity records."
+    }
+  },
+  "base": {
+    "address": {
+      "canonical_template": "https://basescan.org/address/{address}",
+      "required_fields": ["address"],
+      "optional_fields": [],
+      "notes": "Address pages can expand into token, transaction, and contract enrichments."
+    },
+    "transaction": {
+      "canonical_template": "https://basescan.org/tx/{tx_hash}",
+      "required_fields": ["tx_hash"],
+      "optional_fields": [],
+      "notes": "Transaction hash is sufficient for deterministic discovery."
+    },
+    "token": {
+      "canonical_template": "https://basescan.org/token/{contract_address}",
+      "required_fields": ["contract_address"],
+      "optional_fields": [],
+      "notes": "Token pages can branch into holder and contract analysis later."
+    },
+    "contract": {
+      "canonical_template": "https://basescan.org/address/{contract_address}#code",
+      "required_fields": ["contract_address"],
+      "optional_fields": [],
+      "notes": "Contract code pages are strong inputs for AI code comprehension."
+    }
+  },
+  "linkedin": {
+    "search": {
+      "canonical_template": "https://www.linkedin.com/search/results/{search_type}/?keywords={query}",
+      "required_fields": ["search_type", "query"],
+      "optional_fields": ["origin"],
+      "notes": "Search pages require authenticated browser-backed fetching and return candidate entity results."
+    },
+    "profile": {
+      "canonical_template": "https://www.linkedin.com/in/{public_identifier}/",
+      "required_fields": ["public_identifier"],
+      "optional_fields": ["member_id"],
+      "notes": "Profiles generally require authenticated browser-backed fetching."
+    },
+    "company": {
+      "canonical_template": "https://www.linkedin.com/company/{company_slug}/",
+      "required_fields": ["company_slug"],
+      "optional_fields": ["company_id"],
+      "notes": "Company pages may resolve from slug or organization identifier."
+    },
+    "post": {
+      "canonical_template": "https://www.linkedin.com/feed/update/{activity_urn}/",
+      "required_fields": ["activity_urn"],
+      "optional_fields": ["author_slug"],
+      "notes": "Post URLs should preserve the activity URN for deterministic replay."
+    },
+    "job": {
+      "canonical_template": "https://www.linkedin.com/jobs/view/{job_id}/",
+      "required_fields": ["job_id"],
+      "optional_fields": [],
+      "notes": "Job pages are useful for structured requirement extraction."
+    }
+  },
+  "generic": {
+    "page": {
+      "canonical_template": "{url}",
+      "required_fields": ["url"],
+      "optional_fields": [],
+      "notes": "Generic public page crawl using existing fetch backends and HTML extraction."
+    }
+  }
+}

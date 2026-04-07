@@ -1,0 +1,76 @@
+{
+  "linkedin": {
+    "search": {
+      "wait_for_selector": "main",
+      "wait_for_network_quiet": true,
+      "scroll_to_load": true,
+      "scroll_count": 2,
+      "max_wait_ms": 15000
+    },
+    "profile": {
+      "wait_for_selector": "section.artdeco-card",
+      "wait_for_network_quiet": true,
+      "max_wait_ms": 15000
+    },
+    "company": {
+      "wait_for_selector": "[data-test-id='about-us']",
+      "scroll_to_load": true,
+      "scroll_count": 3,
+      "max_wait_ms": 15000
+    },
+    "post": {
+      "wait_for_selector": ".feed-shared-update-v2",
+      "wait_for_network_quiet": true,
+      "max_wait_ms": 12000
+    },
+    "job": {
+      "wait_for_selector": ".jobs-unified-top-card",
+      "max_wait_ms": 10000
+    }
+  },
+  "amazon": {
+    "product": {
+      "wait_for_selector": "#productTitle",
+      "max_wait_ms": 10000
+    },
+    "search": {
+      "wait_for_selector": ".s-main-slot",
+      "max_wait_ms": 10000
+    },
+    "review": {
+      "wait_for_selector": "#cm_cr-review_list",
+      "scroll_to_load": true,
+      "scroll_count": 2,
+      "max_wait_ms": 12000
+    }
+  },
+  "wikipedia": {
+    "article": {
+      "wait_for_selector": "#mw-content-text",
+      "max_wait_ms": 5000
+    }
+  },
+  "arxiv": {
+    "paper": {
+      "wait_for_selector": "#abs",
+      "max_wait_ms": 5000
+    }
+  },
+  "base_chain": {
+    "address": {
+      "wait_for_selector": "[data-testid='address-page']",
+      "wait_for_network_quiet": true,
+      "max_wait_ms": 10000
+    },
+    "transaction": {
+      "wait_for_selector": "[data-testid='transaction-page']",
+      "max_wait_ms": 10000
+    }
+  },
+  "_defaults": {
+    "max_wait_ms": 10000,
+    "wait_for_network_quiet": false,
+    "scroll_to_load": false,
+    "scroll_count": 0
+  }
+}

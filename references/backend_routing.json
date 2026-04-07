@@ -1,0 +1,53 @@
+{
+  "rules": [
+    {
+      "match": {"platform": "linkedin", "resource_type": "search"},
+      "initial_backend": "api",
+      "fallback_chain": ["playwright", "camoufox"]
+    },
+    {
+      "match": {"platform": "linkedin", "resource_type": "post"},
+      "initial_backend": "camoufox",
+      "fallback_chain": ["playwright"]
+    },
+    {
+      "match": {"platform": "linkedin", "requires_auth": true},
+      "initial_backend": "api",
+      "fallback_chain": ["playwright", "camoufox"]
+    },
+    {
+      "match": {"platform": "linkedin"},
+      "initial_backend": "playwright",
+      "fallback_chain": ["camoufox"]
+    },
+    {
+      "match": {"platform": "amazon"},
+      "initial_backend": "http",
+      "fallback_chain": ["playwright", "camoufox"]
+    },
+    {
+      "match": {"platform": "wikipedia"},
+      "initial_backend": "api",
+      "fallback_chain": ["http", "playwright"]
+    },
+    {
+      "match": {"platform": "arxiv"},
+      "initial_backend": "api",
+      "fallback_chain": ["http", "playwright"]
+    },
+    {
+      "match": {"platform": "generic"},
+      "initial_backend": "http",
+      "fallback_chain": ["playwright", "camoufox"]
+    },
+    {
+      "match": {"platform": "base"},
+      "initial_backend": "api",
+      "fallback_chain": ["http", "playwright"]
+    }
+  ],
+  "default": {
+    "initial_backend": "http",
+    "fallback_chain": ["playwright", "camoufox"]
+  }
+}

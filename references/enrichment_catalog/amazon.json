@@ -1,0 +1,181 @@
+{
+  "dataset": "Amazon",
+  "support_status": "planned",
+  "source_document": "Dataset_Product_Catalog_v2.md",
+  "subdatasets": [
+    {
+      "name": "Amazon Products Dataset",
+      "source_hint": "4.1 Amazon Products Dataset",
+      "field_groups": [
+        {"group_name": "Identity", "fields": [
+          {"name": "title_cleaned", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "brand_standardized", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "is_brand_official_store", "type": "boolean", "source_hint": "Identity", "support_status": "planned"}
+        ]},
+        {"group_name": "Pricing", "fields": [
+          {"name": "price_tier", "type": "string", "source_hint": "Pricing", "support_status": "planned"},
+          {"name": "price_vs_category_avg", "type": "number", "source_hint": "Pricing", "support_status": "planned"},
+          {"name": "historical_price_trend", "type": "string", "source_hint": "Pricing", "support_status": "planned"},
+          {"name": "deal_quality_score", "type": "number", "source_hint": "Pricing", "support_status": "planned"}
+        ]},
+        {"group_name": "Description", "fields": [
+          {"name": "features_structured", "type": "array<object>", "source_hint": "Description", "support_status": "planned", "subfields": ["feature_name", "feature_value", "feature_unit"]},
+          {"name": "key_specs_table", "type": "object", "source_hint": "Description", "support_status": "planned"},
+          {"name": "use_cases_extracted", "type": "array<string>", "source_hint": "Description", "support_status": "planned"},
+          {"name": "target_audience_inferred", "type": "string", "source_hint": "Description", "support_status": "planned"}
+        ]},
+        {"group_name": "Category", "fields": [
+          {"name": "category_standardized", "type": "string", "source_hint": "Category", "support_status": "planned"},
+          {"name": "niche_tags", "type": "array<string>", "source_hint": "Category", "support_status": "planned"},
+          {"name": "seasonal_relevance", "type": "string", "source_hint": "Category", "support_status": "planned"}
+        ]},
+        {"group_name": "Visual", "fields": [
+          {"name": "image_count", "type": "integer", "source_hint": "Visual", "support_status": "planned"},
+          {"name": "has_lifestyle_images", "type": "boolean", "source_hint": "Visual", "support_status": "planned"},
+          {"name": "has_infographic", "type": "boolean", "source_hint": "Visual", "support_status": "planned"},
+          {"name": "has_video", "type": "boolean", "source_hint": "Visual", "support_status": "planned"},
+          {"name": "visual_quality_score", "type": "number", "source_hint": "Visual", "support_status": "planned"}
+        ]},
+        {"group_name": "Availability", "fields": [
+          {"name": "fulfillment_type", "type": "string", "source_hint": "Availability", "support_status": "planned"},
+          {"name": "shipping_speed_tier", "type": "string", "source_hint": "Availability", "support_status": "planned"},
+          {"name": "prime_eligible", "type": "boolean", "source_hint": "Availability", "support_status": "planned"},
+          {"name": "estimated_monthly_sales", "type": "integer", "source_hint": "Availability", "support_status": "planned"}
+        ]},
+        {"group_name": "Competition", "fields": [
+          {"name": "competitive_position", "type": "object", "source_hint": "Competition", "support_status": "planned", "subfields": ["rank_in_category", "market_share_estimated", "top_competitors"]},
+          {"name": "listing_quality_score", "type": "number", "source_hint": "Competition", "support_status": "planned"},
+          {"name": "seo_keyword_density", "type": "number", "source_hint": "Competition", "support_status": "planned"}
+        ]},
+        {"group_name": "Reviews Summary", "fields": [
+          {"name": "rating_trend", "type": "string", "source_hint": "Reviews Summary", "support_status": "planned"},
+          {"name": "review_velocity", "type": "string", "source_hint": "Reviews Summary", "support_status": "planned"},
+          {"name": "fake_review_risk_score", "type": "number", "source_hint": "Reviews Summary", "support_status": "planned"},
+          {"name": "verified_purchase_ratio", "type": "number", "source_hint": "Reviews Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Variants", "fields": [
+          {"name": "variant_matrix_structured", "type": "object", "source_hint": "Variants", "support_status": "planned"},
+          {"name": "best_seller_variant", "type": "string", "source_hint": "Variants", "support_status": "planned"},
+          {"name": "variant_price_range", "type": "string", "source_hint": "Variants", "support_status": "planned"}
+        ]},
+        {"group_name": "Compliance", "fields": [
+          {"name": "certifications_mentioned", "type": "array<string>", "source_hint": "Compliance", "support_status": "planned"},
+          {"name": "country_of_origin", "type": "string", "source_hint": "Compliance", "support_status": "planned"},
+          {"name": "material_composition_extracted", "type": "string", "source_hint": "Compliance", "support_status": "planned"},
+          {"name": "safety_warnings", "type": "array<string>", "source_hint": "Compliance", "support_status": "planned"}
+        ]},
+        {"group_name": "Multimodal Product Images", "fields": [
+          {"name": "main_image_analysis", "type": "object", "source_hint": "Multimodal (Product Images)", "support_status": "planned", "subfields": ["background_type", "product_clearly_visible", "image_resolution_adequate", "product_angle"]},
+          {"name": "all_images_analysis", "type": "array<object>", "source_hint": "Multimodal (Product Images)", "support_status": "planned", "subfields": ["image_type", "text_extracted_from_image", "scene_description"]},
+          {"name": "image_text_consistency_score", "type": "number", "source_hint": "Multimodal (Product Images)", "support_status": "planned"},
+          {"name": "listing_visual_completeness", "type": "object", "source_hint": "Multimodal (Product Images)", "support_status": "planned", "subfields": ["has_hero", "has_lifestyle", "has_infographic", "has_size_reference", "has_packaging", "missing_recommended"]}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "buyer_quick_take", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "product_elevator_pitch", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "seller_competitive_brief", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "seo_optimized_description", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Market Positioning", "fields": [
+          {"name": "product_lifecycle_stage_inferred", "type": "string", "source_hint": "Market Positioning", "support_status": "planned"},
+          {"name": "lifecycle_evidence", "type": "string", "source_hint": "Market Positioning", "support_status": "planned"},
+          {"name": "unique_selling_points", "type": "array<string>", "source_hint": "Market Positioning", "support_status": "planned"},
+          {"name": "purchase_decision_factors_from_listing", "type": "array<object>", "source_hint": "Market Positioning", "support_status": "planned", "subfields": ["factor", "prominence_in_listing", "value_claim"]},
+          {"name": "cross_sell_category_hints", "type": "array<string>", "source_hint": "Market Positioning", "support_status": "planned"}
+        ]},
+        {"group_name": "Listing Quality", "fields": [
+          {"name": "listing_optimization_score", "type": "number", "source_hint": "Listing Quality", "support_status": "planned"},
+          {"name": "listing_issues_detected", "type": "array<object>", "source_hint": "Listing Quality", "support_status": "planned", "subfields": ["issue", "severity", "fix_suggestion"]},
+          {"name": "listing_completeness", "type": "object", "source_hint": "Listing Quality", "support_status": "planned", "subfields": ["title_quality", "bullet_point_quality", "description_quality", "image_quality", "a_plus_content_present"]}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["brand_website_url", "brand_linkedin_search_hint", "wikipedia_product_hint", "patent_numbers_mentioned", "certification_bodies_mentioned", "upc_ean_isbn", "manufacturer_model_number"]}
+        ]}
+      ]
+    },
+    {
+      "name": "Amazon Reviews Dataset",
+      "source_hint": "4.2 Amazon Reviews Dataset",
+      "field_groups": [
+        {"group_name": "Identity", "fields": [
+          {"name": "reviewer_profile_type", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+        ]},
+        {"group_name": "Content", "fields": [
+          {"name": "sentiment_overall", "type": "string", "source_hint": "Content", "support_status": "planned"},
+          {"name": "sentiment_aspects", "type": "array<object>", "source_hint": "Content", "support_status": "planned", "subfields": ["aspect", "sentiment", "detail"]}
+        ]},
+        {"group_name": "Analysis", "fields": [
+          {"name": "product_pros_extracted", "type": "array<string>", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "product_cons_extracted", "type": "array<string>", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "feature_satisfaction_map", "type": "object", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "use_case_mentioned", "type": "string", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "comparison_to_alternatives", "type": "array<object>", "source_hint": "Analysis", "support_status": "planned", "subfields": ["product", "advantage_disadvantage"]}
+        ]},
+        {"group_name": "Quality", "fields": [
+          {"name": "review_quality_score", "type": "number", "source_hint": "Quality", "support_status": "planned"},
+          {"name": "review_type", "type": "string", "source_hint": "Quality", "support_status": "planned"},
+          {"name": "authenticity_score", "type": "number", "source_hint": "Quality", "support_status": "planned"},
+          {"name": "information_density", "type": "number", "source_hint": "Quality", "support_status": "planned"}
+        ]},
+        {"group_name": "Structured", "fields": [
+          {"name": "issues_reported", "type": "array<object>", "source_hint": "Structured", "support_status": "planned", "subfields": ["issue", "severity", "product_component"]},
+          {"name": "customer_segment_inferred", "type": "string", "source_hint": "Structured", "support_status": "planned"},
+          {"name": "purchase_context", "type": "string", "source_hint": "Structured", "support_status": "planned"}
+        ]},
+        {"group_name": "Media", "fields": [
+          {"name": "image_content_described", "type": "array<string>", "source_hint": "Media", "support_status": "planned"},
+          {"name": "shows_product_in_use", "type": "boolean", "source_hint": "Media", "support_status": "planned"},
+          {"name": "shows_defect", "type": "boolean", "source_hint": "Media", "support_status": "planned"}
+        ]},
+        {"group_name": "Multimodal Review Images", "fields": [
+          {"name": "review_image_analysis", "type": "array<object>", "source_hint": "Multimodal (Review Images)", "support_status": "planned", "subfields": ["image_type", "defect_described", "usage_context_shown", "matches_review_text"]}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "review_one_liner", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "purchase_decision_factor", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Review Depth", "fields": [
+          {"name": "usage_duration_mentioned", "type": "string", "source_hint": "Review Depth", "support_status": "planned"},
+          {"name": "expertise_level_inferred", "type": "string", "source_hint": "Review Depth", "support_status": "planned"},
+          {"name": "actionable_feedback", "type": "array<string>", "source_hint": "Review Depth", "support_status": "planned"},
+          {"name": "competitor_products_mentioned", "type": "array<string>", "source_hint": "Review Depth", "support_status": "planned"}
+        ]}
+      ]
+    },
+    {
+      "name": "Amazon Sellers Dataset",
+      "source_hint": "4.3 Amazon Sellers Dataset",
+      "field_groups": [
+        {"group_name": "Identity", "fields": [
+          {"name": "seller_type", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "business_name_registered", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+        ]},
+        {"group_name": "Performance", "fields": [
+          {"name": "seller_health_score", "type": "number", "source_hint": "Performance", "support_status": "planned"},
+          {"name": "response_time_tier", "type": "string", "source_hint": "Performance", "support_status": "planned"},
+          {"name": "dispute_rate_estimated", "type": "number", "source_hint": "Performance", "support_status": "planned"}
+        ]},
+        {"group_name": "Portfolio", "fields": [
+          {"name": "product_count", "type": "integer", "source_hint": "Portfolio", "support_status": "planned"},
+          {"name": "category_focus", "type": "array<string>", "source_hint": "Portfolio", "support_status": "planned"},
+          {"name": "brand_portfolio", "type": "array<string>", "source_hint": "Portfolio", "support_status": "planned"},
+          {"name": "price_range", "type": "string", "source_hint": "Portfolio", "support_status": "planned"},
+          {"name": "avg_product_rating", "type": "number", "source_hint": "Portfolio", "support_status": "planned"}
+        ]},
+        {"group_name": "Business Intel", "fields": [
+          {"name": "years_on_amazon", "type": "integer", "source_hint": "Business Intel", "support_status": "planned"},
+          {"name": "growth_trajectory", "type": "string", "source_hint": "Business Intel", "support_status": "planned"},
+          {"name": "geographic_focus", "type": "string", "source_hint": "Business Intel", "support_status": "planned"},
+          {"name": "fulfillment_strategy", "type": "string", "source_hint": "Business Intel", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "seller_one_liner", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "seller_profile_narrative", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["seller_website_url", "linkedin_company_search_hint", "brand_names_carried"]}
+        ]}
+      ]
+    }
+  ]
+}

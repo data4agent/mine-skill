@@ -1,0 +1,3 @@
+# Browser execution
+playwright>=1.52.0
+camoufox>=0.4.11

@@ -1,0 +1,205 @@
+{
+  "dataset": "Base",
+  "support_status": "planned",
+  "source_document": "Dataset_Product_Catalog_v2.md",
+  "subdatasets": [
+    {
+      "name": "Transactions Dataset",
+      "source_hint": "5.1 Transactions Dataset",
+      "field_groups": [
+        {"group_name": "Basic", "fields": [
+          {"name": "value_usd", "type": "number", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "gas_fee_usd", "type": "number", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "tx_fee_tier", "type": "string", "source_hint": "Basic", "support_status": "planned"}
+        ]},
+        {"group_name": "Input Data", "fields": [
+          {"name": "function_name", "type": "string", "source_hint": "Input Data", "support_status": "planned"},
+          {"name": "function_signature", "type": "string", "source_hint": "Input Data", "support_status": "planned"},
+          {"name": "decoded_parameters", "type": "object", "source_hint": "Input Data", "support_status": "planned"},
+          {"name": "human_readable_action", "type": "string", "source_hint": "Input Data", "support_status": "planned"}
+        ]},
+        {"group_name": "Classification", "fields": [
+          {"name": "tx_type", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+          {"name": "protocol_name", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+          {"name": "protocol_category", "type": "string", "source_hint": "Classification", "support_status": "planned"}
+        ]},
+        {"group_name": "Token Transfers", "fields": [
+          {"name": "token_transfers", "type": "array<object>", "source_hint": "Token Transfers", "support_status": "planned", "subfields": ["token_address", "token_symbol", "token_name", "decimals", "from", "to", "amount", "amount_usd", "transfer_type"]}
+        ]},
+        {"group_name": "Context", "fields": [
+          {"name": "is_mev", "type": "boolean", "source_hint": "Context", "support_status": "planned"},
+          {"name": "mev_type", "type": "string", "source_hint": "Context", "support_status": "planned"},
+          {"name": "is_contract_interaction", "type": "boolean", "source_hint": "Context", "support_status": "planned"},
+          {"name": "is_internal_tx_parent", "type": "boolean", "source_hint": "Context", "support_status": "planned"},
+          {"name": "related_tx_hashes", "type": "array<string>", "source_hint": "Context", "support_status": "planned"}
+        ]},
+        {"group_name": "Risk", "fields": [
+          {"name": "sender_risk_label", "type": "string", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "receiver_risk_label", "type": "string", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "anomaly_flags", "type": "array<string>", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "fund_source_trace", "type": "string", "source_hint": "Risk", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "compliance_narrative", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "investor_narrative", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Strategy Detection", "fields": [
+          {"name": "strategy_signal", "type": "object", "source_hint": "Strategy Detection", "support_status": "planned", "subfields": ["dca_pattern_hint", "arbitrage_signal", "sandwich_component", "flash_loan_detected", "batch_operation", "governance_action_type"]}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["protocol_website_hint", "protocol_github_hint", "protocol_wikipedia_hint"]}
+        ]}
+      ]
+    },
+    {
+      "name": "Addresses / Wallets Dataset",
+      "source_hint": "5.2 Addresses / Wallets Dataset",
+      "field_groups": [
+        {"group_name": "Basic", "fields": [
+          {"name": "balance_usd", "type": "number", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "total_value_locked_usd", "type": "number", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "portfolio_composition", "type": "array<object>", "source_hint": "Basic", "support_status": "planned", "subfields": ["token", "amount", "usd_value", "percentage"]}
+        ]},
+        {"group_name": "Identity", "fields": [
+          {"name": "label", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "entity_name", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "ens_name", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "is_contract", "type": "boolean", "source_hint": "Identity", "support_status": "planned"},
+          {"name": "contract_type", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+        ]},
+        {"group_name": "Activity", "fields": [
+          {"name": "activity_summary", "type": "object", "source_hint": "Activity", "support_status": "planned", "subfields": ["total_volume_usd", "avg_tx_per_day", "active_days", "primary_activities", "most_used_protocols"]}
+        ]},
+        {"group_name": "DeFi", "fields": [
+          {"name": "defi_positions", "type": "array<object>", "source_hint": "DeFi", "support_status": "planned", "subfields": ["protocol", "pool", "position_type", "token_pair", "value_usd", "apy_at_entry", "pnl_estimated"]}
+        ]},
+        {"group_name": "NFT", "fields": [
+          {"name": "nft_holdings", "type": "array<object>", "source_hint": "NFT", "support_status": "planned", "subfields": ["collection", "token_id", "acquired_date", "acquired_price_usd", "current_floor_usd"]},
+          {"name": "nft_trading_pnl", "type": "number", "source_hint": "NFT", "support_status": "planned"}
+        ]},
+        {"group_name": "Behavioral", "fields": [
+          {"name": "wallet_archetype", "type": "string", "source_hint": "Behavioral", "support_status": "planned"},
+          {"name": "trading_pattern", "type": "string", "source_hint": "Behavioral", "support_status": "planned"},
+          {"name": "risk_appetite_score", "type": "number", "source_hint": "Behavioral", "support_status": "planned"},
+          {"name": "sophistication_score", "type": "number", "source_hint": "Behavioral", "support_status": "planned"}
+        ]},
+        {"group_name": "Risk", "fields": [
+          {"name": "risk_score", "type": "number", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "sanctions_match", "type": "boolean", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "mixer_interaction_count", "type": "integer", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "high_risk_counterparties", "type": "array<string>", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "fund_flow_risk_path", "type": "array<string>", "source_hint": "Risk", "support_status": "planned"}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "wallet_one_liner", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "compliance_profile_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "investor_profile_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Address Intelligence", "fields": [
+          {"name": "cross_chain_address_hint", "type": "object", "source_hint": "Address Intelligence", "support_status": "planned", "subfields": ["same_nonce_pattern_chains"]},
+          {"name": "deployer_analysis", "type": "string", "source_hint": "Address Intelligence", "support_status": "planned"},
+          {"name": "token_approval_risk", "type": "object", "source_hint": "Address Intelligence", "support_status": "planned", "subfields": ["unlimited_approvals_count", "high_risk_approvals"]}
+        ]}
+      ]
+    },
+    {
+      "name": "Smart Contracts Dataset",
+      "source_hint": "5.3 Smart Contracts Dataset",
+      "field_groups": [
+        {"group_name": "Basic", "fields": [
+          {"name": "contract_name", "type": "string", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "is_verified", "type": "boolean", "source_hint": "Basic", "support_status": "planned"},
+          {"name": "compiler_version", "type": "string", "source_hint": "Basic", "support_status": "planned"}
+        ]},
+        {"group_name": "Code", "fields": [
+          {"name": "contract_type_classified", "type": "string", "source_hint": "Code", "support_status": "planned"},
+          {"name": "protocol_name", "type": "string", "source_hint": "Code", "support_status": "planned"},
+          {"name": "implements_standards", "type": "array<string>", "source_hint": "Code", "support_status": "planned"}
+        ]},
+        {"group_name": "Analysis", "fields": [
+          {"name": "functions_summary", "type": "array<object>", "source_hint": "Analysis", "support_status": "planned", "subfields": ["name", "purpose", "access_control", "state_mutability"]},
+          {"name": "admin_functions", "type": "array<string>", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "upgrade_mechanism", "type": "string", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "has_pausable", "type": "boolean", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "has_blacklist", "type": "boolean", "source_hint": "Analysis", "support_status": "planned"},
+          {"name": "owner_privileges", "type": "array<string>", "source_hint": "Analysis", "support_status": "planned"}
+        ]},
+        {"group_name": "Security", "fields": [
+          {"name": "known_vulnerabilities", "type": "array<string>", "source_hint": "Security", "support_status": "planned"},
+          {"name": "audit_status", "type": "string", "source_hint": "Security", "support_status": "planned"},
+          {"name": "audit_firms", "type": "array<string>", "source_hint": "Security", "support_status": "planned"},
+          {"name": "reentrancy_risk", "type": "string", "source_hint": "Security", "support_status": "planned"},
+          {"name": "centralization_risk_score", "type": "number", "source_hint": "Security", "support_status": "planned"},
+          {"name": "proxy_implementation_history", "type": "array<string>", "source_hint": "Security", "support_status": "planned"}
+        ]},
+        {"group_name": "Usage", "fields": [
+          {"name": "total_interactions", "type": "integer", "source_hint": "Usage", "support_status": "planned"},
+          {"name": "unique_users", "type": "integer", "source_hint": "Usage", "support_status": "planned"},
+          {"name": "tvl_current_usd", "type": "number", "source_hint": "Usage", "support_status": "planned"},
+          {"name": "tvl_30d_trend", "type": "string", "source_hint": "Usage", "support_status": "planned"},
+          {"name": "daily_active_users_avg", "type": "number", "source_hint": "Usage", "support_status": "planned"}
+        ]},
+        {"group_name": "Code Comprehension", "fields": [
+          {"name": "contract_purpose_summary", "type": "string", "source_hint": "Code Comprehension", "support_status": "planned"},
+          {"name": "function_explanations", "type": "array<object>", "source_hint": "Code Comprehension", "support_status": "planned", "subfields": ["function_name", "plain_english_description", "risk_assessment", "risk_reasoning"]},
+          {"name": "admin_risk_narrative", "type": "string", "source_hint": "Code Comprehension", "support_status": "planned"},
+          {"name": "code_quality_indicators", "type": "object", "source_hint": "Code Comprehension", "support_status": "planned", "subfields": ["has_comments", "comment_density", "follows_style_guide", "uses_safe_math", "has_reentrancy_guards", "has_access_control", "notable_patterns"]}
+        ]},
+        {"group_name": "Multi-level Summary", "fields": [
+          {"name": "contract_one_liner", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "security_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+          {"name": "developer_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["github_source_url", "audit_report_urls", "protocol_website", "author_github_hint", "license_type"]}
+        ]}
+      ]
+    },
+    {
+      "name": "DeFi Protocol Aggregated Dataset",
+      "source_hint": "5.4 DeFi Protocol Aggregated Dataset",
+      "field_groups": [
+        {"group_name": "Protocol", "fields": [
+          {"name": "protocol_name", "type": "string", "source_hint": "Protocol", "support_status": "planned"},
+          {"name": "protocol_category", "type": "string", "source_hint": "Protocol", "support_status": "planned"},
+          {"name": "main_contracts", "type": "array<string>", "source_hint": "Protocol", "support_status": "planned"},
+          {"name": "website", "type": "string", "source_hint": "Protocol", "support_status": "planned"},
+          {"name": "documentation_url", "type": "string", "source_hint": "Protocol", "support_status": "planned"},
+          {"name": "governance_token", "type": "string", "source_hint": "Protocol", "support_status": "planned"}
+        ]},
+        {"group_name": "Metrics", "fields": [
+          {"name": "tvl_usd", "type": "number", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "tvl_change_24h/7d/30d", "type": "string", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "total_volume_24h", "type": "number", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "total_users", "type": "integer", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "daily_active_users", "type": "number", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "total_fees_24h", "type": "number", "source_hint": "Metrics", "support_status": "planned"},
+          {"name": "total_revenue_24h", "type": "number", "source_hint": "Metrics", "support_status": "planned"}
+        ]},
+        {"group_name": "Pools", "fields": [
+          {"name": "pools", "type": "array<object>", "source_hint": "Pools", "support_status": "planned", "subfields": ["pool_address", "token_pair", "tvl", "volume_24h", "apy", "fee_tier", "utilization_rate"]}
+        ]},
+        {"group_name": "Risk", "fields": [
+          {"name": "protocol_risk_score", "type": "number", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "smart_contract_risk", "type": "string", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "centralization_risk", "type": "string", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "oracle_dependency", "type": "string", "source_hint": "Risk", "support_status": "planned"},
+          {"name": "insurance_coverage", "type": "string", "source_hint": "Risk", "support_status": "planned"}
+        ]},
+        {"group_name": "LLM-Enhanced", "fields": [
+          {"name": "protocol_summary", "type": "string", "source_hint": "LLM-Enhanced", "support_status": "planned"},
+          {"name": "competitive_landscape", "type": "string", "source_hint": "LLM-Enhanced", "support_status": "planned"},
+          {"name": "key_differentiators", "type": "array<string>", "source_hint": "LLM-Enhanced", "support_status": "planned"},
+          {"name": "risk_narrative", "type": "string", "source_hint": "LLM-Enhanced", "support_status": "planned"},
+          {"name": "recent_governance_decisions", "type": "array<string>", "source_hint": "LLM-Enhanced", "support_status": "planned"}
+        ]},
+        {"group_name": "Governance Analysis", "fields": [
+          {"name": "governance_proposal_analysis", "type": "object", "source_hint": "Governance Analysis", "support_status": "planned", "subfields": ["proposal_id", "plain_english_summary", "impact_assessment", "risk_implications", "controversy_indicators"]}
+        ]},
+        {"group_name": "Cross-dataset Linkable IDs", "fields": [
+          {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["team_linkedin_hints", "arxiv_paper_hints", "github_org_url", "wikipedia_hint"]}
+        ]}
+      ]
+    }
+  ]
+}

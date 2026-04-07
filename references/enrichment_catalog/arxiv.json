@@ -1,0 +1,101 @@
+{
+  "dataset": "arXiv",
+  "support_status": "planned",
+  "source_document": "Dataset_Product_Catalog_v2.md",
+  "field_groups": [
+    {"group_name": "Identity", "fields": [
+      {"name": "title_normalized", "type": "string", "source_hint": "Identity", "support_status": "planned"},
+      {"name": "abstract_plain_text", "type": "string", "source_hint": "Identity", "support_status": "planned"}
+    ]},
+    {"group_name": "Authors", "fields": [
+      {"name": "authors_structured", "type": "array<object>", "source_hint": "Authors", "support_status": "planned", "subfields": ["full_name", "first_name", "last_name", "affiliation_standardized", "affiliation_type", "affiliation_country", "author_id_crossref", "h_index_estimated", "career_stage_inferred"]}
+    ]},
+    {"group_name": "Classification", "fields": [
+      {"name": "topic_hierarchy", "type": "array<string>", "source_hint": "Classification", "support_status": "planned"},
+      {"name": "keywords_extracted", "type": "array<string>", "source_hint": "Classification", "support_status": "planned"},
+      {"name": "research_area_plain_english", "type": "string", "source_hint": "Classification", "support_status": "planned"},
+      {"name": "interdisciplinary_score", "type": "number", "source_hint": "Classification", "support_status": "planned"}
+    ]},
+    {"group_name": "Dates", "fields": [
+      {"name": "acceptance_status_inferred", "type": "string", "source_hint": "Dates", "support_status": "planned"},
+      {"name": "venue_published", "type": "string", "source_hint": "Dates", "support_status": "planned"},
+      {"name": "venue_tier", "type": "string", "source_hint": "Dates", "support_status": "planned"}
+    ]},
+    {"group_name": "Full Text", "fields": [
+      {"name": "sections_structured", "type": "array<object>", "source_hint": "Full Text", "support_status": "planned", "subfields": ["heading", "content_summary", "section_type"]}
+    ]},
+    {"group_name": "Contribution", "fields": [
+      {"name": "main_contributions", "type": "array<string>", "source_hint": "Contribution", "support_status": "planned"},
+      {"name": "novelty_type", "type": "string", "source_hint": "Contribution", "support_status": "planned"},
+      {"name": "problem_statement", "type": "string", "source_hint": "Contribution", "support_status": "planned"},
+      {"name": "proposed_solution_summary", "type": "string", "source_hint": "Contribution", "support_status": "planned"}
+    ]},
+    {"group_name": "Methodology", "fields": [
+      {"name": "methods_used", "type": "array<object>", "source_hint": "Methodology", "support_status": "planned", "subfields": ["method_name", "method_category", "is_novel"]},
+      {"name": "baselines_compared", "type": "array<string>", "source_hint": "Methodology", "support_status": "planned"},
+      {"name": "evaluation_metrics", "type": "array<string>", "source_hint": "Methodology", "support_status": "planned"},
+      {"name": "datasets_used", "type": "array<object>", "source_hint": "Methodology", "support_status": "planned", "subfields": ["name", "url", "size", "domain"]},
+      {"name": "experimental_setup_summary", "type": "string", "source_hint": "Methodology", "support_status": "planned"}
+    ]},
+    {"group_name": "Results", "fields": [
+      {"name": "key_results", "type": "array<object>", "source_hint": "Results", "support_status": "planned", "subfields": ["metric", "value", "baseline_comparison", "improvement_percentage"]},
+      {"name": "state_of_art_claimed", "type": "boolean", "source_hint": "Results", "support_status": "planned"},
+      {"name": "statistical_significance_reported", "type": "boolean", "source_hint": "Results", "support_status": "planned"},
+      {"name": "reproducibility_indicators", "type": "array<string>", "source_hint": "Results", "support_status": "planned"}
+    ]},
+    {"group_name": "Limitations", "fields": [
+      {"name": "limitations_stated", "type": "array<string>", "source_hint": "Limitations", "support_status": "planned"},
+      {"name": "future_work_directions", "type": "array<string>", "source_hint": "Limitations", "support_status": "planned"},
+      {"name": "threats_to_validity", "type": "array<string>", "source_hint": "Limitations", "support_status": "planned"}
+    ]},
+    {"group_name": "References", "fields": [
+      {"name": "references_structured", "type": "array<object>", "source_hint": "References", "support_status": "planned", "subfields": ["title", "authors", "year", "venue", "citation_context", "citation_sentiment"]},
+      {"name": "total_citation_count", "type": "integer", "source_hint": "References", "support_status": "planned"},
+      {"name": "influential_citation_count", "type": "integer", "source_hint": "References", "support_status": "planned"}
+    ]},
+    {"group_name": "Code & Data", "fields": [
+      {"name": "code_available", "type": "boolean", "source_hint": "Code & Data", "support_status": "planned"},
+      {"name": "code_url", "type": "string", "source_hint": "Code & Data", "support_status": "planned"},
+      {"name": "code_framework", "type": "string", "source_hint": "Code & Data", "support_status": "planned"},
+      {"name": "dataset_released", "type": "boolean", "source_hint": "Code & Data", "support_status": "planned"},
+      {"name": "dataset_url", "type": "string", "source_hint": "Code & Data", "support_status": "planned"},
+      {"name": "open_access_status", "type": "string", "source_hint": "Code & Data", "support_status": "planned"}
+    ]},
+    {"group_name": "Embeddings", "fields": [
+      {"name": "title_embedding", "type": "array<number>", "source_hint": "Embeddings", "support_status": "planned"},
+      {"name": "abstract_embedding", "type": "array<number>", "source_hint": "Embeddings", "support_status": "planned"},
+      {"name": "full_paper_embedding", "type": "array<number>", "source_hint": "Embeddings", "support_status": "planned"}
+    ]},
+    {"group_name": "Relations", "fields": [
+      {"name": "builds_upon", "type": "array<string>", "source_hint": "Relations", "support_status": "planned"},
+      {"name": "contradicts", "type": "array<string>", "source_hint": "Relations", "support_status": "planned"},
+      {"name": "replicates", "type": "array<string>", "source_hint": "Relations", "support_status": "planned"},
+      {"name": "uses_dataset_from", "type": "array<string>", "source_hint": "Relations", "support_status": "planned"},
+      {"name": "uses_method_from", "type": "array<string>", "source_hint": "Relations", "support_status": "planned"}
+    ]},
+    {"group_name": "Multimodal Figures", "fields": [
+      {"name": "figures_analyzed", "type": "array<object>", "source_hint": "Multimodal (Figures)", "support_status": "planned", "subfields": ["figure_id", "figure_type", "caption_original", "caption_enhanced", "key_findings_from_figure", "data_points_extracted", "components_identified"]}
+    ]},
+    {"group_name": "Multimodal Equations", "fields": [
+      {"name": "key_equations", "type": "array<object>", "source_hint": "Multimodal (Equations)", "support_status": "planned", "subfields": ["equation_latex", "equation_id", "plain_english_explanation", "variables_defined", "equation_role"]}
+    ]},
+    {"group_name": "Multi-level Summary", "fields": [
+      {"name": "tweet_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "one_line_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "executive_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "layman_summary", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "technical_abstract_enhanced", "type": "string", "source_hint": "Multi-level Summary", "support_status": "planned"},
+      {"name": "review_style_summary", "type": "object", "source_hint": "Multi-level Summary", "support_status": "planned"}
+    ]},
+    {"group_name": "Research Depth Analysis", "fields": [
+      {"name": "mathematical_complexity_score", "type": "integer", "source_hint": "Research Depth Analysis", "support_status": "planned"},
+      {"name": "mathematical_complexity_evidence", "type": "string", "source_hint": "Research Depth Analysis", "support_status": "planned"},
+      {"name": "novelty_delta_assessment", "type": "object", "source_hint": "Research Depth Analysis", "support_status": "planned"},
+      {"name": "methodology_transferability", "type": "array<string>", "source_hint": "Research Depth Analysis", "support_status": "planned"},
+      {"name": "claim_verification_notes", "type": "array<object>", "source_hint": "Research Depth Analysis", "support_status": "planned"}
+    ]},
+    {"group_name": "Cross-dataset Linkable IDs", "fields": [
+      {"name": "linkable_identifiers", "type": "object", "source_hint": "Cross-dataset Linkable IDs", "support_status": "planned", "subfields": ["author_linkedin_hints", "github_repos_mentioned", "project_urls_mentioned", "wikipedia_concept_hints", "dataset_source_urls", "related_arxiv_ids_mentioned"]}
+    ]}
+  ]
+}

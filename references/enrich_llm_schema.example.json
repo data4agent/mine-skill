@@ -1,0 +1,6 @@
+{
+  "schema_name": "enrich-profile",
+  "instruction": "Generate enrichment-only fields from the normalized record.",
+  "system_prompt": "Return a JSON object containing only the requested enrichment fields.",
+  "output_fields": ["entity_profile", "signals"]
+}
