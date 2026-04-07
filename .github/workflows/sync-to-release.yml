@@ -1,0 +1,110 @@
+name: Sync to release repo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release files
+        run: |
+          mkdir -p /tmp/release-staging
+
+          # Copy everything first
+          rsync -a --exclude='.git' ./ /tmp/release-staging/
+
+          # Remove dev-only files
+          cd /tmp/release-staging
+          rm -rf tests/
+          rm -rf evals/
+          rm -rf mine-workspace/
+          rm -rf __pycache__/
+          rm -f example-worker.py
+          rm -f pyproject.toml
+          rm -f requirements-dev.txt
+          rm -f .skillignore
+          rm -rf .github/
+
+          # Remove dev-only docs (keep ones referenced by SKILL.md)
+          rm -f docs/frontend-skill-development-guide-en.md
+          rm -f docs/SCHEMA_LAYERING_4PLATFORMS.md
+          rm -f docs/Subnet_protocol_v2.0.md
+          rm -f docs/FIELD_ALIGNMENT_GUIDE.md
+          rm -f docs/OPENCLAW_HOST_INTEGRATION.md
+
+          # Remove all __pycache__ and .pyc recursively
+          find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+          find . -name '*.pyc' -delete 2>/dev/null || true
+
+          echo "=== Release file count ==="
+          find . -type f | wc -l
+
+      - name: Get source commit info
+        id: source
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha_full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: awp-worknet/mine
+          token: ${{ secrets.RELEASE_REPO_TOKEN }}
+          path: target-repo
+
+      - name: Sync files to target
+        id: sync
+        run: |
+          cd target-repo
+
+          # Remove all tracked files (except .git)
+          git ls-files -z | xargs -0 rm -f 2>/dev/null || true
+
+          # Copy release files
+          rsync -a --exclude='.git' /tmp/release-staging/ ./
+
+          # Check for changes
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to sync"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "=== Changes ==="
+            git status --short | head -50
+          fi
+
+      - name: Create PR to target repo
+        if: steps.sync.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_SHA_FULL: ${{ steps.source.outputs.sha_full }}
+        run: |
+          cd target-repo
+          BRANCH="sync/${SOURCE_SHA}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "sync: update from data4agent/mine@${SOURCE_SHA}"
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo awp-worknet/mine \
+            --base main \
+            --head "$BRANCH" \
+            --title "sync: update from source @${SOURCE_SHA}" \
+            --body "Automated sync from [data4agent/mine@\`${SOURCE_SHA}\`](https://github.com/data4agent/mine/commit/${SOURCE_SHA_FULL}).
+
+          Dev-only files excluded: tests/, evals/, mine-workspace/, example-worker.py, pyproject.toml, dev docs."
