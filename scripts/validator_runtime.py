@@ -289,14 +289,14 @@ class ValidatorRuntime:
             status = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
             if status == 403:
                 log.error(
-                    "Validator requires minimum 10,000 AWP staked on the ocDATA worknet. "
+                    "Validator requires minimum 10,000 AWP staked on the Mine Worknet. "
                     "Either the agent can stake its own AWP, or a user can delegate stake to the agent. "
                     "Use the AWP Skill to stake and allocate, then retry."
                 )
                 with self._lock:
                     self._running = False
                 return {**self.status(), "error": "insufficient_stake",
-                        "message": "Validator requires minimum 10,000 AWP staked on the ocDATA worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
+                        "message": "Validator requires minimum 10,000 AWP staked on the Mine Worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
             log.warning("Validator application check failed: %s (proceeding anyway)", err)
         except Exception as exc:
             log.warning("Validator application check failed: %s (proceeding anyway)", exc)
@@ -315,7 +315,7 @@ class ValidatorRuntime:
             if status == 403:
                 log.error(
                     "Failed to join validator ready pool — insufficient stake. "
-                    "Validator requires minimum 10,000 AWP staked on the ocDATA worknet. "
+                    "Validator requires minimum 10,000 AWP staked on the Mine Worknet. "
                     "Either the agent can stake its own AWP, or a user can delegate stake to the agent. "
                     "Use the AWP Skill to stake and allocate, then retry."
                 )
@@ -323,7 +323,7 @@ class ValidatorRuntime:
                     self._running = False
                 self._ws.close()
                 return {**self.status(), "error": "insufficient_stake",
-                        "message": "Validator requires minimum 10,000 AWP staked on the ocDATA worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
+                        "message": "Validator requires minimum 10,000 AWP staked on the Mine Worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
             log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
             log.warning("join_ready_pool failed: %s", exc)
