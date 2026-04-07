@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -1447,8 +1448,7 @@ def _export_and_submit_core_submissions_for_task(
                 except Exception:
                     pass  # dedup check is best-effort, don't block submission on failure
         if dedup_blocked:
-            import logging as _log
-            _log.getLogger("agent.submit").info(
+            logging.getLogger("agent.submit").info(
                 "dedup hash check blocked %d/%d entries: %s", len(dedup_blocked), len(entries), dedup_blocked
             )
             # Remove blocked entries from payload before submitting

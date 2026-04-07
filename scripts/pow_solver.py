@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import operator
+import re
 from typing import Any
 
 import httpx
@@ -50,11 +51,10 @@ def _solve_content_understanding(challenge: dict[str, Any]) -> str:
 
 def _extract_answer_from_prompt(prompt: str) -> str | None:
     """Extract the answer keyword given directly in a PoW prompt (e.g. "输出 generic-ready 作为...")."""
-    import re as _re
-    m = _re.search(r"输出\s+(\S+)\s+作为", prompt)
+    m = re.search(r"输出\s+(\S+)\s+作为", prompt)
     if m:
         return m.group(1)
-    m = _re.search(r"output\s+(\S+)\s+as\b", prompt, _re.IGNORECASE)
+    m = re.search(r"output\s+(\S+)\s+as\b", prompt, re.IGNORECASE)
     if m:
         return m.group(1)
     return None
