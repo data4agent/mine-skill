@@ -1144,10 +1144,22 @@ def run_agent_control(action: str = "status") -> str:
             except Exception:
                 pass
 
+        # Build detailed status summary so LLM doesn't need to guess
+        epoch_submitted = status.get("epoch_submitted", 0)
+        epoch_target = status.get("epoch_target", 80)
+        credit_score = status.get("credit_score", "?")
+        credit_tier = status.get("credit_tier", "?")
+        processed = status.get("session_totals", {}).get("processed_items", 0)
+        submitted = status.get("session_totals", {}).get("submitted_items", 0)
+        errors_count = status.get("session_totals", {}).get("errors", 0)
+
         if is_running:
-            user_msg = f"Mining is running in background (session: {session_id})."
+            progress = f"Epoch progress: {epoch_submitted}/{epoch_target} submissions."
+            credit = f"Credit: {credit_score} ({credit_tier})."
+            session_stats = f"This session: {processed} processed, {submitted} submitted, {errors_count} errors."
+            user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}"
             if recent_errors:
-                user_msg += f" Warning: {len(recent_errors)} recent error(s) detected in worker log."
+                user_msg += f" Warning: {len(recent_errors)} recent error(s) in log."
             user_acts = ["Pause mining", "Stop mining"]
             action_map = {
                 "Pause mining": "python scripts/run_tool.py agent-control pause",
@@ -1363,10 +1375,31 @@ def render_validator_status() -> str:
 
     if bg_status == "running":
         session_id = str(snapshot.get("session_id") or "")
+        # Read validator status file for detailed stats
+        detail_parts: list[str] = [f"Validator is running (session: {session_id})."]
+        try:
+            from worker_state import ValidatorStateStore
+            vstore = ValidatorStateStore(_validator_state_root())
+            vstatus = vstore.load_session()
+            ws_ok = vstatus.get("ws_connected", False)
+            eligible = vstatus.get("eligible", True)
+            stats = vstatus.get("stats", {})
+            received = stats.get("tasks_received", 0)
+            evaluated = stats.get("tasks_evaluated", 0)
+            accepted = stats.get("tasks_accepted", 0)
+            rejected = stats.get("tasks_rejected", 0)
+            detail_parts.append(f"WebSocket: {'connected' if ws_ok else 'reconnecting (normal during idle periods)'}.")
+            detail_parts.append(f"Eligible: {'yes' if eligible else 'no (check heartbeat)'}.")
+            if evaluated > 0:
+                detail_parts.append(f"Tasks: {received} received, {evaluated} evaluated ({accepted} accepted, {rejected} rejected).")
+            else:
+                detail_parts.append("No tasks evaluated yet — waiting for platform to assign tasks.")
+        except Exception:
+            pass
         return json.dumps({
             "ready": True,
             "state": "running",
-            "user_message": f"Validator is running in the background (session: {session_id}).",
+            "user_message": " ".join(detail_parts),
             "user_actions": ["Check validator status", "Stop validator"],
             "_internal": {
                 "next_command": "python scripts/run_tool.py validator-control status",
