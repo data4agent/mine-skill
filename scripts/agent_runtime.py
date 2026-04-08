@@ -834,6 +834,7 @@ class AgentWorker:
                     report_result = self.client.report_refresh_task_result(item.claim_task_id, report_payload)
                 else:
                     summary.errors.append(f"unknown claim_task_type: {item.claim_task_type} for {item.claim_task_id}")
+                    return
             except PlatformApiError as api_exc:
                 if api_exc.code == "address_not_registered":
                     summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
