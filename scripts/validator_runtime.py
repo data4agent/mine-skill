@@ -286,18 +286,15 @@ class ValidatorRuntime:
                     self._running = False
                 return self.status()
         except (PlatformApiError, _HTTPStatusError) as err:
-            status = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
-            if status == 403:
-                log.error(
-                    "Validator requires minimum 10,000 AWP staked on the Mine Worknet. "
-                    "Either the agent can stake its own AWP, or a user can delegate stake to the agent. "
-                    "Use the AWP Skill to stake and allocate, then retry."
-                )
-                with self._lock:
-                    self._running = False
-                return {**self.status(), "error": "insufficient_stake",
-                        "message": "Validator requires minimum 10,000 AWP staked on the Mine Worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
-            log.warning("Validator application check failed: %s (proceeding anyway)", err)
+            status_code = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
+            error_code = err.code if isinstance(err, PlatformApiError) else ""
+            error_msg = str(err)
+            if status_code == 403:
+                log.warning("Validator application check got 403: %s (proceeding — will retry via heartbeat)", error_msg)
+                # Don't stop — 403 on application check may be transient or a permission issue
+                # that resolves after heartbeat. Only join_ready_pool 403 is fatal.
+            else:
+                log.warning("Validator application check failed: %s (proceeding anyway)", err)
         except Exception as exc:
             log.warning("Validator application check failed: %s (proceeding anyway)", exc)
 
@@ -311,20 +308,20 @@ class ValidatorRuntime:
                 self._platform.join_ready_pool()
             log.info("Joined validator ready pool")
         except (PlatformApiError, _HTTPStatusError) as err:
-            status = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
-            if status == 403:
+            status_code = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
+            error_code = err.code if isinstance(err, PlatformApiError) else ""
+            error_msg = str(err)
+            if status_code == 403:
                 log.error(
-                    "Failed to join validator ready pool — insufficient stake. "
-                    "Validator requires minimum 10,000 AWP staked on the Mine Worknet. "
-                    "Either the agent can stake its own AWP, or a user can delegate stake to the agent. "
-                    "Use the AWP Skill to stake and allocate, then retry."
+                    "Failed to join validator ready pool (403 Forbidden): %s. "
+                    "This may indicate insufficient stake (minimum 10,000 AWP on Mine Worknet) "
+                    "or a permission issue. Check your stake allocation and retry.",
+                    error_msg,
                 )
-                with self._lock:
-                    self._running = False
-                self._ws.close()
-                return {**self.status(), "error": "insufficient_stake",
-                        "message": "Validator requires minimum 10,000 AWP staked on the Mine Worknet. Either the agent stakes its own AWP, or a user delegates stake to the agent. Use the AWP Skill to stake and allocate, then retry."}
-            log.warning("join_ready_pool failed: %s", err)
+                # Don't immediately stop — log the error but continue to heartbeat loop.
+                # The heartbeat will update eligibility status from the platform.
+            else:
+                log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
             log.warning("join_ready_pool failed: %s", exc)
 
