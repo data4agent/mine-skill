@@ -277,7 +277,7 @@ def step5_setup_wallet() -> tuple[bool, str, dict[str, Any]]:
 
         duration = WALLET_SESSION_DURATION_SECONDS
         unlock_result = subprocess.run(
-            [wallet_bin, "unlock", "--duration", str(duration)],
+            [wallet_bin, "unlock", "--duration", str(duration), "--scope", "full"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -288,7 +288,7 @@ def step5_setup_wallet() -> tuple[bool, str, dict[str, Any]]:
             # Might need password - this is the only expected manual fallback
             if "password" in unlock_result.stderr.lower():
                 extra["needs_password"] = True
-                extra["manual_command"] = f"awp-wallet unlock --duration {duration}"
+                extra["manual_command"] = f"awp-wallet unlock --duration {duration} --scope full"
                 return False, "Wallet needs interactive confirmation. Run awp-wallet unlock once, then rerun setup.", extra
             return False, f"Unlock failed: {unlock_result.stderr.strip()}", extra
 
