@@ -317,9 +317,7 @@ class AgentWorker:
         session = self.state_store.load_session()
         # Enrich with unified profile from platform (replaces multiple API calls)
         try:
-            signer_addr = ""
-            if self.client._signer is not None:
-                signer_addr = self.client._signer.get_address()
+            signer_addr = self.client.get_signer_address()
             if signer_addr:
                 profile = self.client.fetch_profile(signer_addr)
                 if profile:
@@ -340,7 +338,10 @@ class AgentWorker:
                             session["epoch_id"] = epoch_id
                         epoch_miner = current_epoch.get("miner") or {}
                         if epoch_miner:
-                            session["epoch_submitted"] = epoch_miner.get("task_count", session.get("epoch_submitted", 0))
+                            # Only advance epoch_submitted, never regress (profile can lag behind heartbeat)
+                            profile_count = epoch_miner.get("task_count")
+                            if profile_count is not None:
+                                session["epoch_submitted"] = max(int(profile_count), int(session.get("epoch_submitted") or 0))
                             session["epoch_avg_score"] = epoch_miner.get("avg_score")
         except Exception:
             pass

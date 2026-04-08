@@ -80,6 +80,15 @@ class PlatformClient:
             headers=headers,
         )
 
+    def get_signer_address(self) -> str:
+        """Return the signer's wallet address, or empty string if unavailable."""
+        if self._signer is None:
+            return ""
+        try:
+            return self._signer.get_address()
+        except Exception:
+            return ""
+
     def consume_wallet_refresh(self) -> dict[str, Any] | None:
         payload = self._last_wallet_refresh
         self._last_wallet_refresh = None
