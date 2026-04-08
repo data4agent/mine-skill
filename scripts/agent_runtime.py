@@ -1479,6 +1479,10 @@ def _export_and_submit_core_submissions_for_task(
                     pass  # PoW answer or retry failed, keep original response
     # Re-derive resp_data in case PoW retry updated response
     resp_data = response.get("data") if isinstance(response, dict) else None
+    # If admission_status is still challenge_required after PoW attempt, raise so callers
+    # don't count this as a successful submission
+    if isinstance(resp_data, dict) and resp_data.get("admission_status") == "challenge_required":
+        raise RuntimeError(f"submission requires PoW challenge that could not be resolved for {item.item_id}")
     # Check for submission_too_frequent in per-entry rejections
     if isinstance(resp_data, dict):
         rejected = resp_data.get("rejected")
