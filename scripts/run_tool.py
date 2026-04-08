@@ -1149,15 +1149,25 @@ def run_agent_control(action: str = "status") -> str:
         epoch_target = status.get("epoch_target", 80)
         credit_score = status.get("credit_score", "?")
         credit_tier = status.get("credit_tier", "?")
+        epoch_avg_score = status.get("epoch_avg_score")
         processed = status.get("session_totals", {}).get("processed_items", 0)
         submitted = status.get("session_totals", {}).get("submitted_items", 0)
         errors_count = status.get("session_totals", {}).get("errors", 0)
+        # Historical totals from profile
+        miner_summary = status.get("miner_stats") or status.get("profile", {}).get("miner_summary") or {}
+        total_rewards = miner_summary.get("total_rewards")
+        total_epochs = miner_summary.get("total_epochs")
 
         if is_running:
             progress = f"Epoch progress: {epoch_submitted}/{epoch_target} submissions."
+            if epoch_avg_score is not None:
+                progress += f" Avg score: {epoch_avg_score}."
             credit = f"Credit: {credit_score} ({credit_tier})."
             session_stats = f"This session: {processed} processed, {submitted} submitted, {errors_count} errors."
-            user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}"
+            rewards_info = ""
+            if total_rewards is not None:
+                rewards_info = f" Total rewards: {total_rewards} aMine ({total_epochs or '?'} epochs)."
+            user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}{rewards_info}"
             # Diagnostic hints for common issues
             if submitted == 0 and processed > 0 and errors_count > 0:
                 user_msg += " Note: items processed but none submitted — check errors in log for submission failures."
@@ -1405,6 +1415,27 @@ def render_validator_status() -> str:
                 detail_parts.append(f"Tasks: {received} received, {evaluated} evaluated ({accepted} accepted, {rejected} rejected).")
             else:
                 detail_parts.append("No tasks evaluated yet — waiting for platform to assign tasks.")
+            # Enrich with profile data for historical stats
+            try:
+                from common import resolve_wallet_config
+                from lib.platform_client import PlatformClient
+                _, wtoken = resolve_wallet_config()
+                if wtoken:
+                    from signer import WalletSigner
+                    _signer = WalletSigner(session_token=wtoken)
+                    _pc = PlatformClient(base_url=resolve_platform_base_url(), token="", signer=_signer)
+                    addr = _pc.get_signer_address()
+                    if not addr:
+                        raise RuntimeError("signer address unavailable")
+                    profile = _pc.fetch_profile(addr)
+                    v_summary = profile.get("validator_summary") or {}
+                    if v_summary.get("total_rewards") is not None:
+                        detail_parts.append(f"Total rewards: {v_summary['total_rewards']} aMine ({v_summary.get('total_epochs', '?')} epochs).")
+                    v_epoch = (profile.get("current_epoch") or {}).get("validator") or {}
+                    if v_epoch.get("accuracy") is not None:
+                        detail_parts.append(f"Current epoch accuracy: {v_epoch['accuracy']}%.")
+            except Exception:
+                pass
         except Exception:
             pass
         return json.dumps({

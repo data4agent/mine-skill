@@ -10,7 +10,7 @@ description: >
   casual phrases like "go online", "start earning", "check my submissions",
   "how many submissions do I have", or "why is my miner not working". NOT for
   AWP wallet transfers, RootNet staking, or general server monitoring.
-version: 0.9.9
+version: 0.9.11
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py

@@ -80,6 +80,15 @@ class PlatformClient:
             headers=headers,
         )
 
+    def get_signer_address(self) -> str:
+        """Return the signer's wallet address, or empty string if unavailable."""
+        if self._signer is None:
+            return ""
+        try:
+            return self._signer.get_address()
+        except Exception:
+            return ""
+
     def consume_wallet_refresh(self) -> dict[str, Any] | None:
         payload = self._last_wallet_refresh
         self._last_wallet_refresh = None
@@ -578,3 +587,7 @@ class PlatformClient:
     def fetch_epoch_settlement_results(self, epoch_id: str) -> dict[str, Any]:
         """GET /api/mining/v1/epochs/:id/settlement-results"""
         return self._request_optional_data("GET", f"/api/mining/v1/epochs/{epoch_id}/settlement-results")
+
+    def fetch_profile(self, address: str) -> dict[str, Any]:
+        """GET /api/mining/v1/profiles/:address — unified profile with miner+validator stats"""
+        return self._request_optional_data("GET", f"/api/mining/v1/profiles/{quote(address, safe='')}")
