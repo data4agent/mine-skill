@@ -541,16 +541,24 @@ def _dataset_domains(dataset: dict[str, Any]) -> list[str]:
 
 
 def _arxiv_recent_papers(count: int = 10) -> list[str]:
-    """Fetch the latest paper /abs/ URLs via the arXiv API."""
+    """Fetch recent paper /abs/ URLs via the arXiv API with random offset.
+
+    Uses a random start offset (0-500) so different miners sample different
+    papers from the recent submission pool, reducing dedup collisions.
+    """
+    import random
     import urllib.request
     import re as _re
 
     categories = ["cs", "math", "physics", "q-fin", "stat", "econ"]
-    query = "+OR+".join(f"cat:{cat}.*" for cat in categories)
+    # Pick a random category subset to further diversify across miners
+    selected = random.sample(categories, k=min(3, len(categories)))
+    query = "+OR+".join(f"cat:{cat}.*" for cat in selected)
+    start = random.randint(0, 500)
     api_url = (
         f"http://export.arxiv.org/api/query"
         f"?search_query={query}&sortBy=submittedDate&sortOrder=descending"
-        f"&start=0&max_results={count}"
+        f"&start={start}&max_results={count}"
     )
     try:
         req = urllib.request.Request(api_url, headers={"User-Agent": "mine-agent/1.0"})

@@ -107,7 +107,7 @@ class GenericDiscoveryAdapter(BaseDiscoveryAdapter):
 
         return MapResult(accepted=accepted, rejected=[], exhausted=True, next_seeds=[])
 
-    async def crawl(self, candidate: DiscoveryCandidate, context: dict[str, object]) -> MapResult:
+    async def crawl(self, candidate: DiscoveryCandidate, context: dict[str, object]) -> Any:
         fetch_fn = context.get("fetch_fn")
         if not callable(fetch_fn) or not candidate.canonical_url:
             return {"candidate": candidate, "fetched": {}, "spawned_candidates": []}
