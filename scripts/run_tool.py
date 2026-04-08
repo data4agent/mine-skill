@@ -1158,6 +1158,11 @@ def run_agent_control(action: str = "status") -> str:
             credit = f"Credit: {credit_score} ({credit_tier})."
             session_stats = f"This session: {processed} processed, {submitted} submitted, {errors_count} errors."
             user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}"
+            # Diagnostic hints for common issues
+            if submitted == 0 and processed > 0 and errors_count > 0:
+                user_msg += " Note: items processed but none submitted — check errors in log for submission failures."
+            elif submitted == 0 and processed == 0 and errors_count == 0:
+                user_msg += " Note: no items processed yet — Discovery may be in cooldown or dataset has no available URLs."
             if recent_errors:
                 user_msg += f" Warning: {len(recent_errors)} recent error(s) in log."
             user_acts = ["Pause mining", "Stop mining"]
