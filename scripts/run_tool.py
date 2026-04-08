@@ -663,13 +663,13 @@ def run_diagnosis() -> str:
                 if status == 401:
                     if error_code == "MISSING_HEADERS":
                         lines.append("    → Missing signature headers")
-                        lines.append("    Fix: rerun bootstrap or refresh the wallet session with awp-wallet unlock --duration 3600")
+                        lines.append("    Fix: rerun bootstrap or refresh the wallet session with awp-wallet unlock --duration 3600 --scope full")
                     elif error_code in {"INVALID_SIGNATURE", "SIGNATURE_MISMATCH"}:
                         lines.append("    → Signature format/content mismatch")
                         lines.append("    This may indicate platform-side signature verification changed")
                     elif error_code in {"TOKEN_EXPIRED", "SESSION_EXPIRED", "UNAUTHORIZED"}:
                         lines.append("    → Session token expired")
-                        lines.append("    Fix: refresh the wallet session with awp-wallet unlock --duration 3600")
+                        lines.append("    Fix: refresh the wallet session with awp-wallet unlock --duration 3600 --scope full")
                     elif error_code == "WALLET_NOT_REGISTERED":
                         lines.append("    → This wallet is not registered on-chain")
                         lines.append("    Fix: Install and use the AWP Skill to complete registration, then retry")
@@ -678,7 +678,7 @@ def run_diagnosis() -> str:
                         lines.append("    Contact: Platform support")
                     else:
                         lines.append("    → Unknown 401 error")
-                        lines.append("    • Auto-managed wallet session may be expired — try: awp-wallet unlock --duration 3600")
+                        lines.append("    • Auto-managed wallet session may be expired — try: awp-wallet unlock --duration 3600 --scope full")
                         lines.append("    • Wallet may not be registered on platform")
                         lines.append("    • Platform signature requirements may have changed")
 
@@ -799,7 +799,7 @@ def run_doctor() -> str:
             "message": "Wallet session unavailable or expired",
         })
         result["_internal"]["fix_commands"].append(_bootstrap_command())
-        result["_internal"]["fix_commands"].append("awp-wallet unlock --duration 3600")
+        result["_internal"]["fix_commands"].append("awp-wallet unlock --duration 3600 --scope full")
 
     # Add session expiry warning if present
     expiry_seconds = readiness.get("session_expiry_seconds")
@@ -809,8 +809,8 @@ def run_doctor() -> str:
             "ok": False,
             "message": f"Wallet session expires in {expiry_seconds}s",
         })
-        if "awp-wallet unlock --duration 3600" not in result["_internal"]["fix_commands"]:
-            result["_internal"]["fix_commands"].append("awp-wallet unlock --duration 3600")
+        if "awp-wallet unlock --duration 3600 --scope full" not in result["_internal"]["fix_commands"]:
+            result["_internal"]["fix_commands"].append("awp-wallet unlock --duration 3600 --scope full")
 
     # Determine next command based on unified readiness
     if readiness["can_start"]:
@@ -1299,7 +1299,7 @@ def run_agent_loop(max_iterations: int = 1) -> str:
             env = os.environ.copy()
             if not env.get("HOME") and env.get("USERPROFILE"):
                 env["HOME"] = env["USERPROFILE"]
-            proc = sp.run([wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS)],
+            proc = sp.run([wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS), "--scope", "full"],
                          capture_output=True, text=True, timeout=30, env=env)
             if proc.returncode == 0:
                 data = json.loads(proc.stdout)

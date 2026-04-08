@@ -782,7 +782,7 @@ def _ensure_wallet_session(wallet_bin: str, *, duration_seconds: int = WALLET_SE
 
     issued_at = int(time.time())
     try:
-        payload = _run_wallet_json(wallet_bin, "unlock", "--duration", str(max(1, duration_seconds)))
+        payload = _run_wallet_json(wallet_bin, "unlock", "--duration", str(max(1, duration_seconds)), "--scope", "full")
     except RuntimeError:
         return ""
 
