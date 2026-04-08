@@ -50,7 +50,7 @@ class WalletSigner:
             if "Invalid or expired session token" in stderr:
                 raise RuntimeError(
                     "The auto-managed wallet session expired or is invalid; rerun "
-                    "`awp-wallet unlock --duration 3600` or rerun bootstrap before retrying. "
+                    "`awp-wallet unlock --duration 3600 --scope full` or rerun bootstrap before retrying. "
                     f"awp-wallet stderr: {stderr}"
                 )
             raise RuntimeError(f"awp-wallet failed (exit {result.returncode}): {stderr}")
@@ -86,7 +86,7 @@ class WalletSigner:
 
     def renew_session(self, *, duration_seconds: int = WALLET_SESSION_DURATION_SECONDS) -> dict[str, int | str]:
         issued_at = int(time.time())
-        resp = self._run("unlock", "--duration", str(max(1, duration_seconds)))
+        resp = self._run("unlock", "--duration", str(max(1, duration_seconds)), "--scope", "full")
         session_token = str(resp.get("sessionToken") or "").strip()
         if not session_token:
             raise RuntimeError("awp-wallet unlock did not return sessionToken")

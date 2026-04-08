@@ -202,7 +202,7 @@ def hook_normalizer(hook_name: str) -> Callable[[dict[str, Any], dict[str, Any],
             if isinstance(canonical_url, str):
                 hostname = urlparse(canonical_url).hostname or ""
                 parts = hostname.split(".")
-                language = parts[0] if len(parts) >= 3 else None
+                language = parts[0] if len(parts) >= 3 else "en"  # default to "en" for bare wikipedia.org
             structured = extracted.get("structured", {})
             page_id = metadata.get("page_id") or structured.get("page_id")
             result = {
