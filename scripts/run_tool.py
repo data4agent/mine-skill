@@ -1424,7 +1424,9 @@ def render_validator_status() -> str:
                     from signer import WalletSigner
                     _signer = WalletSigner(session_token=wtoken)
                     _pc = PlatformClient(base_url=resolve_platform_base_url(), token="", signer=_signer)
-                    addr = _signer.get_address()
+                    addr = _pc.get_signer_address()
+                    if not addr:
+                        raise RuntimeError("signer address unavailable")
                     profile = _pc.fetch_profile(addr)
                     v_summary = profile.get("validator_summary") or {}
                     if v_summary.get("total_rewards") is not None:
