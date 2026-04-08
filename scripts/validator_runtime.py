@@ -322,8 +322,9 @@ class ValidatorRuntime:
             if status_code == 403:
                 log.error(
                     "Failed to join validator ready pool (403 Forbidden): %s. "
-                    "This may indicate insufficient stake (minimum 10,000 AWP on Mine Worknet) "
-                    "or a permission issue. Will retry on next heartbeat.",
+                    "This may indicate insufficient stake (minimum 10,000 AWP on Mine Worknet, "
+                    "may increase as more validators join). Stake must remain allocated "
+                    "continuously — withdrawal causes eviction. Will retry on next heartbeat.",
                     error_msg,
                 )
             else:
