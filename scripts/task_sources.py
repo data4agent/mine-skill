@@ -617,9 +617,19 @@ def _discovery_seed_urls(domain: str) -> list[str]:
         if host == "wikipedia.org":
             host = "en.wikipedia.org"
         return [canonicalize_url(f"{parsed.scheme or 'https'}://{host}/wiki/Main_Page")]
-    # Amazon: redirect homepage to bestsellers page which links to actual products
+    # Amazon: pick a random bestseller category to diversify across miners
     if (host.endswith(".amazon.com") or host == "amazon.com" or host.endswith(".amazon.co.uk") or host == "amazon.co.uk" or host.endswith(".amazon.de") or host == "amazon.de") and normalized_path in {"", "/"}:
-        return [canonicalize_url(f"{parsed.scheme or 'https'}://{host}/gp/bestsellers/")]
+        import random as _rnd
+        _amazon_categories = [
+            "electronics", "computers", "books", "home-garden", "toys-games",
+            "sports-outdoors", "beauty", "health-personal-care", "automotive",
+            "pet-supplies", "office-products", "tools-home-improvement",
+            "kitchen", "grocery", "baby-products", "arts-crafts-sewing",
+            "industrial-scientific", "musical-instruments", "patio-lawn-garden",
+        ]
+        cat = _rnd.choice(_amazon_categories)
+        scheme = parsed.scheme or "https"
+        return [canonicalize_url(f"{scheme}://{host}/gp/bestsellers/{cat}/")]
     # arXiv: seed from recent archive listings so one-hop discovery reaches /abs/<id> pages
     if (host == "arxiv.org" or host.endswith(".arxiv.org")) and normalized_path in {"", "/"}:
         scheme = parsed.scheme or "https"
