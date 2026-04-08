@@ -57,6 +57,10 @@ install_requirements() {
   "$VENV_DIR/bin/python" -m pip install -r requirements-core.txt
   if [[ "$INSTALL_PROFILE" == "browser" || "$INSTALL_PROFILE" == "full" ]]; then
     "$VENV_DIR/bin/python" -m pip install -r requirements-browser.txt
+    # Download Playwright browser binaries (chromium only to save space)
+    echo "Installing Playwright browsers..."
+    "$VENV_DIR/bin/python" -m playwright install chromium 2>/dev/null || \
+      echo "WARNING: Playwright browser install failed. Amazon/LinkedIn crawling may not work."
   fi
   if [[ "$INSTALL_PROFILE" == "full" ]]; then
     "$VENV_DIR/bin/python" -m pip install -r requirements-dev.txt
