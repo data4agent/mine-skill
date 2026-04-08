@@ -135,7 +135,7 @@ def setup_wallet() -> tuple[str, str] | None:
     # Unlock wallet
     try:
         result = subprocess.run(
-            [wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS)],
+            [wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS), "--scope", "full"],
             capture_output=True,
             text=True,
             timeout=30,

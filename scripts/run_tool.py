@@ -1299,7 +1299,7 @@ def run_agent_loop(max_iterations: int = 1) -> str:
             env = os.environ.copy()
             if not env.get("HOME") and env.get("USERPROFILE"):
                 env["HOME"] = env["USERPROFILE"]
-            proc = sp.run([wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS)],
+            proc = sp.run([wallet_bin, "unlock", "--duration", str(WALLET_SESSION_DURATION_SECONDS), "--scope", "full"],
                          capture_output=True, text=True, timeout=30, env=env)
             if proc.returncode == 0:
                 data = json.loads(proc.stdout)
