@@ -296,6 +296,9 @@ class WebSocketClaimSource:
                 continue
             if msg.type == "repeat_crawl_task":
                 task_id = msg.repeat_crawl_task_id
+                if not task_id:
+                    log.warning("WS received repeat_crawl_task with empty id, ignoring")
+                    continue
                 if task_id:
                     # ACK within 30s deadline
                     try:

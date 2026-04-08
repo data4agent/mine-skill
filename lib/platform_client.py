@@ -389,7 +389,10 @@ class PlatformClient:
                     ):
                         renew_session = getattr(self._signer, "renew_session", None)
                         if callable(renew_session):
-                            self._last_wallet_refresh = renew_session(duration_seconds=WALLET_SESSION_DURATION_SECONDS)
+                            try:
+                                self._last_wallet_refresh = renew_session(duration_seconds=WALLET_SESSION_DURATION_SECONDS)
+                            except Exception as renew_exc:
+                                raise error from renew_exc
                             renewed_session = True
                             continue
                 # Retryable server error or explicitly marked as retryable

@@ -341,8 +341,12 @@ class WorkerStateStore:
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{time.time_ns()}")
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(path)
+        try:
+            temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            temp_path.replace(path)
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def _default_json_payload(self, path: Path) -> Any:
         if path in {self._backlog_path, self._auth_pending_path, self._submit_pending_path}:
@@ -398,9 +402,13 @@ class ValidatorStateStore:
 
     def _write_json(self, path: Path, data: dict[str, Any]) -> None:
         temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{time.time_ns()}")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        temp_path.replace(path)
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            temp_path.replace(path)
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def _read_json(self, path: Path) -> dict[str, Any]:
         if not path.exists():
