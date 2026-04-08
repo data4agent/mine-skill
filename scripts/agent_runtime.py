@@ -839,11 +839,13 @@ class AgentWorker:
                     summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     return
                 summary.errors.append(f"report failed for {item.item_id}: {api_exc}")
+                return
             except httpx.HTTPStatusError as exc:
                 if self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
                     return
                 summary.errors.append(f"HTTP error for {item.item_id}: {exc.response.status_code}")
                 self.state_store.enqueue_backlog([_clone_item(item, resume=True, output_dir=result.output_dir)])
+                return
 
         if item.dataset_id:
             try:

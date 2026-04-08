@@ -947,10 +947,6 @@ FIELD_RESOLVERS: dict[str, Resolver] = {
         record.get("review_count"),
         _structured(record).get("review_count"),
     ),
-    "image_count": lambda record: _first(
-        record.get("image_count"),
-        _structured(record).get("image_count"),
-    ),
     "coupon_available": lambda record: _first(
         record.get("coupon_available"),
         _structured(record).get("coupon_available"),
