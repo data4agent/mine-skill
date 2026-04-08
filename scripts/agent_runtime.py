@@ -315,21 +315,52 @@ class AgentWorker:
 
     def check_status(self) -> dict[str, Any]:
         session = self.state_store.load_session()
-        # Enrich with self-service stats from platform
+        # Enrich with unified profile from platform (replaces multiple API calls)
         try:
-            my_stats = self.client.fetch_my_miner_stats()
-            if my_stats:
-                session["miner_stats"] = my_stats
+            signer_addr = ""
+            if self.client._signer is not None:
+                signer_addr = self.client._signer.get_address()
+            if signer_addr:
+                profile = self.client.fetch_profile(signer_addr)
+                if profile:
+                    session["profile"] = profile
+                    # Extract miner stats from profile
+                    miner_info = profile.get("miner") or {}
+                    if miner_info:
+                        session["credit_score"] = miner_info.get("credit", session.get("credit_score"))
+                        session["credit_tier"] = miner_info.get("credit_tier", session.get("credit_tier"))
+                    miner_summary = profile.get("miner_summary") or {}
+                    if miner_summary:
+                        session["miner_stats"] = miner_summary
+                    current_epoch = profile.get("current_epoch") or {}
+                    if current_epoch:
+                        session["current_epoch"] = current_epoch
+                        epoch_id = current_epoch.get("epoch_id")
+                        if epoch_id:
+                            session["epoch_id"] = epoch_id
+                        epoch_miner = current_epoch.get("miner") or {}
+                        if epoch_miner:
+                            session["epoch_submitted"] = epoch_miner.get("task_count", session.get("epoch_submitted", 0))
+                            session["epoch_avg_score"] = epoch_miner.get("avg_score")
         except Exception:
             pass
-        try:
-            current_epoch = self.client.fetch_current_epoch()
-            if current_epoch:
-                session["current_epoch"] = current_epoch
-                if not session.get("epoch_id"):
-                    session["epoch_id"] = current_epoch.get("epoch_id")
-        except Exception:
-            pass
+        # Fallback: try older APIs if profile didn't populate
+        if "miner_stats" not in session:
+            try:
+                my_stats = self.client.fetch_my_miner_stats()
+                if my_stats:
+                    session["miner_stats"] = my_stats
+            except Exception:
+                pass
+        if "current_epoch" not in session:
+            try:
+                current_epoch = self.client.fetch_current_epoch()
+                if current_epoch:
+                    session["current_epoch"] = current_epoch
+                    if not session.get("epoch_id"):
+                        session["epoch_id"] = current_epoch.get("epoch_id")
+            except Exception:
+                pass
         epoch_submitted = int(session.get("epoch_submitted") or 0)
         epoch_target = int(session.get("epoch_target") or 80)
         epoch_remaining = max(0, epoch_target - epoch_submitted)

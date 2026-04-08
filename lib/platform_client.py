@@ -578,3 +578,7 @@ class PlatformClient:
     def fetch_epoch_settlement_results(self, epoch_id: str) -> dict[str, Any]:
         """GET /api/mining/v1/epochs/:id/settlement-results"""
         return self._request_optional_data("GET", f"/api/mining/v1/epochs/{epoch_id}/settlement-results")
+
+    def fetch_profile(self, address: str) -> dict[str, Any]:
+        """GET /api/mining/v1/profiles/:address — unified profile with miner+validator stats"""
+        return self._request_optional_data("GET", f"/api/mining/v1/profiles/{quote(address, safe='')}")
