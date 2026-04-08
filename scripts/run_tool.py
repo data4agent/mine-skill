@@ -1392,6 +1392,8 @@ def render_validator_status() -> str:
             evaluated = stats.get("tasks_evaluated", 0)
             accepted = stats.get("tasks_accepted", 0)
             rejected = stats.get("tasks_rejected", 0)
+            in_pool = vstatus.get("in_ready_pool", False)
+            detail_parts.append(f"Ready pool: {'joined' if in_pool else 'not joined (retrying on next heartbeat)'}.")
             detail_parts.append(f"WebSocket: {'connected' if ws_ok else 'reconnecting (normal during idle periods)'}.")
             detail_parts.append(f"Eligible: {'yes' if eligible else 'no (check heartbeat)'}.")
             if evaluated > 0:

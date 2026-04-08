@@ -120,18 +120,23 @@ class ValidatorRuntime:
 
     def _write_status(self) -> None:
         """Write current status to JSON file for external monitoring."""
+        with self._lock:
+            eligible = self._eligible
+            min_interval = self._min_task_interval
+            in_pool = self._in_ready_pool
         status = {
             "running": self._running,
             "pid": os.getpid(),
             "uptime_seconds": int(time.monotonic() - self._start_time),
             "validator_id": self._validator_id,
-            "eligible": self._eligible,
+            "eligible": eligible,
+            "in_ready_pool": in_pool,
             "ws_connected": self._ws.connected,
             "stats": self._snapshot_stats(),
             "last_action": self._last_action,
             "last_action_at": self._last_action_at,
             "recent_actions": self._recent_actions[-30:],
-            "min_task_interval": self._min_task_interval,
+            "min_task_interval": min_interval,
         }
         try:
             tmp = str(self._status_file) + ".tmp"
@@ -307,7 +312,8 @@ class ValidatorRuntime:
         try:
             with self._platform_lock:
                 self._platform.join_ready_pool()
-            self._in_ready_pool = True
+            with self._lock:
+                self._in_ready_pool = True
             log.info("Joined validator ready pool")
         except (PlatformApiError, _HTTPStatusError) as err:
             status_code = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
@@ -598,10 +604,12 @@ class ValidatorRuntime:
         try:
             with self._platform_lock:
                 self._platform.join_ready_pool()
-            self._in_ready_pool = True
+            with self._lock:
+                self._in_ready_pool = True
             log.info("Rejoined ready pool")
         except Exception as exc:
-            self._in_ready_pool = False
+            with self._lock:
+                self._in_ready_pool = False
             log.warning("Rejoin ready pool failed: %s", exc)
 
     def _heartbeat_loop(self) -> None:
@@ -609,11 +617,14 @@ class ValidatorRuntime:
         while self._running:
             self._send_heartbeat()
             # Retry joining ready pool if not yet in it
-            if not self._in_ready_pool:
+            with self._lock:
+                in_pool = self._in_ready_pool
+            if not in_pool:
                 try:
                     with self._platform_lock:
                         self._platform.join_ready_pool()
-                    self._in_ready_pool = True
+                    with self._lock:
+                        self._in_ready_pool = True
                     log.info("Successfully joined ready pool on retry")
                 except Exception as exc:
                     log.warning("Ready pool retry failed: %s", exc)
