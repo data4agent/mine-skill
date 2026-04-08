@@ -21,8 +21,8 @@ venv/
 .env.*
 !.env.example
 
-# ── Runtime output ──
-output/
+# ── Runtime output (root level only, not crawler/output/) ──
+/output/
 .sessions/
 .omx/
 .tmp-debug*/
