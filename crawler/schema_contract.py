@@ -736,6 +736,15 @@ FIELD_RESOLVERS: dict[str, Resolver] = {
         record.get("employees_in_linkedin"),
         _structured(record).get("employees_in_linkedin"),
     ),
+    "text": lambda record: _first(
+        record.get("text"),
+        _structured(record).get("text"),
+        record.get("post_text"),
+        _structured(record).get("post_text"),
+        record.get("body"),
+        _structured(record).get("body"),
+        record.get("plain_text"),
+    ),
     "post_text": lambda record: _first(
         record.get("post_text"),
         _structured(record).get("post_text"),

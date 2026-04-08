@@ -1384,10 +1384,10 @@ def render_validator_status() -> str:
         detail_parts: list[str] = [f"Validator is running (session: {session_id})."]
         try:
             # The runtime writes to output/validator-runs/validator-{id}-status.json
-            from common import resolve_validator_id
+            from common import resolve_validator_id, resolve_validator_output_root
             vid = resolve_validator_id()
             suffix = f"-{vid}" if vid else ""
-            output_root = Path(os.environ.get("VALIDATOR_OUTPUT_ROOT", "output/validator-runs"))
+            output_root = resolve_validator_output_root()
             status_file = output_root / f"validator{suffix}-status.json"
             vstatus = json.loads(status_file.read_text(encoding="utf-8")) if status_file.exists() else {}
             ws_ok = vstatus.get("ws_connected", False)

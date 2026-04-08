@@ -88,7 +88,8 @@ class ValidatorRuntime:
         if state_dir:
             base = Path(state_dir)
         else:
-            base = Path(os.environ.get("VALIDATOR_OUTPUT_ROOT", "output/validator-runs"))
+            from common import resolve_validator_output_root
+            base = resolve_validator_output_root()
         base.mkdir(parents=True, exist_ok=True)
         self._status_file = base / f"validator{suffix}-status.json"
         self._history_file = base / f"validator{suffix}-history.jsonl"
