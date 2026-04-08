@@ -896,7 +896,8 @@ class AgentWorker:
                     summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     self.state_store.clear_submit_pending(item.item_id)
                 continue
-            except Exception:
+            except Exception as exc:
+                summary.errors.append(f"submit pending failed for {item.item_id}: {exc}")
                 continue
             self.state_store.clear_submit_pending(item.item_id)
             summary.submitted_items += 1

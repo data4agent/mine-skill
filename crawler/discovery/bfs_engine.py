@@ -208,6 +208,16 @@ async def run_bfs_expand(
         except Exception as e:
             errors.append(f"{entry.canonical_url}: {e!r}")
             scheduler.report_failure(entry.frontier_id, e)
+            # Mark as visited with error state to prevent infinite retry
+            visited.put(VisitRecord(
+                url_key=entry.url_key,
+                canonical_url=entry.canonical_url or "",
+                scope_key=adapter.platform,
+                first_seen_at=_now_iso(),
+                last_seen_at=_now_iso(),
+                best_depth=entry.depth,
+                crawl_state="error",
+            ))
             if verbose:
                 print(f"[bfs] Error: {e!r}")
 
