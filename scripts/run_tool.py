@@ -1375,12 +1375,16 @@ def render_validator_status() -> str:
 
     if bg_status == "running":
         session_id = str(snapshot.get("session_id") or "")
-        # Read validator status file for detailed stats
+        # Read validator runtime status file (written by ValidatorRuntime._write_status)
         detail_parts: list[str] = [f"Validator is running (session: {session_id})."]
         try:
-            from worker_state import ValidatorStateStore
-            vstore = ValidatorStateStore(_validator_state_root())
-            vstatus = vstore.load_session()
+            # The runtime writes to output/validator-runs/validator-{id}-status.json
+            from common import resolve_validator_id
+            vid = resolve_validator_id()
+            suffix = f"-{vid}" if vid else ""
+            output_root = Path(os.environ.get("VALIDATOR_OUTPUT_ROOT", "output/validator-runs"))
+            status_file = output_root / f"validator{suffix}-status.json"
+            vstatus = json.loads(status_file.read_text(encoding="utf-8")) if status_file.exists() else {}
             ws_ok = vstatus.get("ws_connected", False)
             eligible = vstatus.get("eligible", True)
             stats = vstatus.get("stats", {})
