@@ -109,7 +109,7 @@ class ProgressTracker:
             "current_url": self._current_url,
             "completed_detail": self._done_detail[-100:],  # Keep last 100 for real-time UX
         }
-        data = json.dumps(payload, indent=2, default=str)
+        data = json.dumps(payload, indent=2, ensure_ascii=False)
         # Atomic write via temp file + rename
         fd, tmp = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
         try:

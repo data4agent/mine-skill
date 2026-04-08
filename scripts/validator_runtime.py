@@ -78,6 +78,7 @@ class ValidatorRuntime:
         # Dynamically updated from heartbeat response
         self._eligible = True
         self._min_task_interval = 30
+        self._in_ready_pool = False
         self._last_action = ""
         self._last_action_at = ""
         self._recent_actions: list[dict[str, str]] = []
@@ -119,18 +120,23 @@ class ValidatorRuntime:
 
     def _write_status(self) -> None:
         """Write current status to JSON file for external monitoring."""
+        with self._lock:
+            eligible = self._eligible
+            min_interval = self._min_task_interval
+            in_pool = self._in_ready_pool
         status = {
             "running": self._running,
             "pid": os.getpid(),
             "uptime_seconds": int(time.monotonic() - self._start_time),
             "validator_id": self._validator_id,
-            "eligible": self._eligible,
+            "eligible": eligible,
+            "in_ready_pool": in_pool,
             "ws_connected": self._ws.connected,
             "stats": self._snapshot_stats(),
             "last_action": self._last_action,
             "last_action_at": self._last_action_at,
             "recent_actions": self._recent_actions[-30:],
-            "min_task_interval": self._min_task_interval,
+            "min_task_interval": min_interval,
         }
         try:
             tmp = str(self._status_file) + ".tmp"
@@ -306,20 +312,19 @@ class ValidatorRuntime:
         try:
             with self._platform_lock:
                 self._platform.join_ready_pool()
+            with self._lock:
+                self._in_ready_pool = True
             log.info("Joined validator ready pool")
         except (PlatformApiError, _HTTPStatusError) as err:
             status_code = err.status_code if isinstance(err, PlatformApiError) else err.response.status_code
-            error_code = err.code if isinstance(err, PlatformApiError) else ""
             error_msg = str(err)
             if status_code == 403:
                 log.error(
                     "Failed to join validator ready pool (403 Forbidden): %s. "
                     "This may indicate insufficient stake (minimum 10,000 AWP on Mine Worknet) "
-                    "or a permission issue. Check your stake allocation and retry.",
+                    "or a permission issue. Will retry on next heartbeat.",
                     error_msg,
                 )
-                # Don't immediately stop — log the error but continue to heartbeat loop.
-                # The heartbeat will update eligibility status from the platform.
             else:
                 log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
@@ -599,14 +604,30 @@ class ValidatorRuntime:
         try:
             with self._platform_lock:
                 self._platform.join_ready_pool()
+            with self._lock:
+                self._in_ready_pool = True
             log.info("Rejoined ready pool")
         except Exception as exc:
+            with self._lock:
+                self._in_ready_pool = False
             log.warning("Rejoin ready pool failed: %s", exc)
 
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to the platform."""
         while self._running:
             self._send_heartbeat()
+            # Retry joining ready pool if not yet in it
+            with self._lock:
+                in_pool = self._in_ready_pool
+            if not in_pool:
+                try:
+                    with self._platform_lock:
+                        self._platform.join_ready_pool()
+                    with self._lock:
+                        self._in_ready_pool = True
+                    log.info("Successfully joined ready pool on retry")
+                except Exception as exc:
+                    log.warning("Ready pool retry failed: %s", exc)
             self._write_status()
             if self._stop_event.wait(timeout=self._heartbeat_interval):
                 break
