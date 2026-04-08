@@ -10,7 +10,7 @@ description: >
   casual phrases like "go online", "start earning", "check my submissions",
   "how many submissions do I have", or "why is my miner not working". NOT for
   AWP wallet transfers, RootNet staking, or general server monitoring.
-version: 0.9.11
+version: 0.9.12
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -275,19 +275,25 @@ The AWP Skill handles the entire on-chain registration flow automatically.
 
 If the validator returns `403`, `permission denied`, or `insufficient_stake`:
 
-1. **Validator requires a minimum of 10,000 AWP staked on the Mine Worknet**
+1. **Validator requires a minimum of 10,000 AWP staked on the Mine Worknet.**
+   The minimum may increase as more validators join. Meeting the stake
+   requirement is the only condition — no manual approval or review needed.
 2. There are two ways to meet this requirement:
    - **Option A (agent stakes):** The agent stakes its own AWP and allocates
      the stake to the Mine Worknet. Use the AWP Skill to do this.
    - **Option B (user delegates):** The user stakes AWP themselves and
      delegates the stake to the agent on the Mine Worknet.
-3. Staking is only a participation requirement — **rewards are NOT affected by
+3. **Stake must remain allocated for the entire duration of validation.**
+   If stake is withdrawn or falls below the minimum, the validator will be
+   evicted from the ready pool.
+4. Staking is only a participation requirement — **rewards are NOT affected by
    who staked**. All mining/validation rewards go to the agent's designated
    reward address, same as miner rewards.
-4. After staking completes, retry `python scripts/run_tool.py validator-start`
+5. After staking completes, retry `python scripts/run_tool.py validator-start`
 
 **Do NOT** suggest the user is "pending review" or needs manual approval when the
-error is 403 — it means insufficient stake, not a review issue.
+error is 403 — it means insufficient stake, not a review issue. Anyone who meets
+the stake requirement can become a validator immediately.
 
 If you see `missing_auth_headers` or `signer_mismatch`, it means something
 bypassed `run_tool.py`. Stop and use the commands listed above instead.
