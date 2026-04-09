@@ -1,23 +1,23 @@
 # Validator API Map
 
-## 目录
+## Table of Contents
 
-- 签名与响应约定
-- 角色与权限
-- 加网相关接口
-- Validator 运行态接口
-- 数据评审接口
-- 外部 staking 接口
+- Signature & Response Conventions
+- Roles & Permissions
+- Network Onboarding Endpoints
+- Validator Runtime Endpoints
+- Data Review Endpoints
+- External Staking Endpoints
 
-## 签名与响应约定
+## Signature & Response Conventions
 
-签名基线：
+Signature baseline:
 
-- 公共配置：`GET /api/public/v1/signature-config`
-- 联调说明：`docs/platform_service_web3_client_integration.md`
-- 示例脚本：`docs/platform_service_web3_request_example.mjs`
+- Public config: `GET /api/public/v1/signature-config`
+- Integration guide: `docs/platform_service_web3_client_integration.md`
+- Example script: `docs/platform_service_web3_request_example.mjs`
 
-最少请求头：
+Minimum required headers:
 
 - `X-Signer`
 - `X-Signature`
@@ -25,14 +25,14 @@
 - `X-Issued-At`
 - `X-Expires-At`
 
-建议同时发送：
+Recommended additional headers:
 
 - `X-Chain-Id`
 - `X-Signed-Headers`
 - `Content-Type`
 - `X-Request-ID`
 
-平台响应 envelope：
+Platform response envelope:
 
 ```json
 {
@@ -44,7 +44,7 @@
 }
 ```
 
-错误 envelope：
+Error envelope:
 
 ```json
 {
@@ -59,38 +59,38 @@
 }
 ```
 
-## 角色与权限
+## Roles & Permissions
 
-| 动作 | 路径 | 权限 | 角色 |
+| Action | Path | Permission | Role |
 |---|---|---|---|
-| 查询当前身份 | `/api/iam/v1/me` | `iam.me.read` | `member+` |
-| 提交 validator 申请 | `/api/iam/v1/validator-applications` | `iam.validator.apply` | `member` |
-| 查询我的申请 | `/api/iam/v1/validator-applications/me` | `iam.validator.apply` | `member` |
-| 审批 validator 申请 | `/api/iam/v1/validator-applications/:id/review` | `iam.validator.review` | `admin` |
-| 统一 heartbeat | `/api/mining/v1/heartbeat` | `mining.heartbeat` | `member` / `miner` / `validator` |
-| validator ready | `/api/mining/v1/validators/ready` | `mining.validator.ready` | `validator` |
-| validator unready | `/api/mining/v1/validators/unready` | `mining.validator.unready` | `validator` |
-| claim evaluation task | `/api/mining/v1/evaluation-tasks/claim` | `mining.evaluation.claim` | `validator` |
-| report evaluation task | `/api/mining/v1/evaluation-tasks/:id/report` | `mining.evaluation.report` | `validator` |
-| list validation results | `/api/core/v1/validation-results` | `core.validation_results.read` | `validator` |
-| get validation result | `/api/core/v1/validation-results/:id` | `core.validation_results.read` | `validator` |
-| create validation result | `/api/core/v1/validation-results` | `core.validation_results.create` | `validator` |
+| Query current identity | `/api/iam/v1/me` | `iam.me.read` | `member+` |
+| Submit validator application | `/api/iam/v1/validator-applications` | `iam.validator.apply` | `member` |
+| Query my application | `/api/iam/v1/validator-applications/me` | `iam.validator.apply` | `member` |
+| Review validator application | `/api/iam/v1/validator-applications/:id/review` | `iam.validator.review` | `admin` |
+| Unified heartbeat | `/api/mining/v1/heartbeat` | `mining.heartbeat` | `member` / `miner` / `validator` |
+| Validator ready | `/api/mining/v1/validators/ready` | `mining.validator.ready` | `validator` |
+| Validator unready | `/api/mining/v1/validators/unready` | `mining.validator.unready` | `validator` |
+| Claim evaluation task | `/api/mining/v1/evaluation-tasks/claim` | `mining.evaluation.claim` | `validator` |
+| Report evaluation task | `/api/mining/v1/evaluation-tasks/:id/report` | `mining.evaluation.report` | `validator` |
+| List validation results | `/api/core/v1/validation-results` | `core.validation_results.read` | `validator` |
+| Get validation result | `/api/core/v1/validation-results/:id` | `core.validation_results.read` | `validator` |
+| Create validation result | `/api/core/v1/validation-results` | `core.validation_results.create` | `validator` |
 
-当前默认不属于 validator 自助权限的接口：
+Endpoints currently not under validator self-service permissions:
 
-- `/api/mining/v1/evaluation-tasks` 创建任务：`admin`
-- `/api/mining/v1/validators/:id/stats`：`admin`
-- `/api/mining/v1/ws`：默认 `miner`
+- `/api/mining/v1/evaluation-tasks` task creation: `admin`
+- `/api/mining/v1/validators/:id/stats`: `admin`
+- `/api/mining/v1/ws`: default `miner`
 
-## 加网相关接口
+## Network Onboarding Endpoints
 
 ### `POST /api/iam/v1/validator-applications`
 
-- body：无
-- 地址来源：当前签名主体
-- 观测 IP：服务端写入
+- Body: none
+- Address source: current signing principal
+- Observed IP: written by server
 
-成功 data 主要字段：
+Success data main fields:
 
 ```json
 {
@@ -101,7 +101,7 @@
 }
 ```
 
-常见失败：
+Common failures:
 
 - `validator_application_exists`
 - `role_suspended`
@@ -110,7 +110,7 @@
 
 ### `GET /api/iam/v1/validator-applications/me`
 
-成功 data 主要字段：
+Success data main fields:
 
 - `id`
 - `address`
@@ -122,7 +122,7 @@
 
 ### `POST /api/iam/v1/validator-applications/:id/review`
 
-请求体：
+Request body:
 
 ```json
 {
@@ -131,7 +131,7 @@
 }
 ```
 
-或：
+Or:
 
 ```json
 {
@@ -140,11 +140,11 @@
 }
 ```
 
-## Validator 运行态接口
+## Validator Runtime Endpoints
 
 ### `POST /api/mining/v1/heartbeat`
 
-请求体：
+Request body:
 
 ```json
 {
@@ -152,7 +152,7 @@
 }
 ```
 
-Validator 成功 data 示例：
+Validator success data example:
 
 ```json
 {
@@ -169,7 +169,7 @@ Validator 成功 data 示例：
 
 ### `POST /api/mining/v1/validators/ready`
 
-成功 data：
+Success data:
 
 ```json
 {
@@ -180,7 +180,7 @@ Validator 成功 data 示例：
 
 ### `POST /api/mining/v1/validators/unready`
 
-成功 data：
+Success data:
 
 ```json
 {
@@ -191,7 +191,7 @@ Validator 成功 data 示例：
 
 ### `POST /api/mining/v1/evaluation-tasks/claim`
 
-成功 data：
+Success data:
 
 ```json
 {
@@ -204,7 +204,7 @@ Validator 成功 data 示例：
 
 ### `POST /api/mining/v1/evaluation-tasks/{id}/report`
 
-请求体：
+Request body:
 
 ```json
 {
@@ -213,36 +213,36 @@ Validator 成功 data 示例：
 }
 ```
 
-常见失败：
+Common failures:
 
 - `evaluation_task_not_found`
 - `validator_not_ready`
 - `task_claim_forbidden`
 
-## 数据评审接口
+## Data Review Endpoints
 
 ### `POST /api/core/v1/validation-results`
 
-请求体：
+Request body:
 
 ```json
 {
   "submission_id": "sub_123",
   "verdict": "accepted",
   "score": 95,
-  "comment": "结构化结果完整",
+  "comment": "Structured result is complete",
   "idempotency_key": "ivr-001"
 }
 ```
 
-已知 `verdict`：
+Known `verdict` values:
 
 - `accepted`
 - `rejected`
 
 ### `GET /api/core/v1/validation-results`
 
-支持查询参数：
+Supported query parameters:
 
 - `page`
 - `page_size`
@@ -251,13 +251,13 @@ Validator 成功 data 示例：
 
 ### `GET /api/core/v1/validation-results/{id}`
 
-返回单条 validation result 详情。
+Returns a single validation result detail.
 
-## 外部 staking 接口
+## External Staking Endpoints
 
-### RPC：`staking.getAgentSubnetStake`
+### RPC: `staking.getAgentSubnetStake`
 
-请求：
+Request:
 
 ```json
 {
@@ -271,7 +271,7 @@ Validator 成功 data 示例：
 }
 ```
 
-成功返回：
+Success response:
 
 ```json
 {
@@ -283,9 +283,9 @@ Validator 成功 data 示例：
 }
 ```
 
-### WSS：`watchAllocations`
+### WSS: `watchAllocations`
 
-订阅：
+Subscribe:
 
 ```json
 {
@@ -295,7 +295,7 @@ Validator 成功 data 示例：
 }
 ```
 
-说明：
+Notes:
 
-- 平台内部 watcher 用它感知 stake 变化并驱逐质押不足的 validator
-- 这不是 validator 在平台侧执行业务动作的主入口
+- The platform's internal watcher uses this to detect stake changes and evict validators with insufficient stake
+- This is not the primary entry point for validators to perform business actions on the platform

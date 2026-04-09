@@ -10,7 +10,7 @@ description: >
   casual phrases like "go online", "start earning", "check my submissions",
   "how many submissions do I have", or "why is my miner not working". NOT for
   AWP wallet transfers, RootNet staking, or general server monitoring.
-version: 0.9.13
+version: 0.10.0
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -116,24 +116,36 @@ Dataset Discovery operates in **two phases**:
 Wikipedia is special: it calls the MediaWiki Random API for random article URLs directly,
 skipping the discover-crawl phase entirely.
 
-### API Call Chain
+### Mining Iteration Loop
+
+Each iteration follows this sequence:
 
 ```text
-Discovery path:
-  GET  /api/core/v1/datasets            <- fetch dataset list and source_domains
-  GET  /api/core/v1/url/check           <- pre-flight dedup check
-  (local crawler fetches target site)
-  POST /api/core/v1/submissions         <- submit structured data
-  POST /api/mining/v1/pow-challenges/…  <- answer PoW challenge (probabilistic)
-
-Backend Claim path:
-  POST /api/mining/v1/repeat-crawl-tasks/claim  <- claim task from platform
-  (local crawler fetches target site)
-  POST /api/mining/v1/repeat-crawl-tasks/{id}/report  <- report result
-  POST /api/core/v1/submissions                       <- submit structured data
+1. POST /api/mining/v1/heartbeat         <- refresh online status + credit info
+2. Collect work items (discovery URLs, backend claims, backlog)
+3. For each URL:
+   a. GET /api/core/v1/url/check         <- MUST check URL occupancy BEFORE crawling
+      If occupied=true: skip this URL
+   b. Crawl the page (API/HTTP backend)
+   c. POST /api/core/v1/dedup-occupancies/check  <- hash dedup before submit
+   d. GET /api/mining/v1/miners/me/submission-gate  <- check PoW BEFORE each submit
+      If state="checking": answer PoW challenge first
+      POST /api/mining/v1/pow-challenges/{id}/answer
+   e. POST /api/mining/v1/submissions    <- submit structured data
+      If still challenge_required: answer and resubmit
+4. For repeat_crawl tasks:
+   - Only report cleaned_data (no structured data submission needed)
+   - POST /api/mining/v1/repeat-crawl-tasks/{id}/report
 ```
 
-Both paths ultimately submit via **`POST /api/core/v1/submissions`**.
+**Key rules:**
+- Always check URL occupancy BEFORE crawling (step 3a)
+- Always check submission gate BEFORE each submission (step 3d) —
+  novice miners have 100% PoW probability
+- Submission failures with conflicts (dedup, url_pattern_mismatch) are
+  discarded, NOT re-queued. Only transient errors (5xx, timeout) are retried
+- repeat_crawl tasks only report cleaned_data — no structured data submission
+- Discovery and refresh paths submit via `POST /api/mining/v1/submissions`
 
 ### Dataset Selection
 
@@ -226,9 +238,10 @@ cd {baseDir} && python scripts/run_tool.py doctor
 cd {baseDir} && python scripts/run_tool.py validator-start
 ```
 
-Auto-installs dependencies, submits validator application, and connects via WebSocket.
-If the application status is `pending_review`, the validator cannot start until approved.
-Re-run the start command after approval.
+Auto-installs dependencies, submits validator application (auto-approved if stake
+meets minimum), and connects via WebSocket. No manual approval needed — meeting
+the minimum stake requirement (currently 10,000 AWP on the Mine Worknet) is the
+only condition. Use the AWP Skill to stake if needed.
 
 ### Check Status / Stop
 

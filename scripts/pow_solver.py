@@ -33,6 +33,8 @@ def solve_challenge(challenge: dict[str, Any]) -> str:
         return str(_evaluate_math_expression(expression))
     if challenge_type in {"sha256_nonce", "hashcash"}:
         return _solve_sha256_nonce(challenge)
+    if challenge_type == "hash_challenge":
+        return _solve_hash_challenge(challenge)
     raise UnsupportedChallenge(challenge_type)
 
 
@@ -94,6 +96,27 @@ def _llm_answer(prompt: str) -> str:
     resp.raise_for_status()
     data = resp.json()
     return str(data.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+
+
+def _solve_hash_challenge(challenge: dict[str, Any]) -> str:
+    """Solve dynamic SHA256 hash challenge from the submission gate.
+
+    The server generates a random nonce and expects:
+    SHA256(nonce) -> first 8 hex characters (first 4 bytes).
+    """
+    validation_meta = challenge.get("validation_meta") or {}
+    nonce = str(validation_meta.get("nonce") or "").strip()
+    if not nonce:
+        # Fallback: extract nonce from prompt
+        prompt = str(challenge.get("prompt") or "")
+        import re
+        m = re.search(r'SHA256\("([^"]+)"\)', prompt)
+        if m:
+            nonce = m.group(1)
+    if not nonce:
+        raise UnsupportedChallenge("hash_challenge", "no nonce found in challenge")
+    digest = hashlib.sha256(nonce.encode("utf-8")).digest()
+    return digest[:4].hex()
 
 
 def _solve_sha256_nonce(challenge: dict[str, Any]) -> str:

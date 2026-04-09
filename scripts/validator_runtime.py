@@ -597,22 +597,14 @@ class ValidatorRuntime:
         })
         self._write_status()
 
-        # Step 5: Wait min_task_interval, then rejoin ready pool
+        # Step 5: Wait min_task_interval before accepting next task
+        # No need to re-call /validators/ready — ready pool membership persists
+        # until explicitly leaving or being evicted. Heartbeat keeps online status.
         with self._lock:
             wait_seconds = self._min_task_interval
-        log.info("Waiting %ds (min_task_interval) before rejoining ready pool", wait_seconds)
-        if self._stop_event.wait(timeout=wait_seconds):
-            return
-        try:
-            with self._platform_lock:
-                self._platform.join_ready_pool()
-            with self._lock:
-                self._in_ready_pool = True
-            log.info("Rejoined ready pool")
-        except Exception as exc:
-            with self._lock:
-                self._in_ready_pool = False
-            log.warning("Rejoin ready pool failed: %s", exc)
+        if wait_seconds > 0:
+            log.info("Waiting %ds (min_task_interval) before next task", wait_seconds)
+            self._stop_event.wait(timeout=wait_seconds)
 
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to the platform."""
