@@ -116,24 +116,31 @@ Dataset Discovery operates in **two phases**:
 Wikipedia is special: it calls the MediaWiki Random API for random article URLs directly,
 skipping the discover-crawl phase entirely.
 
-### API Call Chain
+### Mining Iteration Loop
+
+Each iteration follows this sequence:
 
 ```text
-Discovery path:
-  GET  /api/core/v1/datasets            <- fetch dataset list and source_domains
-  GET  /api/core/v1/url/check           <- pre-flight dedup check
-  (local crawler fetches target site)
-  POST /api/core/v1/submissions         <- submit structured data
-  POST /api/mining/v1/pow-challenges/…  <- answer PoW challenge (probabilistic)
-
-Backend Claim path:
-  POST /api/mining/v1/repeat-crawl-tasks/claim  <- claim task from platform
-  (local crawler fetches target site)
-  POST /api/mining/v1/repeat-crawl-tasks/{id}/report  <- report result
-  POST /api/core/v1/submissions                       <- submit structured data
+1. POST /api/mining/v1/heartbeat         <- refresh online status + credit info
+2. GET  /api/mining/v1/miners/me/submission-gate  <- check PoW state
+   If state="checking": answer PoW challenge first
+   POST /api/mining/v1/pow-challenges/{id}/answer
+3. Collect work items (discovery URLs, backend claims, backlog)
+4. For each URL:
+   a. GET /api/core/v1/url/check         <- MUST check URL occupancy before crawling
+      If occupied=true: skip this URL
+   b. Crawl the page (API/HTTP backend)
+   c. POST /api/core/v1/dedup-occupancies/check  <- hash dedup before submit
+   d. POST /api/core/v1/submissions      <- submit structured data
+      If admission_status="challenge_required" (HTTP 428):
+        answer PoW, then resubmit
 ```
 
-Both paths ultimately submit via **`POST /api/core/v1/submissions`**.
+**Key rules:**
+- Always check URL occupancy BEFORE crawling (step 4a) to avoid wasted work
+- Always check submission gate at the START of each iteration (step 2) —
+  novice miners have 100% PoW probability
+- Both discovery and backend-claim paths submit via `POST /api/core/v1/submissions`
 
 ### Dataset Selection
 
@@ -226,9 +233,10 @@ cd {baseDir} && python scripts/run_tool.py doctor
 cd {baseDir} && python scripts/run_tool.py validator-start
 ```
 
-Auto-installs dependencies, submits validator application, and connects via WebSocket.
-If the application status is `pending_review`, the validator cannot start until approved.
-Re-run the start command after approval.
+Auto-installs dependencies, submits validator application (auto-approved if stake
+meets minimum), and connects via WebSocket. No manual approval needed — meeting
+the minimum stake requirement (currently 10,000 AWP on the Mine Worknet) is the
+only condition. Use the AWP Skill to stake if needed.
 
 ### Check Status / Stop
 

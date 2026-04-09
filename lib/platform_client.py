@@ -498,6 +498,10 @@ class PlatformClient:
 
     # === Self-service endpoints (v2.1) ===
 
+    def fetch_submission_gate(self) -> dict[str, Any]:
+        """GET /api/mining/v1/miners/me/submission-gate — check PoW state before submitting."""
+        return self._request_optional_data("GET", "/api/mining/v1/miners/me/submission-gate")
+
     def fetch_my_miner_stats(self) -> dict[str, Any]:
         """GET /api/mining/v1/miners/me/stats"""
         return self._request_optional_data("GET", "/api/mining/v1/miners/me/stats")

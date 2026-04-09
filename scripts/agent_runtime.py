@@ -491,6 +491,8 @@ class AgentWorker:
             batch_state = self._save_current_batch(iteration=iteration, items=[], state=mining_state, summary=summary)
             return self._finalize_iteration(summary, current_batch=batch_state)
         self._send_heartbeats(summary)
+        # Check submission gate — resolve PoW challenges before submitting
+        self._check_submission_gate(summary)
         stop_reason = self._active_stop_reason()
         if stop_reason:
             summary.messages.append(f"stop condition reached: {stop_reason}")
@@ -639,6 +641,38 @@ class AgentWorker:
                 if self._pool_join_failures <= 3:
                     summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
+
+    def _check_submission_gate(self, summary: WorkerIterationSummary) -> None:
+        """Check submission gate state and resolve PoW challenges if needed.
+
+        The platform uses a PoW state machine: when state="checking", the miner
+        must answer a SHA256 hash challenge before any submission will be accepted.
+        """
+        try:
+            gate = self.client.fetch_submission_gate()
+            if not gate:
+                return
+            state = str(gate.get("state") or "")
+            if state != "checking":
+                return  # state="opening" — can submit freely
+            # PoW challenge required
+            challenge = gate.get("challenge")
+            if not isinstance(challenge, dict):
+                return
+            challenge_id = str(challenge.get("id") or "")
+            if not challenge_id:
+                return
+            try:
+                answer = solve_challenge(challenge)
+                self.client.answer_pow_challenge(challenge_id, answer)
+                summary.messages.append(f"PoW challenge {challenge_id} answered, submission gate opened")
+            except UnsupportedChallenge as uc:
+                summary.errors.append(f"PoW challenge unsupported: {uc}")
+            except Exception as exc:
+                summary.errors.append(f"PoW challenge failed: {exc}")
+        except Exception as exc:
+            # submission-gate check is best-effort — don't block the iteration
+            logging.getLogger("agent.pow").debug("submission-gate check failed: %s", exc)
 
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
         session = self.state_store.load_session()
