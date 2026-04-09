@@ -491,8 +491,6 @@ class AgentWorker:
             batch_state = self._save_current_batch(iteration=iteration, items=[], state=mining_state, summary=summary)
             return self._finalize_iteration(summary, current_batch=batch_state)
         self._send_heartbeats(summary)
-        # Check submission gate — resolve PoW challenges before submitting
-        self._check_submission_gate(summary)
         stop_reason = self._active_stop_reason()
         if stop_reason:
             summary.messages.append(f"stop condition reached: {stop_reason}")
@@ -641,38 +639,6 @@ class AgentWorker:
                 if self._pool_join_failures <= 3:
                     summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
-
-    def _check_submission_gate(self, summary: WorkerIterationSummary) -> None:
-        """Check submission gate state and resolve PoW challenges if needed.
-
-        The platform uses a PoW state machine: when state="checking", the miner
-        must answer a SHA256 hash challenge before any submission will be accepted.
-        """
-        try:
-            gate = self.client.fetch_submission_gate()
-            if not gate:
-                return
-            state = str(gate.get("state") or "")
-            if state != "checking":
-                return  # state="opening" — can submit freely
-            # PoW challenge required
-            challenge = gate.get("challenge")
-            if not isinstance(challenge, dict):
-                return
-            challenge_id = str(challenge.get("id") or "")
-            if not challenge_id:
-                return
-            try:
-                answer = solve_challenge(challenge)
-                self.client.answer_pow_challenge(challenge_id, answer)
-                summary.messages.append(f"PoW challenge {challenge_id} answered, submission gate opened")
-            except UnsupportedChallenge as uc:
-                summary.errors.append(f"PoW challenge unsupported: {uc}")
-            except Exception as exc:
-                summary.errors.append(f"PoW challenge failed: {exc}")
-        except Exception as exc:
-            # submission-gate check is best-effort — don't block the iteration
-            logging.getLogger("agent.pow").debug("submission-gate check failed: %s", exc)
 
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
         session = self.state_store.load_session()
@@ -914,6 +880,12 @@ class AgentWorker:
                 self.state_store.enqueue_backlog([_clone_item(item, resume=True, output_dir=result.output_dir)])
                 return
 
+        # repeat_crawl tasks only report cleaned_data — no structured data submission needed
+        if item.claim_task_type == "repeat_crawl":
+            summary.processed_items += 1
+            summary.messages.append(f"repeat_crawl reported for {item.item_id}")
+            return
+
         if item.dataset_id:
             try:
                 export_path, _response_path = _export_and_submit_core_submissions_for_task(
@@ -927,11 +899,23 @@ class AgentWorker:
                 summary.submitted_items += 1
                 summary.messages.append(f"processed {item.item_id} in {result.output_dir}; exported core submissions to {export_path}")
             except Exception as exc:
-                if isinstance(exc, PlatformApiError) and exc.code == "address_not_registered":
-                    summary.errors.append(f"Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
-                    return
-                if isinstance(exc, httpx.HTTPStatusError) and self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
-                    return
+                if isinstance(exc, PlatformApiError):
+                    if exc.code == "address_not_registered":
+                        summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
+                        return
+                    # Non-retryable conflicts — discard, don't re-queue
+                    if exc.code in ("dedup_hash_conflict", "dedup_hash_in_cooldown", "url_pattern_mismatch",
+                                    "duplicate", "submission_not_found", "dataset_not_found"):
+                        summary.errors.append(f"submission rejected for {item.item_id}: {exc.code} — discarded")
+                        return
+                if isinstance(exc, httpx.HTTPStatusError):
+                    if self._maybe_handle_rate_limit(item, exc, summary, output_dir=result.output_dir):
+                        return
+                    # 4xx client errors (except 429) are not retryable — discard
+                    if 400 <= exc.response.status_code < 500:
+                        summary.errors.append(f"submission rejected for {item.item_id}: HTTP {exc.response.status_code} — discarded")
+                        return
+                # Only re-queue for transient errors (5xx, network, timeout)
                 self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
                 summary.errors.append(f"submit deferred for {item.item_id}: {exc}")
         else:
@@ -961,6 +945,20 @@ class AgentWorker:
                 if api_exc.code == "address_not_registered":
                     summary.errors.append("Wallet address not registered. Please install and use the AWP Skill to complete on-chain registration, then retry.")
                     self.state_store.clear_submit_pending(item.item_id)
+                elif api_exc.code in ("dedup_hash_conflict", "dedup_hash_in_cooldown", "url_pattern_mismatch",
+                                      "duplicate", "submission_not_found", "dataset_not_found"):
+                    # Non-retryable — clear from pending queue
+                    summary.errors.append(f"submit pending rejected for {item.item_id}: {api_exc.code} — discarded")
+                    self.state_store.clear_submit_pending(item.item_id)
+                else:
+                    summary.errors.append(f"submit pending failed for {item.item_id}: {api_exc}")
+                continue
+            except httpx.HTTPStatusError as http_exc:
+                if 400 <= http_exc.response.status_code < 500 and http_exc.response.status_code != 429:
+                    summary.errors.append(f"submit pending rejected for {item.item_id}: HTTP {http_exc.response.status_code} — discarded")
+                    self.state_store.clear_submit_pending(item.item_id)
+                else:
+                    summary.errors.append(f"submit pending failed for {item.item_id}: {http_exc}")
                 continue
             except Exception as exc:
                 summary.errors.append(f"submit pending failed for {item.item_id}: {exc}")
@@ -1527,6 +1525,19 @@ def _export_and_submit_core_submissions_for_task(
             if not payload["entries"]:
                 response_path.write_text(json.dumps({"data": {"rejected": [{"url": u, "reason": "dedup_hash_conflict"} for u in dedup_blocked]}}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 return export_path, response_path
+
+    # Check submission gate before submitting — resolve PoW if in "checking" state
+    try:
+        gate = client.fetch_submission_gate()
+        if isinstance(gate, dict) and gate.get("state") == "checking":
+            challenge = gate.get("challenge")
+            if isinstance(challenge, dict) and challenge:
+                challenge_id = str(challenge.get("id") or "")
+                if challenge_id:
+                    answer = solve_challenge(challenge)
+                    client.answer_pow_challenge(challenge_id, answer)
+    except Exception:
+        pass  # best-effort — submission will trigger challenge_required if still needed
 
     response = client.submit_core_submissions(payload)
     # Handle PoW challenge: if admission_status is challenge_required, answer and retry

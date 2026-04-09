@@ -122,25 +122,30 @@ Each iteration follows this sequence:
 
 ```text
 1. POST /api/mining/v1/heartbeat         <- refresh online status + credit info
-2. GET  /api/mining/v1/miners/me/submission-gate  <- check PoW state
-   If state="checking": answer PoW challenge first
-   POST /api/mining/v1/pow-challenges/{id}/answer
-3. Collect work items (discovery URLs, backend claims, backlog)
-4. For each URL:
-   a. GET /api/core/v1/url/check         <- MUST check URL occupancy before crawling
+2. Collect work items (discovery URLs, backend claims, backlog)
+3. For each URL:
+   a. GET /api/core/v1/url/check         <- MUST check URL occupancy BEFORE crawling
       If occupied=true: skip this URL
    b. Crawl the page (API/HTTP backend)
    c. POST /api/core/v1/dedup-occupancies/check  <- hash dedup before submit
-   d. POST /api/core/v1/submissions      <- submit structured data
-      If admission_status="challenge_required" (HTTP 428):
-        answer PoW, then resubmit
+   d. GET /api/mining/v1/miners/me/submission-gate  <- check PoW BEFORE each submit
+      If state="checking": answer PoW challenge first
+      POST /api/mining/v1/pow-challenges/{id}/answer
+   e. POST /api/mining/v1/submissions    <- submit structured data
+      If still challenge_required: answer and resubmit
+4. For repeat_crawl tasks:
+   - Only report cleaned_data (no structured data submission needed)
+   - POST /api/mining/v1/repeat-crawl-tasks/{id}/report
 ```
 
 **Key rules:**
-- Always check URL occupancy BEFORE crawling (step 4a) to avoid wasted work
-- Always check submission gate at the START of each iteration (step 2) —
+- Always check URL occupancy BEFORE crawling (step 3a)
+- Always check submission gate BEFORE each submission (step 3d) —
   novice miners have 100% PoW probability
-- Both discovery and backend-claim paths submit via `POST /api/core/v1/submissions`
+- Submission failures with conflicts (dedup, url_pattern_mismatch) are
+  discarded, NOT re-queued. Only transient errors (5xx, timeout) are retried
+- repeat_crawl tasks only report cleaned_data — no structured data submission
+- Discovery and refresh paths submit via `POST /api/mining/v1/submissions`
 
 ### Dataset Selection
 

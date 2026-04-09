@@ -394,16 +394,14 @@ class TestRateLimitBackoffFlow:
     """测试 429 Rate Limit 触发 dataset 冷却和重新入队。"""
 
     def test_429_marks_cooldown_and_requeues(self, tmp_work_dir: Path) -> None:
-        """submit_core_submissions 返回 429 → dataset 冷却 → item 重新入队。"""
+        """submit_core_submissions returns 429 → dataset cooldown → item re-queued."""
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # 创建 work item
+        # Use a discovery item (not repeat_crawl, since repeat_crawl skips submission)
         item = _make_work_item(
-            item_id="repeat_crawl:rl-task-1",
-            claim_task_id="rl-task-1",
-            claim_task_type="repeat_crawl",
+            item_id="discovery:ds-rate-limited:https://en.wikipedia.org/wiki/Test",
             dataset_id="ds-rate-limited",
         )
 
