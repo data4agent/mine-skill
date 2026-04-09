@@ -882,7 +882,6 @@ class AgentWorker:
 
         # repeat_crawl tasks only report cleaned_data — no structured data submission needed
         if item.claim_task_type == "repeat_crawl":
-            summary.processed_items += 1
             summary.messages.append(f"repeat_crawl reported for {item.item_id}")
             return
 
