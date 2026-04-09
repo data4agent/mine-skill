@@ -115,10 +115,10 @@ class PlatformClient:
 
     def submit_core_submissions(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._validate_submission_payload(payload)
-        return self._request("POST", "/api/core/v1/submissions", payload)
+        return self._request("POST", "/api/mining/v1/submissions", payload)
 
     def fetch_core_submission(self, submission_id: str) -> dict[str, Any]:
-        payload = self._request("GET", f"/api/core/v1/submissions/{submission_id}", None)
+        payload = self._request("GET", f"/api/mining/v1/submissions/{submission_id}", None)
         data = payload.get("data")
         if not isinstance(data, dict):
             raise ValueError(f"unexpected submission payload for {submission_id}")
@@ -465,8 +465,8 @@ class PlatformClient:
         })
 
     def create_validation_result(self, submission_id: str, verdict: str, score: int, comment: str, idempotency_key: str) -> dict[str, Any]:
-        """POST /api/core/v1/validation-results"""
-        return self._request("POST", "/api/core/v1/validation-results", {
+        """POST /api/mining/v1/validation-results"""
+        return self._request("POST", "/api/mining/v1/validation-results", {
             "submission_id": submission_id,
             "verdict": verdict,
             "score": score,
@@ -475,9 +475,9 @@ class PlatformClient:
         })
 
     def list_validation_results(self, **params: Any) -> list[dict[str, Any]]:
-        """GET /api/core/v1/validation-results"""
+        """GET /api/mining/v1/validation-results"""
         query = urlencode({k: v for k, v in params.items() if v is not None})
-        path = "/api/core/v1/validation-results"
+        path = "/api/mining/v1/validation-results"
         if query:
             path = f"{path}?{query}"
         resp = self._request("GET", path, None)
@@ -491,8 +491,8 @@ class PlatformClient:
         return []
 
     def get_validation_result(self, result_id: str) -> dict[str, Any]:
-        """GET /api/core/v1/validation-results/{id}"""
-        resp = self._request("GET", f"/api/core/v1/validation-results/{result_id}", None)
+        """GET /api/mining/v1/validation-results/{id}"""
+        resp = self._request("GET", f"/api/mining/v1/validation-results/{result_id}", None)
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
@@ -595,3 +595,29 @@ class PlatformClient:
     def fetch_profile(self, address: str) -> dict[str, Any]:
         """GET /api/mining/v1/profiles/:address — unified profile with miner+validator stats"""
         return self._request_optional_data("GET", f"/api/mining/v1/profiles/{quote(address, safe='')}")
+
+    def fetch_miner_profile(self, address: str) -> dict[str, Any]:
+        """GET /api/mining/v1/profiles/miners/:address — public miner profile"""
+        return self._request_optional_data("GET", f"/api/mining/v1/profiles/miners/{quote(address, safe='')}")
+
+    def fetch_miner_epoch_history(self, address: str) -> list[dict[str, Any]]:
+        """GET /api/mining/v1/profiles/miners/:address/epochs — miner epoch history"""
+        try:
+            payload = self._request("GET", f"/api/mining/v1/profiles/miners/{quote(address, safe='')}/epochs", None)
+        except (PlatformApiError, httpx.HTTPStatusError):
+            return []
+        data = payload.get("data")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    def fetch_validator_epoch_history(self, address: str) -> list[dict[str, Any]]:
+        """GET /api/mining/v1/profiles/validators/:address/epochs — validator epoch history"""
+        try:
+            payload = self._request("GET", f"/api/mining/v1/profiles/validators/{quote(address, safe='')}/epochs", None)
+        except (PlatformApiError, httpx.HTTPStatusError):
+            return []
+        data = payload.get("data")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    def fetch_signature_config(self) -> dict[str, Any]:
+        """GET /api/public/v1/signature-config — EIP-712 signing parameters"""
+        return self._request_optional_data("GET", "/api/public/v1/signature-config")
