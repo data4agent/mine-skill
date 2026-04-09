@@ -1,118 +1,118 @@
 # Validator Runbook
 
-## 目录
+## Table of Contents
 
-- 角色与阶段
+- Roles and Phases
 - Join Flow
 - Runtime Flow
 - Troubleshooting
-- 代码与文档来源
+- Code and Documentation Sources
 
-## 角色与阶段
+## Roles and Phases
 
-先识别当前是哪一种身份：
+First identify which identity you currently have:
 
-- `member`：还没有 Validator 权限，只能发起申请、查询自己的申请
-- `admin`：可以审批 Validator 申请、触发 evaluation task、查询 epoch / validator stats
-- `validator`：可以 heartbeat、ready/unready、写 validation result、claim/report evaluation task
+- `member`: Does not yet have Validator privileges; can only submit applications and query own applications
+- `admin`: Can approve Validator applications, trigger evaluation tasks, and query epoch / validator stats
+- `validator`: Can heartbeat, ready/unready, write validation results, and claim/report evaluation tasks
 
-再识别当前任务是哪一类：
+Then identify which category your current task falls into:
 
-- 想加入网络
-- 想确认为什么没法加入
-- 已经是 validator，想开始接任务
-- 已经接到任务，想完成数据评审
-- 某个接口报错，需要定位是签名、权限还是业务前置条件
+- Want to join the network
+- Want to find out why joining failed
+- Already a validator, want to start accepting tasks
+- Already received a task, want to complete data review
+- An endpoint returned an error, need to determine whether it is a signature, permission, or business precondition issue
 
 ## Join Flow
 
-### 1. 建立签名上下文
+### 1. Establish Signing Context
 
-先用这两个接口确认当前环境：
+Use these two endpoints to confirm the current environment:
 
 - `GET /api/public/v1/signature-config`
 - `GET /api/iam/v1/me`
 
-签名请求优先复用：
+For signing requests, prefer reusing:
 
 - `docs/platform_service_web3_client_integration.md`
 - `docs/platform_service_web3_request_example.mjs`
 
-注意：
+Notes:
 
-- 所有业务接口都走标准 envelope：成功时 `success=true,data,meta.request_id`；失败时 `success=false,error,meta.request_id`
-- 客户端不需要传 `ip_address`；服务端会从连接与代理链中观测
+- All business endpoints use the standard envelope: on success `success=true,data,meta.request_id`; on failure `success=false,error,meta.request_id`
+- The client does not need to send `ip_address`; the server observes it from the connection and proxy chain
 
-### 2. 检查 stake 是否满足最低要求
+### 2. Check Whether Stake Meets the Minimum Requirement
 
-外部 staking RPC：
+External staking RPC:
 
-- 方法：`staking.getAgentSubnetStake`
-- 文档：`docs/stake接口-v2.md`
+- Method: `staking.getAgentSubnetStake`
+- Documentation: `docs/stake接口-v2.md`
 
-当前协议中的最低 stake 规则：
+Minimum stake rules in the current protocol:
 
-- 默认 `min_stake = "1000000000000000000000"`（1000 AWP，wei）
-- 代码与设计来源：
+- Default `min_stake = "1000000000000000000000"` (1000 AWP, wei)
+- Code and design sources:
   - `docs/superpowers/specs/2026-04-01-validator-staking-design.md`
   - `apps/platform-service/internal/staking/`
 
-当用户需要判断是否能加入时：
+When a user needs to determine whether they can join:
 
-1. 查询 `(agent, subnetId)` 当前 stake
-2. 将结果按十进制 wei 字符串与 `min_stake` 比较
-3. 不满足时，预期平台会返回 `insufficient_stake`
+1. Query the current stake for `(agent, subnetId)`
+2. Compare the result as a decimal wei string against `min_stake`
+3. If the requirement is not met, the platform is expected to return `insufficient_stake`
 
-### 3. 以 member 身份提交申请
+### 3. Submit Application as a Member
 
-接口：
+Endpoint:
 
 - `POST /api/iam/v1/validator-applications`
-- 权限：`iam.validator.apply`
-- 默认允许角色：`member`
+- Permission: `iam.validator.apply`
+- Default allowed role: `member`
 
-请求体：
+Request body:
 
-- 无 body
+- No body
 
-平台会用当前签名主体地址作为申请地址，并记录观测到的 IP。
+The platform uses the current signing principal's address as the application address and records the observed IP.
 
-成功后主要字段：
+Key fields on success:
 
 - `id`
 - `address`
 - `status`
 - `submitted_at`
 
-可能结果：
+Possible outcomes:
 
 - `pending_review`
 - `approved`
 - `rejected`
 
-### 4. 查询自己的申请
+### 4. Query Your Own Application
 
-接口：
+Endpoint:
 
 - `GET /api/iam/v1/validator-applications/me`
 
-用途：
+Use cases:
 
-- 轮询当前申请是否已获批
-- 读取 `rejection_reason`
-- 在自动化流程中确认是否可以切换到 validator 运行态
+- Poll whether the current application has been approved
+- Read the `rejection_reason`
+- Confirm in an automated workflow whether it is safe to switch to validator runtime mode
 
-### 5. admin 审批
+### 5. Admin Approval
 
-只有当用户明确以 admin 身份操作，或者任务目标是“协助管理员完成审批”时才走这一步。
+Only follow this step when the user is explicitly operating as an admin, or when the task objective is "assist the administrator in completing the approval."
 
-接口：
+Endpoint:
 
 - `POST /api/iam/v1/validator-applications/:id/review`
-- 权限：`iam.validator.review`
-- 默认允许角色：`admin`
+- Permission: `iam.validator.review`
+- Default allowed role: `admin`
 
-请求体：
+Request body:
 
 ```json
 {
@@ -121,7 +121,7 @@
 }
 ```
 
-或：
+Or:
 
 ```json
 {
@@ -130,26 +130,26 @@
 }
 ```
 
-审批通过时，服务会再次检查：
+When approval is granted, the service re-checks:
 
-- stake 是否仍然达到 `min_stake`
-- validator capacity 是否允许准入
+- Whether the stake still meets `min_stake`
+- Whether the validator capacity allows admission
 
-因此“提交申请成功”不代表“审批时一定能通过”。
+Therefore, "application submitted successfully" does not guarantee "approval will succeed at review time."
 
-### 6. 理解容量竞争与保护期
+### 6. Understanding Capacity Competition and Protection Period
 
-Validator 准入不是只看最低 stake，还会看容量：
+Validator admission does not only check the minimum stake; it also considers capacity:
 
 - `capacity = ceil(active_miner_count / validator_ratio)`
-- 如果未满员，可直接准入
-- 如果满员，会尝试替换 stake 最低且不在保护期内的 validator
+- If not at full capacity, admission is granted directly
+- If at full capacity, the system attempts to replace the validator with the lowest stake who is not in a protection period
 
-保护期规则：
+Protection period rules:
 
-- `JoinedEpoch == currentEpoch` 时，处于保护期，不能被替换
+- When `JoinedEpoch == currentEpoch`, the validator is in a protection period and cannot be replaced
 
-如果容量已满且当前 stake 不足以替换最低可替换 validator，预期返回：
+If capacity is full and the current stake is insufficient to replace the lowest replaceable validator, the expected response is:
 
 - `validator_capacity_full`
 
@@ -157,11 +157,11 @@ Validator 准入不是只看最低 stake，还会看容量：
 
 ### 1. heartbeat
 
-接口：
+Endpoint:
 
 - `POST /api/mining/v1/heartbeat`
-- 权限：`mining.heartbeat`
-- Validator body：
+- Permission: `mining.heartbeat`
+- Validator body:
 
 ```json
 {
@@ -169,7 +169,7 @@ Validator 准入不是只看最低 stake，还会看容量：
 }
 ```
 
-返回中的关键字段：
+Key fields in the response:
 
 - `role = "validator"`
 - `validator.validator_id`
@@ -178,50 +178,50 @@ Validator 准入不是只看最低 stake，还会看容量：
 - `validator.credit_tier`
 - `validator.min_task_interval_seconds`
 
-说明：
+Notes:
 
-- 这是统一 heartbeat 入口，miner 和 validator 共用一个 path
-- 服务端按当前角色分流
-- 如果主体角色还不是 `validator`，不要假设 heartbeat 能把角色升级
+- This is a unified heartbeat endpoint shared by both miners and validators under one path
+- The server routes based on the current role
+- If the principal's role is not yet `validator`, do not assume that heartbeat can upgrade the role
 
 ### 2. ready / unready
 
-接口：
+Endpoint:
 
 - `POST /api/mining/v1/validators/ready`
 - `POST /api/mining/v1/validators/unready`
 
-用途：
+Use cases:
 
-- `ready`：声明自己可以接收新的 evaluation task
-- `unready`：显式退出 ready pool，用于维护或暂时停止接单
+- `ready`: Declare that you are available to receive new evaluation tasks
+- `unready`: Explicitly exit the ready pool, used for maintenance or temporarily stopping task acceptance
 
-如果 ready 失败，优先排查：
+If ready fails, prioritize checking:
 
-- 是否已经获批为 validator
-- 是否近期 heartbeat 正常
-- 是否因为质押下降或其他原因已被驱逐
+- Whether you have been approved as a validator
+- Whether recent heartbeats have been normal
+- Whether you have been evicted due to stake decrease or other reasons
 
-### 3. 处理 evaluation task
+### 3. Handling Evaluation Tasks
 
-只有 admin 能创建 evaluation task；validator 只负责 claim / report。
+Only admins can create evaluation tasks; validators are only responsible for claim / report.
 
-领取：
+Claim:
 
 - `POST /api/mining/v1/evaluation-tasks/claim`
 
-成功返回：
+Successful response:
 
 - `task_id`
 - `assignment_id`
 - `validator_id`
 - `golden`
 
-回报：
+Report:
 
 - `POST /api/mining/v1/evaluation-tasks/{taskID}/report`
 
-请求体：
+Request body:
 
 ```json
 {
@@ -230,59 +230,59 @@ Validator 准入不是只看最低 stake，还会看容量：
 }
 ```
 
-说明：
+Notes:
 
-- `assignment_id` 必须和 claim 返回一致
-- `validator_id` 不从 body 传，服务端取当前签名主体
-- 代码没有额外限制 score 区间；若无其他上游约束，按当前业务示例使用整数评分
+- `assignment_id` must match the one returned by claim
+- `validator_id` is not passed in the body; the server uses the current signing principal
+- The code does not impose additional restrictions on the score range; if there are no other upstream constraints, use integer scores per the current business examples
 
-### 4. 写 core validation result
+### 4. Writing Core Validation Results
 
-这是 Validator 的另一条“数据评审”主路径，与 mining evaluation task 并行存在。
+This is another primary "data review" path for Validators, existing in parallel with the mining evaluation task flow.
 
-创建：
+Create:
 
 - `POST /api/core/v1/validation-results`
 
-请求体：
+Request body:
 
 ```json
 {
   "submission_id": "sub_123",
   "verdict": "accepted",
   "score": 95,
-  "comment": "结构化结果完整",
+  "comment": "Structured result is complete",
   "idempotency_key": "ivr-001"
 }
 ```
 
-读取：
+Read:
 
 - `GET /api/core/v1/validation-results`
 - `GET /api/core/v1/validation-results/{id}`
 
-已知 verdict：
+Known verdicts:
 
 - `accepted`
 - `rejected`
 
-使用建议：
+Usage recommendations:
 
-- 需要可重试写入时，总是带 `idempotency_key`
-- 需要“直接对 submission 给出结论”时，优先考虑 `validation-results`
-- 需要“完成 mining 侧分配给 validator 的评分任务”时，优先考虑 `evaluation-tasks`
+- When retryable writes are needed, always include `idempotency_key`
+- When you need to "directly provide a conclusion on a submission," prefer `validation-results`
+- When you need to "complete a scoring task assigned to a validator by the mining side," prefer `evaluation-tasks`
 
 ## Troubleshooting
 
-### 401 / 403 基础排查
+### 401 / 403 Basic Troubleshooting
 
-先确认：
+First confirm:
 
-1. `GET /api/public/v1/signature-config` 是否拿到正确 domain 配置
-2. `GET /api/iam/v1/me` 返回的 `subject` 与预期 signer 是否一致
-3. 当前 `role` 是否满足目标接口权限
+1. Whether `GET /api/public/v1/signature-config` returns the correct domain configuration
+2. Whether the `subject` returned by `GET /api/iam/v1/me` matches the expected signer
+3. Whether the current `role` satisfies the target endpoint's permission requirements
 
-常见签名协议错误来源：
+Common signing protocol error sources:
 
 - `MISSING_HEADERS`
 - `INVALID_NONCE`
@@ -294,32 +294,32 @@ Validator 准入不是只看最低 stake，还会看容量：
 - `SIGNER_MISMATCH`
 - `NONCE_REUSED`
 
-### 常见业务错误
+### Common Business Errors
 
 - `validator_application_exists`
-  - 已经提交过申请；改为查询 `/api/iam/v1/validator-applications/me`
+  - An application has already been submitted; switch to querying `/api/iam/v1/validator-applications/me`
 - `role_suspended`
-  - 身份被暂停，不能继续申请或操作
+  - The identity has been suspended; cannot continue applying or operating
 - `insufficient_stake`
-  - 质押不足；查看返回里的 `requirements.min_stake`
+  - Stake is insufficient; check `requirements.min_stake` in the response
 - `validator_capacity_full`
-  - 容量已满；等待 slot 或提高 stake
+  - Capacity is full; wait for a slot or increase stake
 - `validator_not_ready`
-  - 还没进入 ready pool、已被驱逐、或当前状态不可接任务
+  - Not yet in the ready pool, has been evicted, or current state does not allow task acceptance
 - `evaluation_task_not_found`
-  - `task_id` / `assignment_id` / 当前 validator 身份三者不匹配
+  - `task_id` / `assignment_id` / current validator identity — the three do not match
 - `task_claim_forbidden`
-  - 当前身份不是该任务允许的操作者
+  - The current identity is not an allowed operator for this task
 
-### 不要误判的点
+### Points to Avoid Misjudging
 
-- `POST /api/mining/v1/heartbeat` 不会替代审批流程
-- `approved` 之前不要假设有 validator 权限
-- `approved` 之后也可能因 staking watcher 发现 stake 下降而被驱逐
-- `GET /api/mining/v1/validators/:id/stats` 当前默认不是 validator 自助接口，而是 admin 接口
-- `GET /api/mining/v1/ws` 当前默认是 miner 接口，不是 validator 接口
+- `POST /api/mining/v1/heartbeat` does not replace the approval flow
+- Do not assume validator privileges before `approved`
+- Even after `approved`, eviction can occur if the staking watcher detects a stake decrease
+- `GET /api/mining/v1/validators/:id/stats` is currently not a validator self-service endpoint by default; it is an admin endpoint
+- `GET /api/mining/v1/ws` is currently a miner endpoint by default, not a validator endpoint
 
-## 代码与文档来源
+## Code and Documentation Sources
 
 - `docs/stake接口-v2.md`
 - `docs/platform_service_web3_client_integration.md`
