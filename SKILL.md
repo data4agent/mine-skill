@@ -5,8 +5,9 @@ description: >
   autonomous miners and validators — use it whenever the user mentions mining,
   validating, aMine, ocDATA, Mine Worknet, or earning crypto rewards by crawling
   data. Covers: start/stop miner or validator, check status/scores/earnings,
-  select datasets, handle PoW challenges, diagnose 401/auth/stake errors, view
-  epoch progress, and staking guidance. Trigger for casual phrases too: "go
+  select datasets, handle PoW challenges, diagnose errors (401, auth, stake),
+  view epoch progress, and validator staking guidance. Miners need NO staking —
+  just register and start. Trigger for casual phrases too: "go
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
@@ -164,6 +165,12 @@ Epoch settlement gate: `task_count >= 80` and `avg_score >= 60` (see protocol v2
 A novice miner's primary path is through **Discovery self-crawling** to accumulate submissions and scores.
 
 ## Miner Workflow
+
+**Miner requires NO staking, NO AWP tokens, and NO special application.**
+Anyone with a registered wallet can start mining immediately. The only
+requirements are: a registered on-chain address (via AWP Skill) and a
+working internet connection. Do NOT tell users they need to stake AWP
+or allocate tokens to become a miner — that is only for validators.
 
 ### Start Mining
 
