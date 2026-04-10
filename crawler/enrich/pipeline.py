@@ -55,7 +55,7 @@ class LLMSchemaFieldGroupExecutor:
 class EnrichPipeline:
     """Enrichment pipeline: extractive-first, generative with graceful fallback.
 
-    Generative execution prefers the benchmark-skill style OpenClaw agent CLI.
+    Generative execution prefers the OpenClaw agent CLI.
     If that path is unavailable, it falls back to model-config driven Gateway or
     other OpenAI-compatible APIs. Only when no execution path is available do
     generative field groups remain ``pending_agent`` for later fulfillment.
