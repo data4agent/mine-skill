@@ -81,11 +81,6 @@ class EvaluationEngine:
 
         has_repeat = bool(repeat_cleaned_data and repeat_cleaned_data.strip())
 
-        # Check if M1 (repeat crawl) is a blocked/login page — skip mismatch check if so
-        if has_repeat and _is_blocked_page(str(repeat_cleaned_data)):
-            log.info("M1 appears to be a blocked/login page — skipping mismatch check, evaluating M0 quality only")
-            has_repeat = False
-
         # Pre-LLM optimization: reduce M0 and M1 with identical rules
         cleaned_data_str = _optimize_for_eval(cleaned_data_str)
         if has_repeat:
@@ -97,10 +92,7 @@ class EvaluationEngine:
         sections.append("")
 
         if has_repeat:
-            sections.append("## Step 1: Authenticity Check (M0 vs M1)")
-            sections.append("Compare the original crawl (M0) with the independent re-crawl (M1).")
-            sections.append("Minor differences (timestamps, ads, layout) are normal — report match.")
-            sections.append("Major content differences (fabricated data, wrong page, missing core content) — report mismatch.")
+            sections.append("## Data")
             sections.append("")
             sections.append("### Original crawl (M0)")
             sections.append(cleaned_data_str)
@@ -121,9 +113,20 @@ class EvaluationEngine:
         sections.append("")
         sections.append("## Evaluation instructions")
         if has_repeat:
-            sections.append("1. Determine `result`: \"match\" if M0 and M1 represent the same content, \"mismatch\" if not.")
+            sections.append("Evaluate in this order:")
+            sections.append("")
+            sections.append("1. **Check if M1 is a blocked page**: If M1 is a CAPTCHA page, login wall,")
+            sections.append("   access-denied page, anti-bot challenge, or any non-content error page,")
+            sections.append("   then M1 is unusable for comparison. In this case, set result to \"match\"")
+            sections.append("   (do NOT penalize the miner for the re-crawler being blocked) and proceed")
+            sections.append("   to quality scoring based on M0 alone.")
+            sections.append("")
+            sections.append("2. **Authenticity check (M0 vs M1)**: If M1 is real content, compare M0 and M1.")
+            sections.append("   Minor differences (timestamps, ads, layout) are normal — report \"match\".")
+            sections.append("   Major content differences (fabricated data, wrong page, missing core content) — report \"mismatch\".")
             sections.append("   If mismatch, set score to 0 and skip quality scoring.")
-            sections.append("2. If match, score structured_data quality (0-100) based on:")
+            sections.append("")
+            sections.append("3. **Quality scoring**: If match, score structured_data quality (0-100) based on:")
         else:
             sections.append("Set result to \"match\" (no re-crawl data to compare).")
             sections.append("Score structured_data quality (0-100) based on:")
@@ -245,44 +248,6 @@ class EvaluationEngine:
                     pass
 
         return eval_result, eval_score
-
-
-_BLOCKED_PAGE_INDICATORS = [
-    # Anti-bot / CAPTCHA
-    "captcha", "robot check", "are you a robot", "verify you are human",
-    "please verify", "unusual traffic", "automated access",
-    # Login walls
-    "sign in to", "log in to", "login required", "please log in",
-    "sign up to", "create an account to", "join to view",
-    "authwall", "auth wall",
-    # Access denied
-    "access denied", "403 forbidden", "blocked", "not authorized",
-    # LinkedIn specific
-    "join linkedin", "sign in - linkedin",
-    # Amazon specific
-    "enter the characters you see below",
-]
-
-_BLOCKED_PAGE_SHORT_THRESHOLD = 200  # blocked pages are usually very short
-
-
-def _is_blocked_page(text: str) -> bool:
-    """Detect if text is a blocked/login/CAPTCHA page rather than real content.
-
-    When M1 (repeat crawl) hits an anti-crawl wall, comparing it against M0
-    would always produce a mismatch — unfairly penalizing the original miner.
-    """
-    if not text or not text.strip():
-        return True  # empty M1 = crawl failed
-    lower = text.strip().lower()
-    # Very short pages are likely blocked
-    if len(lower) < _BLOCKED_PAGE_SHORT_THRESHOLD:
-        for indicator in _BLOCKED_PAGE_INDICATORS:
-            if indicator in lower:
-                return True
-    # Even in longer pages, multiple indicators = blocked
-    hits = sum(1 for ind in _BLOCKED_PAGE_INDICATORS if ind in lower)
-    return hits >= 3
 
 
 # Max chars for each M0/M1 text sent to LLM (~5000 tokens)
