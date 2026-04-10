@@ -1,4 +1,4 @@
-"""run_models 数据模型单元测试。"""
+"""Unit tests for run_models data models."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,10 +15,10 @@ from run_models import CrawlerRunResult, TaskEnvelope, WorkerConfig, WorkerItera
 
 
 class TestWorkItem:
-    """WorkItem 数据模型测试。"""
+    """WorkItem data model tests."""
 
     def test_to_dict_from_dict_roundtrip(self) -> None:
-        """to_dict → from_dict 应完整还原对象。"""
+        """to_dict -> from_dict should fully restore the object."""
         original = WorkItem(
             item_id="test:item-1",
             source="backend_claim",
@@ -52,7 +52,7 @@ class TestWorkItem:
         assert restored.output_dir == original.output_dir
 
     def test_from_dict_with_empty_payload(self) -> None:
-        """空 payload 应返回具有默认值的 WorkItem。"""
+        """Empty payload should return a WorkItem with default values."""
         item = WorkItem.from_dict({})
         assert item.item_id == ""
         assert item.source == ""
@@ -69,7 +69,7 @@ class TestWorkItem:
         assert item.output_dir is None
 
     def test_frozen_dataclass_immutable(self) -> None:
-        """WorkItem 是 frozen dataclass，属性不可修改。"""
+        """WorkItem is a frozen dataclass; attributes cannot be modified."""
         item = WorkItem(
             item_id="x",
             source="s",
@@ -83,7 +83,7 @@ class TestWorkItem:
             item.item_id = "new-id"  # type: ignore[misc]
 
     def test_default_values(self) -> None:
-        """可选字段应有正确的默认值。"""
+        """Optional fields should have correct default values."""
         item = WorkItem(
             item_id="i",
             source="s",
@@ -101,7 +101,7 @@ class TestWorkItem:
         assert item.output_dir is None
 
     def test_to_dict_returns_new_dicts(self) -> None:
-        """to_dict 返回的 record 和 metadata 应是副本，不应是原始引用。"""
+        """to_dict should return copies of record and metadata, not original references."""
         original_record: dict[str, Any] = {"key": "val"}
         original_meta: dict[str, Any] = {"m": 1}
         item = WorkItem(
@@ -115,14 +115,14 @@ class TestWorkItem:
             metadata=original_meta,
         )
         d = item.to_dict()
-        # 修改返回值不应影响原始对象
+        # Modifying the returned value should not affect the original object
         d["record"]["new_key"] = "new_val"
         d["metadata"]["new_m"] = 2
         assert "new_key" not in item.record
         assert "new_m" not in item.metadata
 
     def test_from_dict_empty_string_dataset_id_is_none(self) -> None:
-        """dataset_id 为空字符串时应转为 None。"""
+        """Empty string dataset_id should be converted to None."""
         item = WorkItem.from_dict({"dataset_id": ""})
         assert item.dataset_id is None
 
@@ -133,10 +133,10 @@ class TestWorkItem:
 
 
 class TestTaskEnvelope:
-    """TaskEnvelope 数据模型测试。"""
+    """TaskEnvelope data model tests."""
 
     def test_all_fields(self) -> None:
-        """所有字段应正确赋值。"""
+        """All fields should be correctly assigned."""
         env = TaskEnvelope(
             task_id="t-1",
             task_source="backend_claim",
@@ -157,7 +157,7 @@ class TestTaskEnvelope:
         assert env.metadata == {"extra": "data"}
 
     def test_optional_fields(self) -> None:
-        """dataset_id 可以为 None。"""
+        """dataset_id can be None."""
         env = TaskEnvelope(
             task_id="t-2",
             task_source="local",
@@ -171,7 +171,7 @@ class TestTaskEnvelope:
         assert env.metadata == {}
 
     def test_frozen(self) -> None:
-        """TaskEnvelope 是 frozen，不可修改。"""
+        """TaskEnvelope is frozen and cannot be modified."""
         env = TaskEnvelope(
             task_id="t",
             task_source="s",
@@ -191,10 +191,10 @@ class TestTaskEnvelope:
 
 
 class TestWorkerConfig:
-    """WorkerConfig 数据模型测试。"""
+    """WorkerConfig data model tests."""
 
     def test_default_values(self) -> None:
-        """可选字段应有正确默认值。"""
+        """Optional fields should have correct default values."""
         config = WorkerConfig(
             base_url="https://api.example.com",
             token="tok",
@@ -216,7 +216,7 @@ class TestWorkerConfig:
         assert config.eip712_domain_version == "1"
 
     def test_custom_eip712_params(self) -> None:
-        """自定义 EIP-712 参数应正确覆盖默认值。"""
+        """Custom EIP-712 parameters should correctly override defaults."""
         config = WorkerConfig(
             base_url="https://api.example.com",
             token="tok",
@@ -236,7 +236,7 @@ class TestWorkerConfig:
         assert config.eip712_verifying_contract == "0x1234567890abcdef1234567890abcdef12345678"
 
     def test_frozen(self) -> None:
-        """WorkerConfig 是 frozen，不可修改。"""
+        """WorkerConfig is frozen and cannot be modified."""
         config = WorkerConfig(
             base_url="u",
             token="t",
@@ -256,10 +256,10 @@ class TestWorkerConfig:
 
 
 class TestCrawlerRunResult:
-    """CrawlerRunResult 数据模型测试。"""
+    """CrawlerRunResult data model tests."""
 
     def test_output_dir_and_records(self) -> None:
-        """output_dir、records、errors 应正确赋值。"""
+        """output_dir, records, errors should be correctly assigned."""
         result = CrawlerRunResult(
             output_dir=Path("/tmp/run-1"),
             records=[{"url": "http://a", "plain_text": "hello"}],
@@ -276,7 +276,7 @@ class TestCrawlerRunResult:
         assert result.summary == {"total": 1}
 
     def test_with_errors(self) -> None:
-        """含错误的结果应正确存储。"""
+        """Results with errors should be correctly stored."""
         result = CrawlerRunResult(
             output_dir=Path("/tmp/run-2"),
             records=[],
@@ -293,7 +293,7 @@ class TestCrawlerRunResult:
         assert result.stderr == "Error occurred"
 
     def test_default_stdout_stderr(self) -> None:
-        """stdout 和 stderr 默认为空字符串。"""
+        """stdout and stderr should default to empty string."""
         result = CrawlerRunResult(
             output_dir=Path("/tmp"),
             records=[],
@@ -312,10 +312,10 @@ class TestCrawlerRunResult:
 
 
 class TestWorkerIterationSummary:
-    """WorkerIterationSummary 数据模型测试。"""
+    """WorkerIterationSummary data model tests."""
 
     def test_to_dict(self) -> None:
-        """to_dict 应包含所有字段且值正确。"""
+        """to_dict should include all fields with correct values."""
         summary = WorkerIterationSummary(iteration=5)
         summary.heartbeat_sent = True
         summary.claimed_items = 2
@@ -335,7 +335,7 @@ class TestWorkerIterationSummary:
         assert d["messages"] == ["processed item-1"]
 
     def test_default_field_values(self) -> None:
-        """默认字段应为 0 / False / 空列表。"""
+        """Default fields should be 0 / False / empty list."""
         summary = WorkerIterationSummary(iteration=1)
         assert summary.heartbeat_sent is False
         assert summary.unified_heartbeat_sent is False
@@ -352,13 +352,13 @@ class TestWorkerIterationSummary:
         assert summary.errors == []
 
     def test_mutable_unlike_other_models(self) -> None:
-        """WorkerIterationSummary 不是 frozen，属性可修改。"""
+        """WorkerIterationSummary is not frozen; attributes can be modified."""
         summary = WorkerIterationSummary(iteration=1)
         summary.processed_items = 10
         assert summary.processed_items == 10
 
     def test_to_dict_returns_list_copies(self) -> None:
-        """to_dict 返回的列表应是副本。"""
+        """to_dict should return copies of lists."""
         summary = WorkerIterationSummary(iteration=1)
         summary.errors.append("err1")
         d = summary.to_dict()
@@ -366,7 +366,7 @@ class TestWorkerIterationSummary:
         assert len(summary.errors) == 1
 
     def test_to_dict_completeness(self) -> None:
-        """to_dict 应包含所有已知字段。"""
+        """to_dict should include all known fields."""
         summary = WorkerIterationSummary(iteration=1)
         d = summary.to_dict()
         expected_keys = {

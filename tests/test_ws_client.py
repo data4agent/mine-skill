@@ -1,4 +1,4 @@
-"""WebSocket 客户端单元测试。"""
+"""WebSocket client unit tests."""
 from __future__ import annotations
 
 import json
@@ -12,15 +12,15 @@ from ws_client import ValidatorWSClient, WSDisconnected, WSMessage
 
 
 # ---------------------------------------------------------------------------
-# WSMessage 解析
+# WSMessage parsing
 # ---------------------------------------------------------------------------
 
 
 class TestWSMessage:
-    """WSMessage 解析逻辑测试。"""
+    """WSMessage parsing logic tests."""
 
     def test_parse_valid_message(self) -> None:
-        """有效消息应正确解析 type / data 字段。"""
+        """Valid message should correctly parse type / data fields."""
         raw: dict[str, Any] = {
             "type": "evaluation_task",
             "data": {
@@ -39,29 +39,29 @@ class TestWSMessage:
         assert msg.raw is raw
 
     def test_missing_fields_defaults(self) -> None:
-        """缺少字段时应返回空字符串或默认值。"""
+        """Missing fields should return empty string or default values."""
         msg = WSMessage({})
         assert msg.type == ""
         assert msg.task_id == ""
         assert msg.assignment_id == ""
         assert msg.submission_id == ""
-        assert msg.mode == "single"  # 默认值
+        assert msg.mode == "single"  # default value
         assert msg.repeat_crawl_task_id == ""
         assert msg.data == {}
 
     def test_data_not_dict_treated_as_empty(self) -> None:
-        """data 不是 dict 时应被视为空 dict。"""
+        """Non-dict data should be treated as empty dict."""
         msg = WSMessage({"type": "x", "data": "not-a-dict"})
         assert msg.data == {}
         assert msg.task_id == ""
 
     def test_repeat_crawl_task_id_from_data_id(self) -> None:
-        """repeat_crawl_task_id 应从 data.id 读取。"""
+        """repeat_crawl_task_id should be read from data.id."""
         msg = WSMessage({"type": "repeat_crawl_task", "data": {"id": "rc-42"}})
         assert msg.repeat_crawl_task_id == "rc-42"
 
     def test_repr(self) -> None:
-        """__repr__ 应包含 type 和 task_id。"""
+        """__repr__ should include type and task_id."""
         msg = WSMessage({"type": "test_type", "data": {"task_id": "abc"}})
         r = repr(msg)
         assert "test_type" in r
@@ -74,15 +74,15 @@ class TestWSMessage:
 
 
 class TestValidatorWSClientConnect:
-    """connect() 方法测试。"""
+    """connect() method tests."""
 
     def test_connect_success(self) -> None:
-        """连接成功应设置 _connected=True 并重置 _reconnect_attempt。"""
+        """Successful connection should set _connected=True and reset _reconnect_attempt."""
         mock_conn = MagicMock()
         mock_ws_client_module = MagicMock()
         mock_ws_client_module.connect.return_value = mock_conn
 
-        # 构建嵌套模块结构，使 import websockets.sync.client 正确解析
+        # Build nested module structure so import websockets.sync.client resolves correctly
         mock_ws_sync = MagicMock()
         mock_ws_sync.client = mock_ws_client_module
         mock_ws = MagicMock()
@@ -93,10 +93,10 @@ class TestValidatorWSClientConnect:
             ws_url="ws://localhost:8080/ws",
             auth_headers={"Authorization": "Bearer tok"},
         )
-        # 模拟之前有重试
+        # Simulate previous retries
         client._reconnect_attempt = 5
 
-        # patch connect() 内部的 local import：websockets.sync.client
+        # Patch the local import inside connect(): websockets.sync.client
         with patch.dict("sys.modules", {
             "websockets": mock_ws,
             "websockets.sync": mock_ws_sync,
@@ -110,13 +110,13 @@ class TestValidatorWSClientConnect:
         mock_ws_client_module.connect.assert_called_once()
 
     def test_connect_failure_raises_ws_disconnected(self) -> None:
-        """连接失败应抛出 WSDisconnected 并设置 _connected=False。"""
+        """Connection failure should raise WSDisconnected and set _connected=False."""
         client = ValidatorWSClient(
             ws_url="ws://localhost:9999/ws",
             auth_headers={},
         )
 
-        # 模拟 connect 方法抛出异常
+        # Simulate connect method raising exception
         def failing_connect() -> None:
             client._connected = False
             raise WSDisconnected("connect failed: refused")
@@ -133,7 +133,7 @@ class TestValidatorWSClientConnect:
 
 
 class TestValidatorWSClientReceive:
-    """receive() 方法测试。"""
+    """receive() method tests."""
 
     def _make_connected_client(self) -> ValidatorWSClient:
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
@@ -142,7 +142,7 @@ class TestValidatorWSClientReceive:
         return client
 
     def test_receive_valid_message(self) -> None:
-        """正常 JSON 消息应返回 WSMessage 对象。"""
+        """Normal JSON message should return a WSMessage object."""
         client = self._make_connected_client()
         payload = {"type": "evaluation_task", "data": {"task_id": "t1"}}
         client._ws.recv.return_value = json.dumps(payload)
@@ -156,7 +156,7 @@ class TestValidatorWSClientReceive:
         client._ws.recv.assert_called_once_with(timeout=5.0)
 
     def test_receive_bytes_message(self) -> None:
-        """bytes 消息应被 decode 后正常解析。"""
+        """Bytes message should be decoded and parsed normally."""
         client = self._make_connected_client()
         payload = {"type": "ping", "data": {}}
         client._ws.recv.return_value = json.dumps(payload).encode("utf-8")
@@ -166,7 +166,7 @@ class TestValidatorWSClientReceive:
         assert msg.type == "ping"
 
     def test_receive_timeout_returns_none(self) -> None:
-        """超时应返回 None。"""
+        """Timeout should return None."""
         client = self._make_connected_client()
         client._ws.recv.side_effect = TimeoutError("timed out")
 
@@ -174,7 +174,7 @@ class TestValidatorWSClientReceive:
         assert result is None
 
     def test_receive_invalid_json_returns_none(self) -> None:
-        """无效 JSON 应返回 None。"""
+        """Invalid JSON should return None."""
         client = self._make_connected_client()
         client._ws.recv.return_value = "not-json{{"
 
@@ -182,7 +182,7 @@ class TestValidatorWSClientReceive:
         assert result is None
 
     def test_receive_non_dict_json_returns_none(self) -> None:
-        """JSON 解析为非 dict 类型应返回 None。"""
+        """JSON parsed to non-dict type should return None."""
         client = self._make_connected_client()
         client._ws.recv.return_value = "[1, 2, 3]"
 
@@ -190,7 +190,7 @@ class TestValidatorWSClientReceive:
         assert result is None
 
     def test_receive_connection_loss_raises_ws_disconnected(self) -> None:
-        """连接丢失应抛出 WSDisconnected。"""
+        """Connection loss should raise WSDisconnected."""
         client = self._make_connected_client()
         client._ws.recv.side_effect = OSError("connection reset")
 
@@ -199,7 +199,7 @@ class TestValidatorWSClientReceive:
         assert client.connected is False
 
     def test_receive_not_connected_raises_ws_disconnected(self) -> None:
-        """未连接状态调用 receive 应抛出 WSDisconnected。"""
+        """Calling receive when not connected should raise WSDisconnected."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         with pytest.raises(WSDisconnected, match="not connected"):
             client.receive()
@@ -211,10 +211,10 @@ class TestValidatorWSClientReceive:
 
 
 class TestValidatorWSClientSendAckEval:
-    """send_ack_eval() 测试。"""
+    """send_ack_eval() tests."""
 
     def test_sends_correct_json(self) -> None:
-        """应发送 {"ack_eval": assignment_id} 格式的 JSON。"""
+        """Should send JSON in {"ack_eval": assignment_id} format."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client._connected = True
         client._ws = MagicMock()
@@ -226,7 +226,7 @@ class TestValidatorWSClientSendAckEval:
         assert sent == {"ack_eval": "assign-99"}
 
     def test_send_when_disconnected_raises(self) -> None:
-        """未连接时发送应抛出 WSDisconnected。"""
+        """Sending when not connected should raise WSDisconnected."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         with pytest.raises(WSDisconnected):
             client.send_ack_eval("x")
@@ -238,10 +238,10 @@ class TestValidatorWSClientSendAckEval:
 
 
 class TestValidatorWSClientSendAckRepeatCrawl:
-    """send_ack_repeat_crawl() 测试。"""
+    """send_ack_repeat_crawl() tests."""
 
     def test_sends_correct_json(self) -> None:
-        """应发送 {"ack": task_id} 格式。"""
+        """Should send {"ack": task_id} format."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client._connected = True
         client._ws = MagicMock()
@@ -258,10 +258,10 @@ class TestValidatorWSClientSendAckRepeatCrawl:
 
 
 class TestValidatorWSClientSendRejectRepeatCrawl:
-    """send_reject_repeat_crawl() 测试。"""
+    """send_reject_repeat_crawl() tests."""
 
     def test_sends_correct_json(self) -> None:
-        """应发送 {"reject": task_id} 格式。"""
+        """Should send {"reject": task_id} format."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client._connected = True
         client._ws = MagicMock()
@@ -278,7 +278,7 @@ class TestValidatorWSClientSendRejectRepeatCrawl:
 
 
 class TestValidatorWSClientReconnectWithBackoff:
-    """reconnect_with_backoff() 测试。"""
+    """reconnect_with_backoff() tests."""
 
     def test_exponential_delay(self) -> None:
         """Delay should grow exponentially: 1s, 2s, 4s, 8s..., max 60s."""
@@ -317,11 +317,11 @@ class TestValidatorWSClientReconnectWithBackoff:
             with patch.object(client, "connect", connect_mock):
                 client.reconnect_with_backoff()
 
-        # connect 不应被调用，因为 _closed 在 sleep 后为 True
+        # connect should not be called because _closed is True after sleep
         connect_mock.assert_not_called()
 
     def test_closed_check_before_connect(self) -> None:
-        """如果 _closed 为 True，reconnect_with_backoff 应立即返回。"""
+        """If _closed is True, reconnect_with_backoff should return immediately."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client._closed = True
 
@@ -338,10 +338,10 @@ class TestValidatorWSClientReconnectWithBackoff:
 
 
 class TestValidatorWSClientReopen:
-    """reopen() 测试。"""
+    """reopen() tests."""
 
     def test_resets_flags(self) -> None:
-        """reopen 应重置 _closed 和 _connected。"""
+        """reopen should reset _closed and _connected."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client._closed = True
         client._connected = True
@@ -353,10 +353,10 @@ class TestValidatorWSClientReopen:
 
 
 class TestValidatorWSClientClose:
-    """close() 测试。"""
+    """close() tests."""
 
     def test_sets_closed_and_disconnected(self) -> None:
-        """close 应设置 _closed=True、_connected=False 并清理 ws 对象。"""
+        """close should set _closed=True, _connected=False, and clean up ws object."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         mock_ws = MagicMock()
         client._ws = mock_ws
@@ -370,20 +370,20 @@ class TestValidatorWSClientClose:
         mock_ws.close.assert_called_once()
 
     def test_close_tolerates_ws_error(self) -> None:
-        """ws.close() 抛异常时 close() 不应传播异常。"""
+        """close() should not propagate exceptions from ws.close()."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         mock_ws = MagicMock()
         mock_ws.close.side_effect = RuntimeError("already closed")
         client._ws = mock_ws
         client._connected = True
 
-        client.close()  # 不应抛异常
+        client.close()  # Should not raise
 
         assert client._closed is True
         assert client._ws is None
 
     def test_close_when_no_ws(self) -> None:
-        """没有 ws 连接时 close() 也应安全执行。"""
+        """close() should execute safely when there is no ws connection."""
         client = ValidatorWSClient(ws_url="ws://x", auth_headers={})
         client.close()
         assert client._closed is True

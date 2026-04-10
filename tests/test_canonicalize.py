@@ -1,4 +1,4 @@
-"""canonicalize_url 的全面测试."""
+"""Comprehensive tests for canonicalize_url."""
 from __future__ import annotations
 
 import pytest
@@ -7,7 +7,7 @@ from canonicalize import canonicalize_url
 
 
 # ---------------------------------------------------------------------------
-# 空/空白输入
+# Empty/blank input
 # ---------------------------------------------------------------------------
 class TestEmptyInput:
     def test_empty_string(self) -> None:
@@ -21,7 +21,7 @@ class TestEmptyInput:
 
 
 # ---------------------------------------------------------------------------
-# 主机名小写规范化
+# Hostname lowercase normalization
 # ---------------------------------------------------------------------------
 class TestHostLowercase:
     def test_uppercase_host(self) -> None:
@@ -36,7 +36,7 @@ class TestHostLowercase:
 
 
 # ---------------------------------------------------------------------------
-# 默认端口剥离
+# Default port stripping
 # ---------------------------------------------------------------------------
 class TestDefaultPortStripping:
     def test_https_443_stripped(self) -> None:
@@ -47,7 +47,7 @@ class TestDefaultPortStripping:
 
 
 # ---------------------------------------------------------------------------
-# 非默认端口保留
+# Non-default port preservation
 # ---------------------------------------------------------------------------
 class TestNonDefaultPort:
     def test_https_8443_preserved(self) -> None:
@@ -66,7 +66,7 @@ class TestNonDefaultPort:
 
 
 # ---------------------------------------------------------------------------
-# UTM 和追踪参数移除
+# UTM and tracking parameter removal
 # ---------------------------------------------------------------------------
 class TestTrackingParamRemoval:
     @pytest.mark.parametrize("param", [
@@ -92,7 +92,7 @@ class TestTrackingParamRemoval:
 
 
 # ---------------------------------------------------------------------------
-# 尾部斜杠规范化
+# Trailing slash normalization
 # ---------------------------------------------------------------------------
 class TestTrailingSlash:
     def test_root_slash_preserved(self) -> None:
@@ -109,7 +109,7 @@ class TestTrailingSlash:
 
 
 # ---------------------------------------------------------------------------
-# 查询参数排序
+# Query parameter sorting
 # ---------------------------------------------------------------------------
 class TestQuerySorting:
     def test_params_sorted_alphabetically(self) -> None:
@@ -124,7 +124,7 @@ class TestQuerySorting:
 
 
 # ---------------------------------------------------------------------------
-# Wikipedia 特殊处理
+# Wikipedia special handling
 # ---------------------------------------------------------------------------
 class TestWikipedia:
     def test_strip_query_params(self) -> None:
@@ -141,22 +141,22 @@ class TestWikipedia:
         assert canonicalize_url(url) == "https://en.wikipedia.org/wiki/Test"
 
     def test_evil_subdomain_not_matched(self) -> None:
-        """evil.en.wikipedia.org 不应匹配 en.wikipedia.org 的特殊逻辑."""
+        """evil.en.wikipedia.org should not match en.wikipedia.org special logic."""
         url = "https://evil.en.wikipedia.org/wiki/Test?action=edit"
         result = canonicalize_url(url)
-        # 不应走 Wikipedia 分支，所以 query 参数不会被无条件移除
-        # 但 action 不在追踪参数列表中，所以应保留
+        # Should not go through Wikipedia branch, so query params are not unconditionally removed
+        # But action is not in the tracking param list, so it should be kept
         assert "action=edit" in result
 
     def test_non_wiki_path_not_special(self) -> None:
-        """en.wikipedia.org 的非 /wiki/ 路径不走特殊处理."""
+        """Non /wiki/ paths on en.wikipedia.org do not get special treatment."""
         url = "https://en.wikipedia.org/w/index.php?title=Test"
         result = canonicalize_url(url)
         assert "title=Test" in result
 
 
 # ---------------------------------------------------------------------------
-# arXiv 特殊处理
+# arXiv special handling
 # ---------------------------------------------------------------------------
 class TestArxiv:
     def test_normalize_to_arxiv_org(self) -> None:
@@ -182,7 +182,7 @@ class TestArxiv:
 
 
 # ---------------------------------------------------------------------------
-# LinkedIn 特殊处理
+# LinkedIn special handling
 # ---------------------------------------------------------------------------
 class TestLinkedin:
     def test_in_profile_trailing_slash(self) -> None:
@@ -204,8 +204,8 @@ class TestLinkedin:
     def test_other_path_no_trailing_slash(self) -> None:
         url = "https://www.linkedin.com/feed/"
         result = canonicalize_url(url)
-        # /feed/ 不属于 /in/ 或 /company/，普通路径逻辑 — 不会额外添加 /
-        # 但注意 LinkedIn 分支返回 normalized，feed 不以 /in/ 或 /company/ 开头
+        # /feed/ does not start with /in/ or /company/, follows normal path logic — no extra / added
+        # Note: LinkedIn branch returns normalized, feed does not start with /in/ or /company/
         assert result == "https://www.linkedin.com/feed"
 
     def test_scheme_forced_https(self) -> None:
@@ -214,7 +214,7 @@ class TestLinkedin:
 
 
 # ---------------------------------------------------------------------------
-# Amazon /dp/ASIN 提取
+# Amazon /dp/ASIN extraction
 # ---------------------------------------------------------------------------
 class TestAmazon:
     def test_extract_asin_from_product_url(self) -> None:
@@ -226,10 +226,10 @@ class TestAmazon:
         assert canonicalize_url(url) == "https://www.amazon.com/dp/B08N5WRWNW"
 
     def test_no_asin_after_dp(self) -> None:
-        """如果 dp 后面没有 ASIN，不走特殊提取."""
+        """If there is no ASIN after dp, special extraction is not applied."""
         url = "https://www.amazon.com/dp/"
         result = canonicalize_url(url)
-        # dp 后面没有 segment，走普通路径规范化
+        # No segment after dp, falls through to normal path normalization
         assert "amazon.com" in result
 
     def test_query_stripped_in_asin_extraction(self) -> None:
@@ -238,25 +238,25 @@ class TestAmazon:
 
 
 # ---------------------------------------------------------------------------
-# 精确主机名匹配（防止子域名误匹配）
+# Exact hostname matching (prevent subdomain false matches)
 # ---------------------------------------------------------------------------
 class TestExactHostnameMatching:
     def test_evil_wikipedia_subdomain(self) -> None:
-        """evil.en.wikipedia.org 不应触发 Wikipedia 特殊逻辑."""
+        """evil.en.wikipedia.org should not trigger Wikipedia special logic."""
         url = "https://evil.en.wikipedia.org/wiki/Test?foo=bar"
         result = canonicalize_url(url)
         assert "foo=bar" in result
 
     def test_non_www_linkedin(self) -> None:
-        """linkedin.com (无 www) 不应触发 LinkedIn 特殊逻辑."""
+        """linkedin.com (without www) should not trigger LinkedIn special logic."""
         url = "https://linkedin.com/in/johndoe"
         result = canonicalize_url(url)
-        # 不走 LinkedIn 分支，普通尾部斜杠剥离
+        # Does not go through LinkedIn branch, normal trailing slash stripping
         assert not result.endswith("/")
 
     def test_non_www_amazon(self) -> None:
-        """amazon.com (无 www) 不应触发 Amazon 特殊逻辑."""
+        """amazon.com (without www) should not trigger Amazon special logic."""
         url = "https://amazon.com/dp/B08N5WRWNW/extra"
         result = canonicalize_url(url)
-        # 不走 Amazon 分支
+        # Does not go through Amazon branch
         assert "/extra" in result or "dp/B08N5WRWNW" in result

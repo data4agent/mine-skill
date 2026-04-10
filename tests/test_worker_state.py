@@ -1,4 +1,4 @@
-"""worker_state.py 的单元测试。"""
+"""Unit tests for worker_state.py."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from worker_state import ValidatorStateStore, WorkerStateStore
 
 
 def _make_work_item(item_id: str = "test:1", url: str = "https://example.com") -> WorkItem:
-    """创建测试用 WorkItem。"""
+    """Create a WorkItem for testing."""
     return WorkItem(
         item_id=item_id,
         source="backend_claim",
@@ -29,7 +29,7 @@ def _make_work_item(item_id: str = "test:1", url: str = "https://example.com") -
 # enqueue_backlog / pop_backlog
 # ---------------------------------------------------------------------------
 class TestBacklog:
-    """测试 backlog 入队、出队和去重。"""
+    """Test backlog enqueue, dequeue, and deduplication."""
 
     def test_enqueue_and_pop(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -40,7 +40,7 @@ class TestBacklog:
         assert len(popped) == 1
         assert popped[0].item_id == "item-1"
 
-        # 剩余 1 项
+        # 1 remaining
         remaining = store.pop_backlog(10)
         assert len(remaining) == 1
         assert remaining[0].item_id == "item-2"
@@ -69,7 +69,7 @@ class TestBacklog:
 # enqueue_submit_pending
 # ---------------------------------------------------------------------------
 class TestSubmitPending:
-    """测试 submit_pending 的 upsert 去重。"""
+    """Test submit_pending upsert deduplication."""
 
     def test_upsert_deduplication(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -93,7 +93,7 @@ class TestSubmitPending:
 # pop_due_auth_pending
 # ---------------------------------------------------------------------------
 class TestAuthPending:
-    """测试 auth_pending 的到期/未到期/in_flight 逻辑。"""
+    """Test auth_pending due/not-due/in_flight logic."""
 
     def test_due_items_returned(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -120,11 +120,11 @@ class TestAuthPending:
         store.upsert_auth_pending(item, {"error": "rate_limit"}, retry_after_seconds=0)
 
         now = int(time.time()) + 1
-        # 第一次取出
+        # First pop
         first = store.pop_due_auth_pending(10, now=now)
         assert len(first) == 1
 
-        # 第二次应跳过 (in_flight)
+        # Second should skip (in_flight)
         second = store.pop_due_auth_pending(10, now=now)
         assert second == []
 
@@ -151,7 +151,7 @@ class TestAuthPending:
 # should_schedule_dataset / mark_dataset_scheduled
 # ---------------------------------------------------------------------------
 class TestDatasetScheduling:
-    """测试 dataset 调度时间判断。"""
+    """Test dataset scheduling time checks."""
 
     def test_should_schedule_when_never_run(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -174,7 +174,7 @@ class TestDatasetScheduling:
 # mark_dataset_cooldown / active_dataset_cooldowns
 # ---------------------------------------------------------------------------
 class TestDatasetCooldown:
-    """测试 dataset cooldown 设置与过期检查。"""
+    """Test dataset cooldown setting and expiry checking."""
 
     def test_cooldown_active(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -202,7 +202,7 @@ class TestDatasetCooldown:
 # acquire_lock / release_lock
 # ---------------------------------------------------------------------------
 class TestLock:
-    """测试分布式锁的获取、释放和过期恢复。"""
+    """Test distributed lock acquire, release, and stale recovery."""
 
     def test_acquire_and_release(self, tmp_path: Path) -> None:
         store = WorkerStateStore(tmp_path / "state")
@@ -221,7 +221,7 @@ class TestLock:
         assert store.acquire_lock("worker-1", now=now + 10) is True
         lock = store.load_lock()
         assert lock is not None
-        # acquired_at 应保持原始值
+        # acquired_at should keep the original value
         assert lock["acquired_at"] == now
 
     def test_different_owner_blocked(self, tmp_path: Path) -> None:
@@ -234,7 +234,7 @@ class TestLock:
         store = WorkerStateStore(tmp_path / "state")
         now = 100000
         store.acquire_lock("worker-1", now=now)
-        # 超过 stale 时间后其他 owner 可获取
+        # After stale timeout, another owner can acquire
         assert store.acquire_lock("worker-2", now=now + 301, stale_after_seconds=300) is True
         lock = store.load_lock()
         assert lock is not None
@@ -251,10 +251,10 @@ class TestLock:
 
 
 # ---------------------------------------------------------------------------
-# ValidatorStateStore._write_json 唯一临时文件
+# ValidatorStateStore._write_json unique temp file naming
 # ---------------------------------------------------------------------------
 class TestValidatorStateStore:
-    """测试 ValidatorStateStore 的基本操作和临时文件命名。"""
+    """Test ValidatorStateStore basic operations and temp file naming."""
 
     def test_save_and_load_session(self, tmp_path: Path) -> None:
         store = ValidatorStateStore(tmp_path / "validator")
@@ -272,9 +272,9 @@ class TestValidatorStateStore:
         assert loaded["b"] == 2
 
     def test_write_json_unique_temp_naming(self, tmp_path: Path) -> None:
-        """验证 _write_json 不会因文件名冲突而失败。"""
+        """Verify _write_json does not fail due to filename conflicts."""
         store = ValidatorStateStore(tmp_path / "validator")
-        # 多次快速写入不应冲突
+        # Multiple rapid writes should not conflict
         for i in range(10):
             store.save_session({"iteration": i})
         loaded = store.load_session()
@@ -295,7 +295,7 @@ class TestValidatorStateStore:
         assert store.load_session() == {}
 
     def test_corrupt_json_handled(self, tmp_path: Path) -> None:
-        """损坏的 JSON 文件应返回空字典而非崩溃。"""
+        """Corrupt JSON file should return empty dict instead of crashing."""
         state_dir = tmp_path / "validator"
         state_dir.mkdir(parents=True)
         session_file = state_dir / "validator_session.json"

@@ -1,7 +1,7 @@
-"""端到端挖矿流程集成测试。
+"""End-to-end mining flow integration tests.
 
-使用 mock 模拟平台 API、爬虫运行器和 WebSocket 客户端，
-验证完整的挖矿生命周期：发现 → 爬取 → 提交 → 错误恢复。
+Uses mocks to simulate Platform API, crawler runner, and WebSocket client,
+verifying the complete mining lifecycle: discovery -> crawl -> submit -> error recovery.
 """
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import httpx
 import pytest
 
-# 修复 canonicalize 模块冲突：lib/canonicalize.py 缺少 normalize_url，
-# 但 scripts/canonicalize.py 有。确保 agent_runtime 能正确导入。
+# Fix canonicalize module conflict: lib/canonicalize.py lacks normalize_url,
+# but scripts/canonicalize.py has it. Ensure agent_runtime imports correctly.
 import canonicalize as _canon_mod
 
 if not hasattr(_canon_mod, "normalize_url"):
-    # 从 scripts/canonicalize.py 加载 normalize_url 并注入
+    # Load normalize_url from scripts/canonicalize.py and inject it
     _scripts_dir = str(Path(__file__).resolve().parents[1] / "scripts")
     import importlib.util
 
@@ -37,12 +37,12 @@ from ws_client import WSMessage
 
 
 # ---------------------------------------------------------------------------
-# 通用 fixture
+# Common fixtures
 # ---------------------------------------------------------------------------
 
 
 def _make_worker_config(tmp_path: Path) -> WorkerConfig:
-    """创建测试用 WorkerConfig。"""
+    """Create a WorkerConfig for testing."""
     return WorkerConfig(
         base_url="https://api.test.local",
         token="test-token",
@@ -54,7 +54,7 @@ def _make_worker_config(tmp_path: Path) -> WorkerConfig:
         default_backend=None,
         max_parallel=1,
         per_dataset_parallel=False,
-        dataset_refresh_seconds=0,  # 不限制 discovery 频率
+        dataset_refresh_seconds=0,  # no throttle on discovery frequency
         discovery_max_pages=5,
         discovery_max_depth=1,
         auth_retry_interval_seconds=60,
@@ -68,7 +68,7 @@ def _make_crawler_result(
     errors: list[dict[str, Any]] | None = None,
     exit_code: int = 0,
 ) -> CrawlerRunResult:
-    """创建测试用 CrawlerRunResult。"""
+    """Create a CrawlerRunResult for testing."""
     output_dir = tmp_path / "run-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     return CrawlerRunResult(
@@ -92,7 +92,7 @@ def _make_work_item(
     claim_task_id: str | None = None,
     claim_task_type: str | None = None,
 ) -> WorkItem:
-    """创建测试用 WorkItem。"""
+    """Create a WorkItem for testing."""
     return WorkItem(
         item_id=item_id,
         source=source,
@@ -108,7 +108,7 @@ def _make_work_item(
 
 @pytest.fixture
 def tmp_work_dir(tmp_path: Path) -> Path:
-    """为每个测试提供独立的临时工作目录。"""
+    """Provide an isolated temporary working directory for each test."""
     (tmp_path / "output").mkdir()
     (tmp_path / "state").mkdir()
     (tmp_path / "crawler").mkdir()
@@ -116,7 +116,7 @@ def tmp_work_dir(tmp_path: Path) -> Path:
 
 
 def _build_mock_client() -> MagicMock:
-    """创建通用 mock PlatformClient。"""
+    """Create a common mock PlatformClient."""
     client = MagicMock()
     client.list_datasets.return_value = []
     client.claim_repeat_crawl_task.return_value = None
@@ -135,7 +135,7 @@ def _build_mock_client() -> MagicMock:
 
 
 def _build_mock_runner() -> MagicMock:
-    """创建通用 mock CrawlerRunner。"""
+    """Create a common mock CrawlerRunner."""
     runner = MagicMock(spec=CrawlerRunner)
     runner.output_root = Path("/tmp/mock-output")
     return runner
@@ -147,15 +147,15 @@ def _build_mock_runner() -> MagicMock:
 
 
 class TestDiscoveryCrawlSubmitFlow:
-    """测试完整的 发现 → 爬取 → 提交 流程。"""
+    """Test the complete discovery -> crawl -> submit flow."""
 
     def test_discovery_crawl_submit(self, tmp_work_dir: Path) -> None:
-        """从 dataset 发现 URL → 爬取 → 提交 core submissions。"""
+        """Discover URLs from dataset -> crawl -> submit core submissions."""
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # 配置 list_datasets 返回一个数据集
+        # Configure list_datasets to return one dataset
         mock_client.list_datasets.return_value = [
             {
                 "dataset_id": "ds-wiki",
@@ -165,7 +165,7 @@ class TestDiscoveryCrawlSubmitFlow:
             },
         ]
 
-        # 设置 runner.run_item 返回带 records 的结果
+        # Set runner.run_item to return a result with records
         run_result = _make_crawler_result(
             tmp_work_dir,
             records=[{
@@ -177,29 +177,29 @@ class TestDiscoveryCrawlSubmitFlow:
         )
         mock_runner.run_item.return_value = run_result
 
-        # 构建 worker 并设置运行状态
+        # Build worker and set running state
         worker = AgentWorker(
             client=mock_client,
             runner=mock_runner,
             config=config,
         )
-        # 模拟已选择 dataset 且处于运行状态
+        # Simulate selected dataset and running state
         worker.state_store.save_session({
             "mining_state": "running",
             "selected_dataset_ids": ["ds-wiki"],
         })
 
-        # mock 掉 _wikipedia_random_articles 避免网络调用
+        # Mock _wikipedia_random_articles to avoid network calls
         with patch("task_sources._wikipedia_random_articles") as mock_wiki:
             mock_wiki.return_value = ["https://en.wikipedia.org/wiki/Test_Article"]
-            # mock build_submission_request 避免依赖 crawler 模块
+            # Mock build_submission_request to avoid dependency on crawler module
             with patch("agent_runtime.build_submission_request") as mock_build_sub:
                 mock_build_sub.return_value = {"records": [{"url": "https://en.wikipedia.org/wiki/Test_Article"}]}
                 summary = worker.run_iteration(1)
 
-        # 验证：应有 discovery items
+        # Verify: should have discovery items
         assert summary["discovery_items"] >= 1
-        # runner 应被调用（至少一次）
+        # runner should be called (at least once)
         assert mock_runner.run_item.called
 
 
@@ -209,15 +209,15 @@ class TestDiscoveryCrawlSubmitFlow:
 
 
 class TestBackendClaimCrawlReportFlow:
-    """测试 后台认领 → 爬取 → 上报 流程。"""
+    """Test the backend claim -> crawl -> report flow."""
 
     def test_claim_crawl_report(self, tmp_work_dir: Path) -> None:
-        """通过 claim_repeat_crawl_task 获取任务 → 爬取 → report_repeat_crawl_task_result。"""
+        """Obtain task via claim_repeat_crawl_task -> crawl -> report_repeat_crawl_task_result."""
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # 配置 claim_repeat_crawl_task 返回任务 payload
+        # Configure claim_repeat_crawl_task to return a task payload
         mock_client.claim_repeat_crawl_task.return_value = {
             "id": "rct-100",
             "url": "https://en.wikipedia.org/wiki/Claimed_Page",
@@ -249,15 +249,15 @@ class TestBackendClaimCrawlReportFlow:
             mock_build_sub.return_value = {"records": [{"url": "https://en.wikipedia.org/wiki/Claimed_Page"}]}
             summary = worker.run_iteration(1)
 
-        # 验证：应有 claimed_items
+        # Verify: should have claimed_items
         assert summary["claimed_items"] >= 1
-        # runner 应被调用
+        # runner should be called
         assert mock_runner.run_item.called
-        # report_repeat_crawl_task_result 应被调用
+        # report_repeat_crawl_task_result should be called
         mock_client.report_repeat_crawl_task_result.assert_called_once()
         call_args = mock_client.report_repeat_crawl_task_result.call_args
         assert call_args[0][0] == "rct-100"  # task_id
-        # report payload 应包含 cleaned_data
+        # report payload should contain cleaned_data
         report_body = call_args[0][1]
         assert "cleaned_data" in report_body
 
@@ -268,16 +268,16 @@ class TestBackendClaimCrawlReportFlow:
 
 
 class TestWSPushAckCollectFlow:
-    """测试 WebSocket 推送 → ACK → 收集 WorkItem 流程。"""
+    """Test WebSocket push -> ACK -> collect WorkItem flow."""
 
     def test_ws_push_collect(self) -> None:
-        """手动推入消息到 WebSocketClaimSource 队列 → collect() 返回 WorkItem。"""
+        """Manually push messages into WebSocketClaimSource queue -> collect() returns WorkItem."""
         mock_ws_client = MagicMock()
         mock_ws_client.connected = False
 
         ws_source = WebSocketClaimSource(mock_ws_client)
 
-        # 手动推入消息到内部队列（模拟 _receive_loop 行为）
+        # Manually push message into internal queue (simulating _receive_loop behavior)
         task_payload = {
             "id": "ws-task-42",
             "url": "https://en.wikipedia.org/wiki/WebSocket_Test",
@@ -286,7 +286,7 @@ class TestWSPushAckCollectFlow:
         with ws_source._lock:
             ws_source._queue.append(task_payload)
 
-        # collect 应将 payload 转换为 WorkItem
+        # collect should convert payload to WorkItem
         items = ws_source.collect()
 
         assert len(items) == 1
@@ -299,7 +299,7 @@ class TestWSPushAckCollectFlow:
         assert item.source == "backend_claim"
 
     def test_ws_push_multiple_messages(self) -> None:
-        """多个消息应全部被 collect()。"""
+        """Multiple messages should all be collected by collect()."""
         mock_ws_client = MagicMock()
         ws_source = WebSocketClaimSource(mock_ws_client)
 
@@ -313,27 +313,27 @@ class TestWSPushAckCollectFlow:
         items = ws_source.collect()
         assert len(items) == 3
 
-        # 队列应被清空
+        # Queue should be emptied
         with ws_source._lock:
             assert len(ws_source._queue) == 0
 
     def test_ws_collect_invalid_payload_skipped(self) -> None:
-        """无效 payload（缺少 url）应被跳过，不影响其他消息。"""
+        """Invalid payload (missing url) should be skipped without affecting other messages."""
         mock_ws_client = MagicMock()
         ws_source = WebSocketClaimSource(mock_ws_client)
 
         with ws_source._lock:
-            ws_source._queue.append({"id": "no-url-task"})  # 缺少 url
+            ws_source._queue.append({"id": "no-url-task"})  # missing url
             ws_source._queue.append({
                 "id": "good-task",
                 "url": "https://en.wikipedia.org/wiki/Good",
             })
 
         items = ws_source.collect()
-        # 第一个应被 skip（SkipClaimedTask），第二个正常
+        # First should be skipped (SkipClaimedTask), second should succeed
         assert len(items) == 1
         assert "good-task" in items[0].item_id
-        # 应有 skip 记录
+        # Should have a skip record
         assert len(ws_source.last_skips) == 1
 
 
@@ -343,22 +343,22 @@ class TestWSPushAckCollectFlow:
 
 
 class TestErrorRecoveryFlow:
-    """测试爬取失败时的错误恢复流程。"""
+    """Test error recovery flow when crawling fails."""
 
     def test_runner_exception_recorded_and_item_requeued(self, tmp_work_dir: Path) -> None:
-        """runner.run_item 抛异常 → 错误记录在 summary → item 重新入队到 backlog。"""
+        """runner.run_item raises exception -> error recorded in summary -> item re-queued to backlog."""
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # 配置 claim 返回一个任务
+        # Configure claim to return a task
         mock_client.claim_repeat_crawl_task.return_value = {
             "id": "fail-task-1",
             "url": "https://en.wikipedia.org/wiki/Will_Fail",
             "dataset_id": "ds-test",
         }
 
-        # runner 抛出异常
+        # Runner throws exception
         mock_runner.run_item.side_effect = RuntimeError("crawler subprocess crashed")
 
         worker = AgentWorker(
@@ -373,12 +373,12 @@ class TestErrorRecoveryFlow:
 
         summary = worker.run_iteration(1)
 
-        # 验证：错误应被记录
+        # Verify: error should be recorded
         assert len(summary["errors"]) >= 1
         error_text = " ".join(summary["errors"])
         assert "crashed" in error_text or "fail-task-1" in error_text
 
-        # item 应被重新入队到 backlog
+        # Item should be re-queued to backlog
         backlog = worker.state_store.load_backlog()
         assert len(backlog) >= 1
         requeued = backlog[0]
@@ -391,7 +391,7 @@ class TestErrorRecoveryFlow:
 
 
 class TestRateLimitBackoffFlow:
-    """测试 429 Rate Limit 触发 dataset 冷却和重新入队。"""
+    """Test 429 Rate Limit triggering dataset cooldown and re-queuing."""
 
     def test_429_marks_cooldown_and_requeues(self, tmp_work_dir: Path) -> None:
         """submit_core_submissions returns 429 → dataset cooldown → item re-queued."""
@@ -405,7 +405,7 @@ class TestRateLimitBackoffFlow:
             dataset_id="ds-rate-limited",
         )
 
-        # 创建 crawler result
+        # Create crawler result
         result = _make_crawler_result(
             tmp_work_dir,
             records=[{
@@ -426,7 +426,7 @@ class TestRateLimitBackoffFlow:
             "selected_dataset_ids": ["ds-rate-limited"],
         })
 
-        # 模拟 report 成功，但 submit_core_submissions 返回 429
+        # Simulate report success, but submit_core_submissions returns 429
         mock_response = MagicMock()
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "120"}
@@ -439,22 +439,22 @@ class TestRateLimitBackoffFlow:
 
         summary = WorkerIterationSummary(iteration=1)
 
-        # 直接调用 _handle_result，让 submit 抛 429
+        # Directly call _handle_result, making submit throw 429
         with patch("agent_runtime.build_submission_request") as mock_build_sub, \
              patch("agent_runtime._export_and_submit_core_submissions_for_task") as mock_export:
             mock_export.side_effect = http_error
             worker._handle_result(item, result, summary)
 
-        # 验证：dataset 冷却被标记
+        # Verify: dataset cooldown is marked
         cooldowns = worker.state_store.active_dataset_cooldowns()
         assert "ds-rate-limited" in cooldowns
 
-        # item 应被重新入队
+        # Item should be re-queued
         backlog = worker.state_store.load_backlog()
         assert len(backlog) >= 1
         requeued_item = backlog[0]
         assert requeued_item.resume is True
 
-        # summary 中应有 429 相关错误
+        # Summary should contain 429-related error
         all_text = " ".join(summary.errors + summary.messages)
         assert "429" in all_text or "Rate Limited" in all_text

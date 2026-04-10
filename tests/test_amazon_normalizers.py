@@ -22,7 +22,7 @@ from crawler.normalize.amazon_normalizers import (
 # ---------------------------------------------------------------------------
 
 class TestNormalizePrice:
-    """normalize_price 的各种价格格式。"""
+    """Various price formats for normalize_price."""
 
     def test_usd(self) -> None:
         result = normalize_price("$19.99")
@@ -71,13 +71,13 @@ class TestNormalizePrice:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeRating:
-    """normalize_rating 的各种评分格式。"""
+    """Various rating formats for normalize_rating."""
 
     def test_out_of_5_stars(self) -> None:
         assert normalize_rating("4.5 out of 5 stars") == 4.5
 
     def test_comma_decimal(self) -> None:
-        """欧洲格式逗号小数。"""
+        """European format with comma decimal."""
         assert normalize_rating("4,5 von 5 Sternen") == 4.5
 
     def test_plain_number(self) -> None:
@@ -93,7 +93,7 @@ class TestNormalizeRating:
         assert normalize_rating("") is None
 
     def test_out_of_range(self) -> None:
-        """超出 0-5 范围的纯数字应返回 None。"""
+        """Plain numbers outside 0-5 range should return None."""
         assert normalize_rating("99") is None
 
 
@@ -102,7 +102,7 @@ class TestNormalizeRating:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeReviewsCount:
-    """normalize_reviews_count 的各种数量格式。"""
+    """Various count formats for normalize_reviews_count."""
 
     def test_with_commas(self) -> None:
         assert normalize_reviews_count("1,234 ratings") == 1234
@@ -131,7 +131,7 @@ class TestNormalizeReviewsCount:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeStockStatus:
-    """normalize_stock_status 的各种库存状态。"""
+    """Various stock status strings for normalize_stock_status."""
 
     def test_in_stock(self) -> None:
         assert normalize_stock_status("In Stock") == "in_stock"
@@ -172,27 +172,27 @@ class TestNormalizeStockStatus:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeFulfillment:
-    """normalize_fulfillment 的配送类型检测。"""
+    """Fulfillment type detection for normalize_fulfillment."""
 
     def test_fba_detection(self) -> None:
-        """Fulfilled by Amazon 应识别为 FBA。"""
+        """Fulfilled by Amazon should be identified as FBA."""
         result = normalize_fulfillment("Fulfilled by Amazon")
         assert result["fulfillment_type"] == "FBA"
         assert result["prime_eligible"] is True
 
     def test_fbm_detection(self) -> None:
-        """无 Amazon 标识应默认为 FBM。"""
+        """Without Amazon identifier should default to FBM."""
         result = normalize_fulfillment("Ships from Seller XYZ")
         assert result["fulfillment_type"] == "FBM"
 
     def test_amz_detection(self) -> None:
-        """Ships from Amazon 应识别为 AMZ。"""
+        """Ships from Amazon should be identified as AMZ."""
         result = normalize_fulfillment("Ships from Amazon")
         assert result["fulfillment_type"] == "AMZ"
         assert result["prime_eligible"] is True
 
     def test_prime_eligible(self) -> None:
-        """包含 prime 字样应设置 FBA + prime_eligible。"""
+        """Text containing 'prime' should set FBA + prime_eligible."""
         result = normalize_fulfillment("Prime delivery")
         assert result["fulfillment_type"] == "FBA"
         assert result["prime_eligible"] is True
@@ -214,13 +214,13 @@ class TestNormalizeFulfillment:
         assert result["shipping_speed_tier"] == "standard"
 
     def test_seller_str_combined(self) -> None:
-        """seller_str 应与 fulfillment_str 组合检测。"""
+        """seller_str should be combined with fulfillment_str for detection."""
         result = normalize_fulfillment(None, "Sold by Amazon")
         assert result["fulfillment_type"] == "AMZ"
 
     def test_operator_precedence_amz_before_fba(self) -> None:
-        """AMZ 检测条件应优先于 FBA（ships from and sold by amazon 匹配 AMZ 分支）。"""
-        # "ships from amazon" 先匹配 AMZ 分支
+        """AMZ detection should take precedence over FBA (ships from and sold by amazon matches AMZ branch)."""
+        # "ships from amazon" matches AMZ branch first
         result = normalize_fulfillment("Ships from Amazon warehouse")
         assert result["fulfillment_type"] == "AMZ"
 
@@ -230,7 +230,7 @@ class TestNormalizeFulfillment:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeDateText:
-    """normalize_date_text 的日期解析。"""
+    """Date parsing for normalize_date_text."""
 
     def test_english_date(self) -> None:
         assert normalize_date_text("January 15, 2024") == "2024-01-15"
@@ -262,7 +262,7 @@ class TestNormalizeDateText:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeVerifiedPurchase:
-    """normalize_verified_purchase 的类型转换。"""
+    """Type conversion for normalize_verified_purchase."""
 
     def test_bool_true(self) -> None:
         assert normalize_verified_purchase(True) is True
@@ -306,7 +306,7 @@ class TestNormalizeVerifiedPurchase:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeSalesVolumeHint:
-    """normalize_sales_volume_hint 的销量提示解析。"""
+    """Sales volume hint parsing for normalize_sales_volume_hint."""
 
     def test_10k_plus(self) -> None:
         assert normalize_sales_volume_hint("10K+ bought in past month") == 10000

@@ -1,4 +1,4 @@
-"""task_sources.py 的单元测试。"""
+"""Unit tests for task_sources.py."""
 from __future__ import annotations
 
 import threading
@@ -23,7 +23,7 @@ from task_sources import (
 # infer_platform_task
 # ---------------------------------------------------------------------------
 class TestInferPlatformTask:
-    """测试 URL → (platform, resource_type, fields) 推断。"""
+    """Test URL -> (platform, resource_type, fields) inference."""
 
     def test_wikipedia_article(self) -> None:
         platform, rtype, fields = infer_platform_task(
@@ -125,7 +125,7 @@ class TestInferPlatformTask:
 # claimed_task_from_payload
 # ---------------------------------------------------------------------------
 class TestClaimedTaskFromPayload:
-    """测试后端 claim payload → TaskEnvelope 转换。"""
+    """Test backend claim payload -> TaskEnvelope conversion."""
 
     def test_valid_payload(self) -> None:
         payload: dict[str, Any] = {
@@ -161,7 +161,7 @@ class TestClaimedTaskFromPayload:
         assert "wiki" in envelope.url
 
     def test_payload_platform_override(self) -> None:
-        """payload 中显式指定 platform 覆盖推断值。"""
+        """Explicitly specified platform in payload overrides inferred value."""
         payload: dict[str, Any] = {
             "id": "task-004",
             "url": "https://en.wikipedia.org/wiki/Test",
@@ -175,7 +175,7 @@ class TestClaimedTaskFromPayload:
 # build_report_payload
 # ---------------------------------------------------------------------------
 class TestBuildReportPayload:
-    """测试 report payload 构建的 fallback 链。"""
+    """Test report payload construction fallback chain."""
 
     def _make_item(self) -> WorkItem:
         return WorkItem(
@@ -227,7 +227,7 @@ class TestBuildReportPayload:
 # _is_content_url
 # ---------------------------------------------------------------------------
 class TestIsContentUrl:
-    """测试 URL 内容页 vs 导航页判断。"""
+    """Test URL content page vs. navigation page detection."""
 
     def test_amazon_product_page(self) -> None:
         assert _is_content_url("https://www.amazon.com/dp/B09V3KXJPB") is True
@@ -270,7 +270,7 @@ class TestIsContentUrl:
 # BackendClaimSource.collect
 # ---------------------------------------------------------------------------
 class TestBackendClaimSourceCollect:
-    """测试 BackendClaimSource 的 collect 逻辑。"""
+    """Test BackendClaimSource collect logic."""
 
     def test_both_claims_succeed(self) -> None:
         client = MagicMock()
@@ -308,7 +308,7 @@ class TestBackendClaimSourceCollect:
         assert items == []
 
     def test_skip_claimed_task_recorded(self) -> None:
-        """payload 缺少 url 时应记录 skip 而非 error。"""
+        """Payload missing url should record a skip rather than an error."""
         client = MagicMock()
         client.claim_repeat_crawl_task.return_value = {"id": "rc-skip"}
         client.claim_refresh_task.return_value = None
@@ -322,12 +322,12 @@ class TestBackendClaimSourceCollect:
 # WebSocketClaimSource
 # ---------------------------------------------------------------------------
 class TestWebSocketClaimSource:
-    """测试 WebSocket claim source 的队列和生命周期。"""
+    """Test WebSocket claim source queue and lifecycle."""
 
     def test_collect_drains_queue(self) -> None:
         ws = MagicMock()
         source = WebSocketClaimSource(ws)
-        # 手动向队列注入数据
+        # Manually inject data into the queue
         source._queue = [
             {"id": "ws-1", "url": "https://en.wikipedia.org/wiki/A"},
             {"id": "ws-2", "url": "https://en.wikipedia.org/wiki/B"},
@@ -347,26 +347,26 @@ class TestWebSocketClaimSource:
         ws.connected = False
         source = WebSocketClaimSource(ws)
 
-        # start 应启动后台线程
+        # start should launch background thread
         source.start()
         assert source._running is True
         assert source._thread is not None
 
-        # 再次 start 不会重复创建
+        # Calling start again should not recreate the thread
         first_thread = source._thread
         source.start()
         assert source._thread is first_thread
 
-        # stop 应设置 _running=False 并调用 close
+        # stop should set _running=False and call close
         source.stop()
         assert source._running is False
         ws.close.assert_called_once()
 
     def test_collect_bad_payload_records_error(self) -> None:
-        """队列中的无效 payload 应记录 error 而非崩溃。"""
+        """Invalid payload in queue should record error rather than crash."""
         ws = MagicMock()
         source = WebSocketClaimSource(ws)
-        source._queue = [{"id": "bad-task"}]  # 缺少 url
+        source._queue = [{"id": "bad-task"}]  # missing url
         items = source.collect()
         assert items == []
         assert len(source.last_skips) == 1 or len(source.last_errors) == 1

@@ -1,4 +1,4 @@
-"""eip712_primitives.py 的单元测试。"""
+"""Unit tests for eip712_primitives.py."""
 from __future__ import annotations
 
 import json
@@ -20,18 +20,18 @@ from eip712_primitives import (
 # keccak_hex
 # ---------------------------------------------------------------------------
 class TestKeccakHex:
-    """测试 keccak256 哈希计算。"""
+    """Test keccak256 hash computation."""
 
     def test_known_hash_empty_string(self) -> None:
-        """空字符串的 keccak256 是已知值。"""
+        """keccak256 of empty string is a known value."""
         result = keccak_hex("")
         # keccak256("") = c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
         assert result == "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
 
     def test_known_hash_hello(self) -> None:
-        """已知输入的 keccak256。"""
+        """keccak256 of a known input."""
         result = keccak_hex("hello")
-        # 验证格式正确
+        # Verify correct format
         assert result.startswith("0x")
         assert len(result) == 66  # 0x + 64 hex chars
 
@@ -46,7 +46,7 @@ class TestKeccakHex:
         assert result_str == result_bytes
 
     def test_deterministic(self) -> None:
-        """相同输入应产生相同输出。"""
+        """Same input should produce same output."""
         assert keccak_hex("abc") == keccak_hex("abc")
 
     def test_different_input_different_hash(self) -> None:
@@ -57,7 +57,7 @@ class TestKeccakHex:
 # EMPTY_HASH
 # ---------------------------------------------------------------------------
 class TestEmptyHash:
-    """测试 EMPTY_HASH 常量。"""
+    """Test EMPTY_HASH constant."""
 
     def test_correct_zero_hash(self) -> None:
         assert EMPTY_HASH == "0x" + "0" * 64
@@ -70,7 +70,7 @@ class TestEmptyHash:
 # hash_query
 # ---------------------------------------------------------------------------
 class TestHashQuery:
-    """测试 URL query 参数哈希。"""
+    """Test URL query parameter hashing."""
 
     def test_url_without_query(self) -> None:
         result = hash_query("https://example.com/path")
@@ -82,7 +82,7 @@ class TestHashQuery:
         assert result != EMPTY_HASH
 
     def test_query_order_independent(self) -> None:
-        """参数顺序不影响哈希结果（排序后哈希）。"""
+        """Parameter order should not affect the hash result (sorted before hashing)."""
         r1 = hash_query("https://example.com?a=1&b=2")
         r2 = hash_query("https://example.com?b=2&a=1")
         assert r1 == r2
@@ -101,7 +101,7 @@ class TestHashQuery:
 # hash_headers
 # ---------------------------------------------------------------------------
 class TestHashHeaders:
-    """测试 HTTP header 哈希。"""
+    """Test HTTP header hashing."""
 
     def test_with_signed_headers(self) -> None:
         headers = {"content-type": "application/json", "authorization": "Bearer xxx"}
@@ -110,7 +110,7 @@ class TestHashHeaders:
         assert result != EMPTY_HASH
 
     def test_without_matching_headers(self) -> None:
-        """signed_headers 中的 header 不在 headers 中时返回 EMPTY_HASH。"""
+        """When signed_headers are not in headers, should return EMPTY_HASH."""
         headers = {"x-custom": "value"}
         result = hash_headers(headers, ("content-type",))
         assert result == EMPTY_HASH
@@ -121,14 +121,14 @@ class TestHashHeaders:
         assert result == EMPTY_HASH
 
     def test_multiple_signed_headers_sorted(self) -> None:
-        """多个 signed headers 应按名称排序。"""
+        """Multiple signed headers should be sorted by name."""
         headers = {"content-type": "application/json", "accept": "text/html"}
         r1 = hash_headers(headers, ("content-type", "accept"))
         r2 = hash_headers(headers, ("accept", "content-type"))
         assert r1 == r2
 
     def test_header_value_normalized(self) -> None:
-        """header 值中的多余空白应被规范化。"""
+        """Extra whitespace in header values should be normalized."""
         headers_messy = {"content-type": "  application/json  "}
         headers_clean = {"content-type": "application/json"}
         r1 = hash_headers(headers_messy, ("content-type",))
@@ -140,7 +140,7 @@ class TestHashHeaders:
 # hash_body
 # ---------------------------------------------------------------------------
 class TestHashBody:
-    """测试请求体哈希。"""
+    """Test request body hashing."""
 
     def test_none_body(self) -> None:
         result = hash_body(None, "application/json")
@@ -153,7 +153,7 @@ class TestHashBody:
         assert result != EMPTY_HASH
 
     def test_json_body_key_order_independent(self) -> None:
-        """JSON body 的 key 顺序不影响哈希（canonical_json 排序）。"""
+        """JSON body key order should not affect the hash (canonical_json sorts keys)."""
         r1 = hash_body({"b": 2, "a": 1}, "application/json")
         r2 = hash_body({"a": 1, "b": 2}, "application/json")
         assert r1 == r2
@@ -173,7 +173,7 @@ class TestHashBody:
 # canonical_json
 # ---------------------------------------------------------------------------
 class TestCanonicalJson:
-    """测试 JSON 规范化。"""
+    """Test JSON canonicalization."""
 
     def test_key_sorting(self) -> None:
         result = canonical_json({"c": 3, "a": 1, "b": 2})
@@ -184,7 +184,7 @@ class TestCanonicalJson:
     def test_compact_separators(self) -> None:
         result = canonical_json({"key": "value"})
         assert result == '{"key":"value"}'
-        # 无空格
+        # No spaces
         assert ": " not in result
         assert ", " not in result
 

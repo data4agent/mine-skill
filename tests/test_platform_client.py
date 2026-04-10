@@ -1,4 +1,4 @@
-"""platform_client 模块的全面测试."""
+"""Comprehensive tests for the platform_client module."""
 from __future__ import annotations
 
 import re
@@ -13,10 +13,10 @@ from platform_client import PlatformApiError, PlatformClient
 
 
 # ---------------------------------------------------------------------------
-# 辅助工具
+# Helpers
 # ---------------------------------------------------------------------------
 def _make_client(**overrides: Any) -> PlatformClient:
-    """创建最小配置的 PlatformClient，跳过签名配置远程解析."""
+    """Create a minimally configured PlatformClient, skipping remote signature config resolution."""
     defaults = {
         "base_url": "https://api.example.com",
         "token": "test-token",
@@ -36,7 +36,7 @@ def _mock_response(
     headers: dict[str, str] | None = None,
     content: bytes | None = None,
 ) -> httpx.Response:
-    """构造 httpx.Response 用于 mock."""
+    """Build an httpx.Response for mocking."""
     resp = httpx.Response(
         status_code=status_code,
         headers=headers or {},
@@ -44,7 +44,7 @@ def _mock_response(
         request=httpx.Request("GET", "https://api.example.com/test"),
     )
     if json_body is not None:
-        # 用 json content 覆盖
+        # Override with json content
         import json as _json
         body_bytes = _json.dumps(json_body).encode()
         resp = httpx.Response(
@@ -57,7 +57,7 @@ def _mock_response(
 
 
 # ===========================================================================
-# PlatformApiError 测试
+# PlatformApiError tests
 # ===========================================================================
 class TestPlatformApiError:
     def test_init_fields(self) -> None:
@@ -81,14 +81,14 @@ class TestPlatformApiError:
 
 
 # ===========================================================================
-# _regex_matches 测试
+# _regex_matches tests
 # ===========================================================================
 class TestRegexMatches:
     def test_full_match(self) -> None:
         assert PlatformClient._regex_matches(r"https://example\.com/.*", "https://example.com/page") is True
 
     def test_partial_no_match(self) -> None:
-        """fullmatch 要求完整匹配，部分匹配应失败."""
+        """fullmatch requires a complete match; partial matches should fail."""
         assert PlatformClient._regex_matches(r"example", "example.com") is False
 
     def test_no_match(self) -> None:
@@ -102,7 +102,7 @@ class TestRegexMatches:
 
 
 # ===========================================================================
-# _build_occupancy_structured_data 测试
+# _build_occupancy_structured_data tests
 # ===========================================================================
 class TestBuildOccupancyStructuredData:
     def test_defaults_set(self) -> None:
@@ -125,7 +125,7 @@ class TestBuildOccupancyStructuredData:
         assert "empty_dict" not in result
 
     def test_zero_and_false_kept(self) -> None:
-        """0 和 False 不在过滤列表中，应保留."""
+        """0 and False are not in the filter list and should be preserved."""
         sd = {"count": 0, "active": False}
         result = PlatformClient._build_occupancy_structured_data("https://x.com", sd)
         assert result["count"] == 0
@@ -133,7 +133,7 @@ class TestBuildOccupancyStructuredData:
 
 
 # ===========================================================================
-# _coerce_url_patterns 测试
+# _coerce_url_patterns tests
 # ===========================================================================
 class TestCoerceUrlPatterns:
     def test_list_of_strings(self) -> None:
@@ -156,15 +156,15 @@ class TestCoerceUrlPatterns:
 
 
 # ===========================================================================
-# _request 重试逻辑（基于 mock）
+# _request retry logic (mock-based)
 # ===========================================================================
 class TestRequestRetryLogic:
-    """测试 _request 的重试/退避行为."""
+    """Test _request retry/backoff behavior."""
 
     def test_429_with_retry_after_platform_api_error(self) -> None:
-        """PlatformApiError 路径下 429 + Retry-After 头的重试."""
+        """Retry on 429 + Retry-After header via PlatformApiError path."""
         client = _make_client()
-        # 第一次返回 429 (success:false envelope)，第二次成功
+        # First returns 429 (success:false envelope), second succeeds
         resp_429 = _mock_response(200, json_body={
             "success": False,
             "error": {"code": "RATE_LIMITED", "message": "slow down", "category": "rate_limit"},
@@ -176,13 +176,13 @@ class TestRequestRetryLogic:
             result = client._request("GET", "/test", None)
             assert result["data"]["ok"] is True
             assert mock_req.call_count == 2
-            # 应根据 Retry-After header 休眠
+            # Should sleep based on Retry-After header
             mock_sleep.assert_called_once()
             sleep_val = mock_sleep.call_args[0][0]
             assert sleep_val <= 60.0
 
     def test_429_with_retry_after_http_status_error(self) -> None:
-        """HTTPStatusError 路径下 429 + Retry-After 头的重试."""
+        """Retry on 429 + Retry-After header via HTTPStatusError path."""
         client = _make_client()
         resp_429 = _mock_response(429, headers={"Retry-After": "2"})
         resp_ok = _mock_response(200, json_body={"success": True, "data": {}})
@@ -195,7 +195,7 @@ class TestRequestRetryLogic:
             assert mock_sleep.call_args[0][0] == 2.0
 
     def test_500_server_error_retry(self) -> None:
-        """500 错误应自动重试."""
+        """500 errors should be automatically retried."""
         client = _make_client()
         resp_500 = _mock_response(500)
         resp_ok = _mock_response(200, json_body={"success": True, "value": 1})
@@ -207,7 +207,7 @@ class TestRequestRetryLogic:
             assert result["value"] == 1
 
     def test_401_session_renewal(self) -> None:
-        """401 SESSION_EXPIRED 应触发 session 更新后重试."""
+        """401 SESSION_EXPIRED should trigger session renewal then retry."""
         mock_signer = MagicMock()
         mock_signer.build_auth_headers.return_value = {"X-Auth": "sig"}
         mock_signer.renew_session.return_value = {"token": "new-token"}
@@ -226,7 +226,7 @@ class TestRequestRetryLogic:
             assert client._last_wallet_refresh == {"token": "new-token"}
 
     def test_unknown_category_defaults_to_500(self) -> None:
-        """success:false 中未知 category 应映射到 status_code 500."""
+        """Unknown category in success:false should map to status_code 500."""
         client = _make_client()
         resp = _mock_response(200, json_body={
             "success": False,
@@ -236,12 +236,12 @@ class TestRequestRetryLogic:
 
         with patch.object(client._client, "request", side_effect=[resp, resp_ok]) as mock_req, \
              patch("platform_client.time.sleep"):
-            # 未知 category → status 500 → 可重试
+            # Unknown category -> status 500 -> retryable
             result = client._request("GET", "/test", None)
             assert mock_req.call_count == 2
 
     def test_unknown_category_raises_after_max_retries(self) -> None:
-        """未知 category 重试耗尽后应抛出 PlatformApiError."""
+        """Unknown category should raise PlatformApiError after retries are exhausted."""
         client = _make_client()
         resp_fail = _mock_response(200, json_body={
             "success": False,
@@ -255,7 +255,7 @@ class TestRequestRetryLogic:
             assert exc_info.value.status_code == 500
 
     def test_success_false_envelope(self) -> None:
-        """success:false 信封应抛出 PlatformApiError."""
+        """success:false envelope should raise PlatformApiError."""
         client = _make_client()
         resp = _mock_response(200, json_body={
             "success": False,
@@ -269,20 +269,20 @@ class TestRequestRetryLogic:
             assert exc_info.value.code == "NOT_FOUND"
 
     def test_429_no_retry_after_uses_backoff(self) -> None:
-        """429 without Retry-After 应使用默认退避."""
+        """429 without Retry-After should use default backoff."""
         client = _make_client()
-        resp_429 = _mock_response(429)  # 无 Retry-After 头
+        resp_429 = _mock_response(429)  # No Retry-After header
         resp_ok = _mock_response(200, json_body={"success": True})
 
         with patch.object(client._client, "request", side_effect=[resp_429, resp_ok]), \
              patch("platform_client.time.sleep") as mock_sleep:
             client._request("GET", "/test", None)
             mock_sleep.assert_called_once()
-            # 默认退避: max(2.0, 1.0 * attempt)，attempt=1 → 2.0
+            # Default backoff: max(2.0, 1.0 * attempt), attempt=1 -> 2.0
             assert mock_sleep.call_args[0][0] == 2.0
 
     def test_empty_response_content(self) -> None:
-        """空响应体返回空字典."""
+        """Empty response body should return empty dict."""
         client = _make_client()
         resp = _mock_response(200, content=b"")
 
@@ -292,11 +292,11 @@ class TestRequestRetryLogic:
 
 
 # ===========================================================================
-# report_evaluation 测试
+# report_evaluation tests
 # ===========================================================================
 class TestReportEvaluation:
     def test_request_body_includes_required_fields(self) -> None:
-        """验证 report_evaluation 发送的请求体包含 assignment_id, result, score."""
+        """Verify report_evaluation sends request body containing assignment_id, result, score."""
         client = _make_client()
         resp = _mock_response(200, json_body={"success": True, "data": {"id": "eval-1"}})
 
@@ -322,25 +322,25 @@ class TestReportEvaluation:
 
 
 # ===========================================================================
-# check_url_occupancy 测试
+# check_url_occupancy tests
 # ===========================================================================
 class TestCheckUrlOccupancy:
     def test_404_returns_empty_dict(self) -> None:
-        """PlatformApiError 404 应返回空字典."""
+        """PlatformApiError 404 should return empty dict."""
         client = _make_client()
         with patch.object(client, "_request", side_effect=PlatformApiError("NF", "not found", "not_found", 404)):
             result = client.check_url_occupancy("ds1", "https://example.com")
             assert result == {}
 
     def test_422_returns_empty_dict(self) -> None:
-        """PlatformApiError 422 应返回空字典."""
+        """PlatformApiError 422 should return empty dict."""
         client = _make_client()
         with patch.object(client, "_request", side_effect=PlatformApiError("V", "invalid", "validation", 422)):
             result = client.check_url_occupancy("ds1", "https://example.com")
             assert result == {}
 
     def test_http_status_error_404(self) -> None:
-        """HTTPStatusError 404 应返回空字典."""
+        """HTTPStatusError 404 should return empty dict."""
         client = _make_client()
         resp_404 = _mock_response(404)
         error = httpx.HTTPStatusError("not found", request=resp_404.request, response=resp_404)
@@ -349,7 +349,7 @@ class TestCheckUrlOccupancy:
             assert result == {}
 
     def test_http_status_error_422(self) -> None:
-        """HTTPStatusError 422 应返回空字典."""
+        """HTTPStatusError 422 should return empty dict."""
         client = _make_client()
         resp_422 = _mock_response(422)
         error = httpx.HTTPStatusError("invalid", request=resp_422.request, response=resp_422)
@@ -358,7 +358,7 @@ class TestCheckUrlOccupancy:
             assert result == {}
 
     def test_other_error_propagated(self) -> None:
-        """非 404/422 错误应向上抛出."""
+        """Non-404/422 errors should propagate."""
         client = _make_client()
         with patch.object(client, "_request", side_effect=PlatformApiError("E", "err", "internal", 500)):
             with pytest.raises(PlatformApiError):
@@ -378,22 +378,22 @@ class TestCheckUrlOccupancy:
 
 
 # ===========================================================================
-# _validate_submission_payload 测试
+# _validate_submission_payload tests
 # ===========================================================================
 class TestValidateSubmissionPayload:
     def test_url_matches_pattern(self) -> None:
-        """URL 匹配 pattern 时不应抛出异常."""
+        """URL matching pattern should not raise."""
         client = _make_client()
         dataset = {"url_patterns": [r"https://example\.com/.*"]}
         with patch.object(client, "fetch_dataset", return_value=dataset):
-            # 不应抛出
+            # Should not raise
             client._validate_submission_payload({
                 "dataset_id": "ds1",
                 "entries": [{"url": "https://example.com/page"}],
             })
 
     def test_url_does_not_match_raises_runtime_error(self) -> None:
-        """URL 不匹配任何 pattern 时应抛出 RuntimeError."""
+        """URL not matching any pattern should raise RuntimeError."""
         client = _make_client()
         dataset = {"url_patterns": [r"https://example\.com/.*"]}
         with patch.object(client, "fetch_dataset", return_value=dataset):
@@ -404,29 +404,29 @@ class TestValidateSubmissionPayload:
                 })
 
     def test_empty_dataset_id_skips_validation(self) -> None:
-        """空 dataset_id 应跳过验证."""
+        """Empty dataset_id should skip validation."""
         client = _make_client()
-        # 不应调用 fetch_dataset
+        # Should not call fetch_dataset
         client._validate_submission_payload({"dataset_id": "", "entries": [{"url": "x"}]})
 
     def test_no_entries_skips_validation(self) -> None:
-        """没有 entries 或空列表应跳过验证."""
+        """No entries or empty list should skip validation."""
         client = _make_client()
         client._validate_submission_payload({"dataset_id": "ds1", "entries": []})
         client._validate_submission_payload({"dataset_id": "ds1"})
 
     def test_dataset_404_skips_validation(self) -> None:
-        """数据集不存在（404）应跳过验证."""
+        """Dataset not found (404) should skip validation."""
         client = _make_client()
         with patch.object(client, "fetch_dataset", side_effect=PlatformApiError("NF", "not found", "not_found", 404)):
-            # 不应抛出
+            # Should not raise
             client._validate_submission_payload({
                 "dataset_id": "ds1",
                 "entries": [{"url": "https://any.com"}],
             })
 
     def test_dataset_http_404_skips_validation(self) -> None:
-        """HTTPStatusError 404 应跳过验证."""
+        """HTTPStatusError 404 should skip validation."""
         client = _make_client()
         resp_404 = _mock_response(404)
         error = httpx.HTTPStatusError("nf", request=resp_404.request, response=resp_404)
@@ -437,7 +437,7 @@ class TestValidateSubmissionPayload:
             })
 
     def test_no_patterns_allows_all(self) -> None:
-        """数据集没有 url_patterns 时应允许所有 URL."""
+        """Dataset without url_patterns should allow all URLs."""
         client = _make_client()
         with patch.object(client, "fetch_dataset", return_value={}):
             client._validate_submission_payload({
@@ -446,9 +446,9 @@ class TestValidateSubmissionPayload:
             })
 
     def test_fullmatch_not_partial(self) -> None:
-        """验证使用 re.fullmatch 而非 re.match / re.search."""
+        """Verify re.fullmatch is used instead of re.match / re.search."""
         client = _make_client()
-        # 这个 pattern 能 match 前缀，但 fullmatch 要求完整匹配
+        # This pattern can match a prefix, but fullmatch requires a complete match
         dataset = {"url_patterns": [r"https://example\.com"]}
         with patch.object(client, "fetch_dataset", return_value=dataset):
             with pytest.raises(RuntimeError):
@@ -458,18 +458,18 @@ class TestValidateSubmissionPayload:
                 })
 
     def test_entry_without_url_skipped(self) -> None:
-        """entries 中没有 url 的项应被跳过."""
+        """Entries without url should be skipped."""
         client = _make_client()
         dataset = {"url_patterns": [r"https://example\.com/.*"]}
         with patch.object(client, "fetch_dataset", return_value=dataset):
-            # 不应抛出 — 空 url 的 entry 被 continue 跳过
+            # Should not raise — entries with empty url are skipped via continue
             client._validate_submission_payload({
                 "dataset_id": "ds1",
                 "entries": [{"url": ""}, {"data": "no url key"}],
             })
 
     def test_non_dict_entry_skipped(self) -> None:
-        """非 dict 的 entry 应被跳过."""
+        """Non-dict entries should be skipped."""
         client = _make_client()
         dataset = {"url_patterns": [r"https://example\.com/.*"]}
         with patch.object(client, "fetch_dataset", return_value=dataset):

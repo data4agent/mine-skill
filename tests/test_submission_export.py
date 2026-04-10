@@ -20,10 +20,10 @@ from crawler.submission_export import (
 # ---------------------------------------------------------------------------
 
 class TestBuildSubmissionRequest:
-    """build_submission_request 的各种输入场景。"""
+    """Various input scenarios for build_submission_request."""
 
     def test_valid_records(self) -> None:
-        """包含完整字段的记录应正确输出。"""
+        """Records with complete fields should produce correct output."""
         records = [
             {
                 "url": "https://example.com/page1",
@@ -41,7 +41,7 @@ class TestBuildSubmissionRequest:
         assert isinstance(entry["structured_data"], dict)
 
     def test_canonical_url_preferred(self) -> None:
-        """canonical_url 应优先于 url 字段。"""
+        """canonical_url should take priority over url field."""
         records = [
             {
                 "canonical_url": "https://example.com/canonical",
@@ -54,7 +54,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["url"] == "https://example.com/canonical"
 
     def test_missing_url_skipped(self) -> None:
-        """url 为空的记录应被跳过。"""
+        """Records with empty url should be skipped."""
         records = [
             {"crawl_timestamp": "2025-01-01T00:00:00Z", "plain_text": "no url"},
             {"url": "", "crawl_timestamp": "2025-01-01T00:00:00Z"},
@@ -63,7 +63,7 @@ class TestBuildSubmissionRequest:
         assert len(result["entries"]) == 0
 
     def test_missing_timestamp_skipped(self) -> None:
-        """crawl_timestamp 为空且没有 generated_at 的记录应被跳过。"""
+        """Records with empty crawl_timestamp and no generated_at should be skipped."""
         records = [
             {"url": "https://example.com", "plain_text": "no ts"},
         ]
@@ -71,7 +71,7 @@ class TestBuildSubmissionRequest:
         assert len(result["entries"]) == 0
 
     def test_generated_at_fallback(self) -> None:
-        """crawl_timestamp 为空时应回退到 generated_at。"""
+        """Should fall back to generated_at when crawl_timestamp is empty."""
         records = [
             {"url": "https://example.com/a", "plain_text": "data"},
         ]
@@ -82,7 +82,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["crawl_timestamp"] == "2025-06-01T00:00:00Z"
 
     def test_cleaned_data_fallback_plain_text(self) -> None:
-        """plain_text 优先级最高。"""
+        """plain_text has the highest priority."""
         records = [
             {
                 "url": "https://example.com",
@@ -96,7 +96,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["cleaned_data"] == "plain"
 
     def test_cleaned_data_fallback_cleaned_data(self) -> None:
-        """plain_text 为空时应回退到 cleaned_data。"""
+        """Should fall back to cleaned_data when plain_text is empty."""
         records = [
             {
                 "url": "https://example.com",
@@ -109,7 +109,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["cleaned_data"] == "cleaned"
 
     def test_cleaned_data_fallback_markdown(self) -> None:
-        """plain_text 和 cleaned_data 都为空时应回退到 markdown。"""
+        """Should fall back to markdown when both plain_text and cleaned_data are empty."""
         records = [
             {
                 "url": "https://example.com",
@@ -121,7 +121,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["cleaned_data"] == "md content"
 
     def test_cleaned_data_all_none(self) -> None:
-        """所有文本字段为 None 时 cleaned_data 应为空字符串。"""
+        """cleaned_data should be empty string when all text fields are None."""
         records = [
             {
                 "url": "https://example.com",
@@ -132,7 +132,7 @@ class TestBuildSubmissionRequest:
         assert result["entries"][0]["cleaned_data"] == ""
 
     def test_empty_string_plain_text_falls_through(self) -> None:
-        """plain_text 为空字符串时应回退。"""
+        """Empty string plain_text should fall back."""
         records = [
             {
                 "url": "https://example.com",
@@ -150,10 +150,10 @@ class TestBuildSubmissionRequest:
 # ---------------------------------------------------------------------------
 
 class TestBuildStructuredData:
-    """_build_structured_data 的正常和异常路径。"""
+    """Normal and error paths for _build_structured_data."""
 
     def test_success_delegates_to_flatten(self) -> None:
-        """flatten_record_for_schema 正常返回时直接使用其结果。"""
+        """When flatten_record_for_schema returns normally, use its result directly."""
         record: dict[str, Any] = {"url": "https://example.com", "structured": {"a": 1}}
         with patch(
             "crawler.submission_export.flatten_record_for_schema",
@@ -163,7 +163,7 @@ class TestBuildStructuredData:
         assert result == {"flat": True}
 
     def test_value_error_fallback(self) -> None:
-        """flatten_record_for_schema 抛出 ValueError 时回退到 record['structured']。"""
+        """When flatten_record_for_schema raises ValueError, fall back to record['structured']."""
         record: dict[str, Any] = {"structured": {"key": "val"}}
         with patch(
             "crawler.submission_export.flatten_record_for_schema",
@@ -173,7 +173,7 @@ class TestBuildStructuredData:
         assert result == {"key": "val"}
 
     def test_os_error_fallback(self) -> None:
-        """flatten_record_for_schema 抛出 OSError 时回退到 record['structured']。"""
+        """When flatten_record_for_schema raises OSError, fall back to record['structured']."""
         record: dict[str, Any] = {"structured": {"x": 1}}
         with patch(
             "crawler.submission_export.flatten_record_for_schema",
@@ -183,7 +183,7 @@ class TestBuildStructuredData:
         assert result == {"x": 1}
 
     def test_fallback_no_structured_key(self) -> None:
-        """record 中没有 structured 键时回退应返回空字典。"""
+        """When record has no structured key, fallback should return empty dict."""
         record: dict[str, Any] = {"url": "https://example.com"}
         with patch(
             "crawler.submission_export.flatten_record_for_schema",
@@ -193,7 +193,7 @@ class TestBuildStructuredData:
         assert result == {}
 
     def test_fallback_structured_not_dict(self) -> None:
-        """structured 值不是字典时应返回空字典。"""
+        """When structured value is not a dict, should return empty dict."""
         record: dict[str, Any] = {"structured": "not a dict"}
         with patch(
             "crawler.submission_export.flatten_record_for_schema",
@@ -208,10 +208,10 @@ class TestBuildStructuredData:
 # ---------------------------------------------------------------------------
 
 class TestExportSubmissionRequest:
-    """export_submission_request 的文件写入测试。"""
+    """File writing tests for export_submission_request."""
 
     def test_writes_to_output_path(self, tmp_path: Path) -> None:
-        """应将 payload 写入 output_path。"""
+        """Should write payload to output_path."""
         input_file = tmp_path / "input.jsonl"
         input_file.write_text(
             json.dumps({"url": "https://example.com", "crawl_timestamp": "2025-01-01T00:00:00Z", "plain_text": "hi"}) + "\n",
@@ -237,7 +237,7 @@ class TestExportSubmissionRequest:
         assert len(payload["entries"]) == 1
 
     def test_creates_parent_dirs(self, tmp_path: Path) -> None:
-        """output_path 的父目录不存在时应自动创建。"""
+        """Should auto-create parent directories when output_path's parent does not exist."""
         input_file = tmp_path / "input.jsonl"
         input_file.write_text(
             json.dumps({"url": "https://example.com", "crawl_timestamp": "2025-01-01T00:00:00Z"}) + "\n",

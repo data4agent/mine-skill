@@ -1,4 +1,4 @@
-"""evaluation_engine.py 的单元测试。"""
+"""Unit tests for evaluation_engine.py."""
 from __future__ import annotations
 
 import json
@@ -14,10 +14,10 @@ from evaluation_engine import EvaluationEngine, EvaluationResult, _optimize_for_
 # EvaluationEngine.evaluate()
 # ---------------------------------------------------------------------------
 class TestEngineEvaluate:
-    """测试 evaluate() 的主流程和异常处理。"""
+    """Test evaluate() main flow and error handling."""
 
     def test_match_with_score(self) -> None:
-        """LLM 返回 match + 高分 → accepted。"""
+        """LLM returns match + high score -> accepted."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": 85}'
@@ -35,7 +35,7 @@ class TestEngineEvaluate:
         assert result.score == 85
 
     def test_mismatch(self) -> None:
-        """LLM 返回 mismatch → rejected, score=0。"""
+        """LLM returns mismatch -> rejected, score=0."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "mismatch", "score": 0}'
@@ -53,10 +53,10 @@ class TestEngineEvaluate:
         assert result.score == 0
 
     def test_no_repeat_data(self) -> None:
-        """无 repeat data 时 result 为 match。"""
+        """Without repeat data, result should be match."""
 
         def mock_llm(prompt: str) -> str:
-            # 验证 prompt 中不包含 M1
+            # Verify prompt does not contain M1
             assert "Re-crawl (M1)" not in prompt
             return '{"result": "match", "score": 70}'
 
@@ -70,7 +70,7 @@ class TestEngineEvaluate:
         assert result.score == 70
 
     def test_infrastructure_failure_returns_score_50(self) -> None:
-        """LLM 调用异常时返回 score=50，不惩罚 miner。"""
+        """LLM call exception should return score=50, not penalizing the miner."""
 
         def mock_llm(prompt: str) -> str:
             raise RuntimeError("LLM service unavailable")
@@ -86,7 +86,7 @@ class TestEngineEvaluate:
         assert result.score == 50
 
     def test_score_clamped_to_100(self) -> None:
-        """分数超过 100 时应被截断。"""
+        """Scores exceeding 100 should be clamped."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": 150}'
@@ -100,7 +100,7 @@ class TestEngineEvaluate:
         assert result.score == 100
 
     def test_score_clamped_to_0(self) -> None:
-        """负分应被截断为 0。"""
+        """Negative scores should be clamped to 0."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": -10}'
@@ -114,7 +114,7 @@ class TestEngineEvaluate:
         assert result.score == 0
 
     def test_dict_cleaned_data(self) -> None:
-        """cleaned_data 为 dict 时应被序列化。"""
+        """Dict cleaned_data should be serialized."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": 60}'
@@ -128,7 +128,7 @@ class TestEngineEvaluate:
         assert result.score == 60
 
     def test_zero_score_match_rejected(self) -> None:
-        """match 但 score=0 → rejected。"""
+        """match but score=0 -> rejected."""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": 0}'
@@ -148,7 +148,7 @@ class TestEngineEvaluate:
 # _extract_result_and_score
 # ---------------------------------------------------------------------------
 class TestExtractResultAndScore:
-    """测试解析 LLM 响应的各种格式。"""
+    """Test parsing various LLM response formats."""
 
     def test_parsed_json(self) -> None:
         parsed = {"result": "match", "score": 75}
@@ -208,7 +208,7 @@ class TestExtractResultAndScore:
         assert score == 72
 
     def test_empty_result_with_score(self) -> None:
-        """result 为空字符串但有 score 时应回退。"""
+        """Empty string result with a score should fall back."""
         parsed = {"result": "", "score": 65}
         result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
         assert result == "match"
@@ -219,7 +219,7 @@ class TestExtractResultAndScore:
 # _optimize_for_eval
 # ---------------------------------------------------------------------------
 class TestOptimizeForEval:
-    """测试文本优化/截断逻辑。"""
+    """Test text optimization/truncation logic."""
 
     def test_short_text_unchanged(self) -> None:
         text = "Hello world, this is a test."
@@ -242,7 +242,7 @@ class TestOptimizeForEval:
         assert "Para two" in result
 
     def test_long_text_heading_removal(self) -> None:
-        """超过 20k 字符的文本应移除低价值 heading 下的内容。"""
+        """Text exceeding 20k chars should have low-value heading content removed."""
         main_content = "Important content. " * 500
         references = "## References\n" + "Reference item. " * 500
         see_also = "## See Also\n" + "See also item. " * 500
@@ -255,7 +255,7 @@ class TestOptimizeForEval:
         assert "## References" not in result
 
     def test_long_text_dedup(self) -> None:
-        """超过 20k 的文本中重复段落应被去除。"""
+        """Duplicate paragraphs in text exceeding 20k should be removed."""
         paragraph = "This is a reasonably long paragraph with enough words to be deduped properly."
         text = ("\n\n".join([paragraph] * 300))
         if len(text) < 20000:
@@ -264,10 +264,10 @@ class TestOptimizeForEval:
         assert len(result) < len(text)
 
     def test_long_text_truncated(self) -> None:
-        """超过 20k 限制的文本最终被截断。"""
+        """Text exceeding 20k limit should ultimately be truncated."""
         text = "A" * 50000
         result = _optimize_for_eval(text)
-        # 截断到 _EVAL_MAX_CHARS (20000) + rsplit 调整 + "\n..." 后缀
+        # Truncated to _EVAL_MAX_CHARS (20000) + rsplit adjustment + "\n..." suffix
         assert len(result) <= 20005
 
     def test_empty_text(self) -> None:
