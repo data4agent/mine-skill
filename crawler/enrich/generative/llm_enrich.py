@@ -1,12 +1,9 @@
 """Unified LLM enrich routing for mine.
 
 Preferred order:
-1. Benchmark-skill style OpenClaw agent CLI
+1. OpenClaw agent CLI
 2. OpenClaw Gateway (`provider=openclaw`)
 3. Other OpenAI-compatible APIs
-
-Reference implementation source:
-https://github.com/awp-core/s1-benchmark-skill
 """
 
 from __future__ import annotations
@@ -46,9 +43,9 @@ def _requested_mode() -> str:
 
 
 def _openclaw_cli_available() -> bool:
-    from crawler.enrich.generative.openclaw_agent import benchmark_skill_available
+    from crawler.enrich.generative.openclaw_agent import openclaw_cli_available
 
-    return benchmark_skill_available()
+    return openclaw_cli_available()
 
 
 def _has_gateway_config(model_config: dict[str, Any] | None) -> bool:
@@ -72,7 +69,7 @@ def llm_execution_available(model_config: dict[str, Any] | None = None) -> bool:
     CLI reuses the model already configured for the OpenClaw agent (e.g. OpenRouter) without a separate API key.
     """
     mode = _requested_mode()
-    if mode in {"benchmark_skill", "cli"}:
+    if mode in {"openclaw_cli", "cli"}:
         return _openclaw_cli_available()
     if mode == "gateway":
         return _has_gateway_config(model_config)
@@ -82,11 +79,11 @@ def llm_execution_available(model_config: dict[str, Any] | None = None) -> bool:
     return _openclaw_cli_available() or _has_gateway_config(model_config) or _has_api_config(model_config)
 
 
-def _should_try_benchmark_skill() -> bool:
+def _should_try_openclaw_cli() -> bool:
     mode = _requested_mode()
     if mode in {"gateway", "api"}:
         return False
-    # auto / cli / benchmark_skill: use CLI whenever it is available
+    # auto / cli / openclaw_cli: use CLI whenever it is available
     return _openclaw_cli_available()
 
 
@@ -97,14 +94,14 @@ async def enrich_with_llm(
     system_prompt: str = "",
     timeout: float = 120.0,
 ) -> EnrichResult:
-    """Execute a single enrich prompt with the preferred benchmark-skill routing."""
+    """Execute a single enrich prompt with the preferred routing."""
     config = dict(model_config or {})
 
-    if _should_try_benchmark_skill():
-        result = await _enrich_via_benchmark_skill(prompt, system_prompt=system_prompt, timeout=timeout)
+    if _should_try_openclaw_cli():
+        result = await _enrich_via_openclaw_cli(prompt, system_prompt=system_prompt, timeout=timeout)
         if result.success:
             return result
-        log.warning("[LLM] benchmark-skill enrich failed: %s", result.error)
+        log.warning("[LLM] OpenClaw CLI enrich failed: %s", result.error)
 
     if _has_api_config(config):
         return await _enrich_via_model_config(
@@ -118,11 +115,11 @@ async def enrich_with_llm(
         content="",
         success=False,
         method="none",
-        error="No LLM method available (benchmark-skill unavailable and no model_config fallback)",
+        error="No LLM method available (OpenClaw CLI unavailable and no model_config fallback)",
     )
 
 
-async def _enrich_via_benchmark_skill(
+async def _enrich_via_openclaw_cli(
     prompt: str,
     *,
     system_prompt: str = "",
@@ -139,7 +136,7 @@ async def _enrich_via_benchmark_skill(
     return EnrichResult(
         content=response.content,
         success=response.success,
-        method="benchmark_skill",
+        method="openclaw_cli",
         error=response.error,
         model=response.model,
         tokens_used=int(response.tokens_used or 0),
@@ -187,13 +184,13 @@ async def _enrich_via_model_config(
     )
 
 
-def get_available_methods(model_config: dict[str, Any] | None = None) -> list[str]:
-    """Return methods that are currently executable, in preference order."""
+def available_methods(model_config: dict[str, Any] | None = None) -> list[str]:
+    """Return list of available LLM methods for diagnostics."""
     methods: list[str] = []
     if _openclaw_cli_available():
-        methods.append("benchmark_skill")
+        methods.append("openclaw_cli")
     if _has_gateway_config(model_config):
         methods.append("gateway")
-    elif _has_api_config(model_config):
+    if _has_api_config(model_config):
         methods.append("api")
     return methods

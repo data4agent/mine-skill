@@ -58,6 +58,18 @@ def _ensure_local_venv_python() -> None:
 
 _ensure_local_venv_python()
 
+# Verify critical dependencies are available
+try:
+    import bs4  # noqa: F401
+except ImportError:
+    print(
+        "ERROR: Required package 'beautifulsoup4' is not installed.\n"
+        "Run bootstrap first:  bash scripts/bootstrap.sh\n"
+        "Or install manually:  pip install -r requirements-core.txt",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 
 def render_env_check() -> str:
     """Check and display all environment variables needed by Mine."""
