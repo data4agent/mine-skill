@@ -850,6 +850,13 @@ class AgentWorker:
         if not result.records:
             for error in result.errors:
                 summary.errors.append(f"{item.item_id}: {error.get('error_code') or 'UNKNOWN'}")
+            # Reject claimed tasks so the server can reassign immediately
+            if item.claim_task_id and item.claim_task_type == "repeat_crawl":
+                try:
+                    self.client.reject_repeat_crawl_task(item.claim_task_id)
+                    summary.messages.append(f"repeat_crawl {item.claim_task_id} rejected (crawl produced no records)")
+                except Exception as exc:
+                    summary.errors.append(f"reject repeat_crawl failed: {exc}")
             return
 
         record = result.records[0]

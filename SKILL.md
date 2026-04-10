@@ -11,7 +11,7 @@ description: >
   progress", "how much have I earned", or any mention of aMine, ocDATA, Mine
   Worknet, data mining rewards, or repeat crawl tasks. NOT for AWP wallet
   transfers, RootNet staking, smart contract deployment, or server monitoring.
-version: 0.10.0
+version: 0.10.1
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
