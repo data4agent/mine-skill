@@ -857,10 +857,13 @@ class AgentWorker:
                     code = str(error.get("error_code") or "")
                     if "CAPTCHA" in code:
                         fail_reason = "captcha_detected"
+                        break
                     elif "AUTH" in code:
                         fail_reason = "auth_required"
+                        break
                     elif "CONTENT_EMPTY" in code:
                         fail_reason = "content_empty"
+                        break
                 try:
                     self.client.report_repeat_crawl_task_result(
                         item.claim_task_id,
