@@ -174,6 +174,16 @@ or allocate tokens to become a miner — that is only for validators.
 
 ### Start Mining
 
+Step 0 — Bootstrap (MUST run before anything else, first time only):
+
+```bash
+cd {baseDir} && bash scripts/bootstrap.sh
+```
+
+This installs all Python dependencies into a local virtualenv. If you skip this
+step, commands will fail with `ModuleNotFoundError`. Run it once — subsequent
+launches reuse the existing virtualenv automatically.
+
 Step 1 — Check readiness (run in terminal, do not show command to user):
 
 ```bash
@@ -241,6 +251,14 @@ cd {baseDir} && python scripts/run_tool.py doctor
 
 ### Start Validating
 
+Step 0 — Bootstrap (MUST run before first use):
+
+```bash
+cd {baseDir} && bash scripts/bootstrap.sh
+```
+
+Step 1 — Start validator:
+
 ```bash
 cd {baseDir} && python scripts/run_tool.py validator-start
 ```
@@ -276,6 +294,12 @@ cd {baseDir} && tail -50 output/agent-runs/<session_id>.log
 Always check `agent-control status` first — it shows recent errors without needing to read the log directly.
 
 ## Error Recovery
+
+If any command fails with `ModuleNotFoundError` or missing package errors:
+
+1. Run `bash scripts/bootstrap.sh` to install all dependencies
+2. This MUST be done before any other command will work
+3. It only needs to run once — subsequent launches reuse the virtualenv
 
 If any command returns a `401` or authentication error:
 
