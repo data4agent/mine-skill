@@ -1,15 +1,16 @@
 ---
 name: mine
 description: >
-  Start, stop, and manage autonomous data mining and validation workers that
-  earn $aMine token rewards on the ocDATA platform. Use this skill when the user
-  wants to: start or stop mining, check mining/validator status, select datasets,
-  diagnose mining errors (401, auth, connectivity), view submission scores or
-  epoch rewards, become a validator, or do anything related to aMine, ocDATA,
-  data crawling for rewards, or autonomous data collection. Trigger even for
-  casual phrases like "go online", "start earning", "check my submissions",
-  "how many submissions do I have", or "why is my miner not working". NOT for
-  AWP wallet transfers, RootNet staking, or general server monitoring.
+  Run autonomous data mining and validation on the Mine Worknet (ocDATA/aMine).
+  Use this skill when the user wants to: mine data, validate submissions, start
+  or stop a miner/validator, check status or scores, select datasets, handle PoW
+  challenges, diagnose errors (401, auth, stake, connectivity), view epoch rewards
+  or credit tier, or become a validator (requires AWP staking via AWP Skill).
+  Also trigger for: "go online", "start earning", "check my submissions",
+  "how's my miner doing", "why no submissions", "validator status", "epoch
+  progress", "how much have I earned", or any mention of aMine, ocDATA, Mine
+  Worknet, data mining rewards, or repeat crawl tasks. NOT for AWP wallet
+  transfers, RootNet staking, smart contract deployment, or server monitoring.
 version: 0.10.0
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
