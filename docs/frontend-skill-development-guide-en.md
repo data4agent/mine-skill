@@ -1,10 +1,12 @@
 # Frontend Skill Development Guide
 
-> **Version**: 2.1 (2026-04-06)  
+> **Version**: 3.0 (2026-04-09)  
 > **Base URL**: `http://<host>:8080`  
 > **Framework**: Gin (Go)
 
-This document serves as a comprehensive reference for developing frontend applications that interact with the ocDATA Data Mining Platform. It covers authentication, all API endpoints, request/response schemas, WebSocket integration, credit systems, and error handling.
+This document serves as a comprehensive reference for developing frontend applications and LLM-driven skills that interact with the ocDATA Data Mining Platform API. It covers authentication, all API endpoints, request/response schemas, state machines, WebSocket integration, credit systems, and error handling.
+
+An LLM reading only this document should be able to correctly call every endpoint.
 
 ---
 
@@ -13,20 +15,17 @@ This document serves as a comprehensive reference for developing frontend applic
 1. [Authentication (EIP-712)](#1-authentication-eip-712)
 2. [Response Envelope](#2-response-envelope)
 3. [Roles & Permissions](#3-roles--permissions)
-4. [Health & Monitoring](#4-health--monitoring)
-5. [Public API](#5-public-api)
+4. [State Machines](#4-state-machines)
+5. [Public API (no auth)](#5-public-api-no-auth)
 6. [IAM Module](#6-iam-module)
 7. [Core Module](#7-core-module)
 8. [Mining Module](#8-mining-module)
 9. [WebSocket Realtime Channel](#9-websocket-realtime-channel)
-10. [Credit System](#10-credit-system)
-11. [Quality Assurance Workflow](#11-quality-assurance-workflow)
-12. [Epoch & Settlement](#12-epoch--settlement)
-13. [Timing Parameters](#13-timing-parameters)
-14. [Error Handling](#14-error-handling)
-15. [Miner Frontend Workflow](#15-miner-frontend-workflow)
-16. [Validator Frontend Workflow](#16-validator-frontend-workflow)
-17. [Admin Frontend Workflow](#17-admin-frontend-workflow)
+10. [Error Reference Table](#10-error-reference-table)
+11. [Miner Workflow](#11-miner-workflow)
+12. [Validator Workflow](#12-validator-workflow)
+13. [Admin Workflow](#13-admin-workflow)
+14. [Timing Parameters](#14-timing-parameters)
 
 ---
 
@@ -118,7 +117,7 @@ APIRequest:
   expiresAt   (uint256)   # Unix timestamp (seconds)
 ```
 
-**Legacy format** (UUID nonce or RFC3339 timestamps — `UseLegacyType = true`):
+**Legacy format** (UUID nonce or RFC3339 timestamps -- `UseLegacyType = true`):
 
 When any of nonce/issuedAt/expiresAt uses a non-canonical format (UUID or RFC3339), the server tries BOTH type variants for signer recovery:
 
@@ -137,16 +136,31 @@ APIRequest (legacy):
 
 The server tries canonical (uint256) first, then legacy (string) types. Clients using UUID nonce or RFC3339 timestamps should sign with the **legacy** type definition (all three fields as `string`).
 
-**Zero Hash**: `0x0000000000000000000000000000000000000000000000000000000000000000` (64 zero nibbles). Used for ALL empty fields — do NOT use `keccak256("")`.
+**Zero Hash**: `0x0000000000000000000000000000000000000000000000000000000000000000` (64 zero nibbles). Used for ALL empty fields -- do NOT use `keccak256("")`.
 
 **Body Hash**:
-- Empty body or `nil` → **zero hash**
-- `application/json` with valid JSON → canonicalize body per RFC 8785, then `keccak256(canonicalized_bytes)`
-- If JSON canonicalization fails → `keccak256(raw_body_bytes)`
-- Other content types → `keccak256(raw_body_bytes)`
+- Empty body or `nil` -> **zero hash**
+- `application/json` with valid JSON -> canonicalize body per RFC 8785 (JCS), then `keccak256(canonicalized_bytes)`
+- If JSON canonicalization fails -> `keccak256(raw_body_bytes)`
+- Other content types -> `keccak256(raw_body_bytes)`
+
+**RFC 8785 (JCS) canonicalization rules** -- the server uses `github.com/cyberphone/json-canonicalization`:
+- Sort object keys lexicographically (by Unicode code point)
+- Use compact separators: no whitespace (equivalent to Python `separators=(',', ':')`)
+- **Non-ASCII characters (e.g. Chinese, emoji) are kept as raw UTF-8 bytes, NOT escaped to `\uXXXX`**
+- Only ASCII control characters (`< U+0020`) are `\u`-escaped
+- Standard JSON escapes: `\\`, `\"`, `\b`, `\f`, `\n`, `\r`, `\t`
+- Numbers: ES6 formatting (no trailing zeros, no positive exponent sign)
+
+**IMPORTANT for Python clients**: Use `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)`. Do NOT use `ensure_ascii=True` -- the server outputs non-ASCII as raw UTF-8. ASCII-escaping produces different bytes -> different keccak256 -> `SIGNER_MISMATCH`.
+
+```
+Input:  {"name": "测试", "value": 42}
+Output: {"name":"测试","value":42}    <- raw UTF-8, NOT \u6d4b\u8bd5
+```
 
 **Query Hash**:
-- No query parameters → **zero hash**
+- No query parameters -> **zero hash**
 - Sort query parameter keys alphabetically
 - For each key, sort its values alphabetically
 - URL-encode both key and value with `url.QueryEscape`
@@ -154,14 +168,14 @@ The server tries canonical (uint256) first, then legacy (string) types. Clients 
 - Hash: `keccak256(joined_string)`
 
 **Headers Hash**:
-- No signed headers (or `X-Signed-Headers` not set) → **zero hash**
+- No signed headers (or `X-Signed-Headers` not set) -> **zero hash**
 - `X-Signed-Headers` is parsed by splitting on `,`, lowercasing, and **sorting alphabetically**
 - For each signed header: join multiple values with `,`, trim and collapse internal whitespace to single space
 - Format each as `lowercasekey:normalizedvalue`
 - Sort all lines alphabetically
 - Join with `\n` (newline)
 - Hash: `keccak256(joined_string)`
-- If `X-Signed-Headers` lists headers but none are present in the request → **zero hash**
+- If `X-Signed-Headers` lists headers but none are present in the request -> **zero hash**
 
 **Nonce**: Two formats supported:
 - **decimal-string** (canonical): parsed as `big.Int`, re-serialized with `.String()`. No leading zeros.
@@ -202,31 +216,40 @@ When a UUID nonce is used, the server sets `UseLegacyType = true` which changes 
 
 All API responses use a consistent envelope format.
 
-### 2.1 Success Response
+### 2.1 SuccessEnvelope
 
 ```json
 {
   "success": true,
-  "data": { ... },
+  "data": { "<varies by endpoint>" },
   "meta": {
     "request_id": "uuid-string"
   }
 }
 ```
 
-### 2.2 Error Response
+TypeScript equivalent:
+```typescript
+interface SuccessEnvelope<T> {
+  success: true;
+  data: T;
+  meta: { request_id: string };
+}
+```
+
+### 2.2 ErrorEnvelope
 
 ```json
 {
   "success": false,
   "error": {
-    "code": "error_code",
-    "category": "category",
-    "message": "Human-readable description",
+    "code": "string",
+    "category": "string",
+    "message": "string",
     "retryable": false,
     "recoverable": true,
-    "recovery_strategy": "fix_request",
-    "hint": "optional hint",
+    "recovery_strategy": "string",
+    "hint": "string",
     "field_errors": [
       {
         "field": "field_name",
@@ -251,9 +274,10 @@ All API responses use a consistent envelope format.
         "blocking": true
       }
     ],
-    "docs_key": "optional_docs_reference",
+    "docs_key": "string",
     "retry_at": "RFC3339 timestamp",
-    "retry_after_seconds": 60
+    "retry_after_seconds": 60,
+    "details": { "key": "value" }
   },
   "meta": {
     "request_id": "uuid-string"
@@ -261,26 +285,70 @@ All API responses use a consistent envelope format.
 }
 ```
 
-### 2.3 Error Categories
+### 2.3 ErrorBody Fields (complete)
+
+| Field | Type | Always present | Description |
+|-------|------|----------------|-------------|
+| `code` | string | Yes | Machine-readable error code |
+| `category` | string | Yes | Error category (see below) |
+| `message` | string | Yes | Human-readable description |
+| `retryable` | bool | Yes | Whether retrying the same request may succeed |
+| `recoverable` | bool | Yes | Whether the caller can fix the issue |
+| `recovery_strategy` | string | No (omitempty) | How to recover (see below) |
+| `hint` | string | No (omitempty) | LLM-friendly hint on what to do next |
+| `field_errors` | FieldError[] | No (omitempty) | Per-field validation errors |
+| `resource` | object | No (omitempty) | Resource info (type, current_state) |
+| `requirements` | object | No (omitempty) | Requirements not met (e.g. min_stake) |
+| `recovery_actions` | RecoveryAction[] | No (omitempty) | Suggested recovery actions |
+| `docs_key` | string | No (omitempty) | Documentation reference |
+| `retry_at` | string | No (omitempty) | Earliest retry time (RFC 3339) |
+| `retry_after_seconds` | int | No (omitempty) | Seconds to wait before retry |
+| `details` | map | No (omitempty) | Additional details |
+
+### 2.4 NextActionHint
+
+When an endpoint response includes a `next_action` field, it tells the LLM caller what to do next:
+
+```json
+{
+  "action": "answer_pow_challenge",
+  "method": "POST",
+  "path": "/api/mining/v1/pow-challenges/<id>/answer",
+  "description": "Answer the PoW challenge to unlock submission"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | string | Machine-readable action name |
+| `method` | string | HTTP method to use |
+| `path` | string | Full API path to call |
+| `description` | string | Human-readable description of what the next step does |
+
+### 2.5 Error Categories
 
 | Category | Description |
 |----------|-------------|
 | `validation` | Request validation failure |
 | `authentication` | Auth header/signature issues |
 | `permission` | Role/permission restrictions |
+| `precondition` | Preconditions not met (e.g. address not registered) |
 | `state_conflict` | State transition violations |
 | `rate_limit` | Rate limiting |
 | `dependency` | Service dependency issues |
 | `not_found` | Resource not found |
 | `internal` | Server errors |
 
-### 2.4 Recovery Strategies
+### 2.6 Recovery Strategies
 
 | Strategy | Description |
 |----------|-------------|
 | `fix_request` | Fix request parameters and retry |
 | `retry_same_request` | Retry the same request later |
+| `wait_and_retry` | Wait for a cooldown period then retry |
+| `wait_next_epoch` | Wait until the next epoch |
 | `change_precondition` | Change a precondition (e.g. stake more) |
+| `register_address` | Register address on-chain first |
 | `switch_identity` | Use a different identity |
 | `request_human_help` | Requires manual intervention |
 | `stop` | Cannot be recovered |
@@ -297,7 +365,7 @@ admin (rank 3) > validator (rank 2) > miner (rank 1) > member (rank 0)
 
 **Two permission models are used:**
 - **`MinRole`**: Higher roles inherit lower role permissions (e.g. `min: admin` means admin only; `min: member` means all roles).
-- **`AllowedRoles`**: Only the exact listed roles are permitted — **admin does NOT inherit**. For example, `allowed: miner` means only miners can call the endpoint; admin will get 403.
+- **`AllowedRoles`**: Only the exact listed roles are permitted -- **admin does NOT inherit**. For example, `allowed: miner` means only miners can call the endpoint; admin will get 403.
 
 See Appendix A for which model each permission uses.
 
@@ -345,34 +413,171 @@ Non-admin users must have their address registered on-chain before accessing pro
 
 ---
 
-## 4. Health & Monitoring
+## 4. State Machines
 
-All health endpoints are **public** (no authentication required).
+This section documents the key state machines in the platform. Understanding these is critical for LLM callers that need to drive multi-step workflows.
 
-| Method | Path | Description | Response |
-|--------|------|-------------|----------|
-| `GET` | `/health` | Liveness probe | `{"status": "ok"}` |
-| `GET` | `/healthz` | Legacy liveness (deprecated) | `{"status": "ok"}` |
-| `GET` | `/ready` | Readiness probe (Core + Mining) | `{"status": "ready"}` |
-| `GET` | `/readyz` | Legacy readiness (deprecated) | `{"status": "ready"}` |
-| `GET` | `/metrics` | Prometheus metrics (OpenMetrics) | Prometheus text format |
+### 4.1 PoW State Machine (Miner Submission Gate)
+
+Each miner has a `submission_state` that controls whether they can submit data. The state transitions probabilistically after each successful submission based on the miner's credit score.
+
+```
+                    PoW passed
+    +----------+  ------------->  +----------+
+    | checking |                  | opening  |
+    +----------+  <-------------  +----------+
+                    dice roll          |
+                    (probability       | submit entries
+                     based on credit)  | (accepted)
+                                       v
+                                  transition back
+                                  based on pow_probability
+```
+
+**States:**
+
+| State | `can_submit` | Description |
+|-------|-------------|-------------|
+| `opening` | `true` | Miner can submit entries freely |
+| `checking` | `false` | Miner must answer a PoW challenge before submitting |
+
+**Transition rules:**
+- `checking -> opening`: Miner answers the PoW challenge correctly
+- `opening -> checking`: After a successful submission, the system rolls dice with probability = `pow_probability` (from heartbeat). If triggered, state transitions to `checking`.
+- `opening -> opening`: If dice roll does not trigger, state stays `opening`.
+
+**PoW probability by credit tier:**
+
+| Tier | Credit Range | `pow_probability` |
+|------|-------------|-------------------|
+| `excellent` | 80-100 | 0.01 (1%) |
+| `good` | 60-79 | 0.05 (5%) |
+| `normal` | 40-59 | 0.20 (20%) |
+| `restricted` | 20-39 | 0.50 (50%) |
+| `novice` | 0-19 | 1.00 (100%) |
+
+**PoW challenge mechanism:** The challenge is a dynamic SHA256 hash computation. The server generates a random nonce (UUID), computes `SHA256(nonce)`, and asks the miner to return the first 8 hex characters of the hash.
+
+- **Prompt**: `Compute SHA256("<nonce>") and return the first 8 hex characters.`
+- **Expected answer**: `hex.EncodeToString(sha256.Sum256([]byte(nonce))[:4])` -- i.e., the first 4 bytes of the SHA256 hash, encoded as 8 hex characters.
+- **Challenge TTL**: 5 minutes
+
+### 4.2 Submission Lifecycle
+
+```
+    +----------+       validation       +-----------+
+    | pending  | --------------------> | confirmed |
+    +----------+                        +-----------+
+         |
+         | validation (negative)
+         v
+    +----------+
+    | rejected |
+    +----------+
+```
+
+**States:**
+
+| State | Description |
+|-------|-------------|
+| `pending` | Submitted, awaiting validation |
+| `confirmed` | Passed quality validation |
+| `rejected` | Failed validation or determined fraudulent |
+
+**Deduplication enforcement:** Dedup is enforced via a partial unique index on the submissions table (`WHERE status != 'rejected'`). There is no separate `dedup_occupancies` table. The dedup-occupancies endpoints query submissions directly.
+
+### 4.3 Quality Workflow Lifecycle
+
+Each sampled submission spawns a quality workflow that progresses through repeat crawl and evaluation phases.
+
+```
+                          repeat task
+    +----------+  created   +-----------------+  miner claims   +---------------------+
+    | accepted | --------> | repeat_pending  | ------------->  | repeat_in_progress  |
+    +----------+            +-----------------+                 +---------------------+
+                                                                        |
+                                                    miner reports       |
+                                                                        v
+                                                            +----------------------+
+                                                            | evaluation_pending   |
+                                                            +----------------------+
+                                                                        |
+                                                    validator claims    |
+                                                                        v
+                                                            +------------------------+
+                                                            | evaluation_in_progress |
+                                                            +------------------------+
+                                                              /                   \
+                                          evaluation          evaluation
+                                          completes           fails/timeout
+                                              |                      |
+                                              v                      v
+                                          +--------+           +---------+
+                                          | closed |           | invalid |
+                                          +--------+           +---------+
+```
+
+**States:**
+
+| State | Description |
+|-------|-------------|
+| `accepted` | Submission sampled; workflow created |
+| `repeat_pending` | Repeat crawl task created, awaiting miner claim |
+| `repeat_in_progress` | A miner is re-crawling the URL |
+| `evaluation_pending` | Repeat data received; evaluation task created |
+| `evaluation_in_progress` | A validator is evaluating the data |
+| `closed` | Evaluation completed successfully |
+| `invalid` | Workflow failed (timeout, error, etc.) |
+
+**QualityWorkflowRecord fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `submission_id` | string | The submission being evaluated |
+| `schema_fields` | string[] | Sorted schema field names |
+| `status` | string | Current workflow status |
+| `repeat_task_id` | string | Associated repeat crawl task ID |
+| `evaluation_id` | string | Associated evaluation task ID |
+| `created_at` | datetime | Workflow creation time |
+| `updated_at` | datetime | Last update time |
+
+### 4.4 Evaluation Task Lifecycle
+
+```
+    +-----------------+     claim      +------------------+     report     +------------+
+    | pending_reports | ------------> | in_progress      | ------------>  | completed  |
+    +-----------------+               +------------------+                +------------+
+                                              |
+                                              | timeout/error
+                                              v
+                                        +---------+
+                                        | expired |
+                                        +---------+
+```
+
+**Evaluation modes:**
+
+| Mode | Validators | Trigger |
+|------|-----------|---------|
+| `single` | 1 validator | Default for Step 1 evaluations |
+| `peer_review` | Up to 5 validators | Triggered when consensus is needed |
 
 ---
 
-## 5. Public API
+## 5. Public API (no auth)
 
 **Base Path**: `/api/public/v1`  
-**Authentication**: None
+**Authentication**: None required
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/signature-config` | Get EIP-712 signature configuration |
-| `GET` | `/protocol-info` | Protocol info (min_stake, chain, registration URL) |
-| `GET` | `/stats` | Network overview (online miners/validators, current epoch) |
+### 5.1 Signature Config
 
-See [Section 1.1](#11-signature-configuration) for signature-config response details.
+```
+GET /api/public/v1/signature-config
+```
 
-### 5.1 Protocol Info
+See [Section 1.1](#11-signature-configuration) for full response.
+
+### 5.2 Protocol Info
 
 ```
 GET /api/public/v1/protocol-info
@@ -392,7 +597,7 @@ GET /api/public/v1/protocol-info
 }
 ```
 
-### 5.2 Network Stats
+### 5.3 Network Stats
 
 ```
 GET /api/public/v1/stats
@@ -405,10 +610,22 @@ GET /api/public/v1/stats
   "data": {
     "online_miners": 42,
     "online_validators": 8,
-    "current_epoch": "2026-04-06"
+    "current_epoch": "2026-04-09"
   }
 }
 ```
+
+### 5.4 Health Endpoints
+
+| Method | Path | Description | Response |
+|--------|------|-------------|----------|
+| `GET` | `/health` | Liveness probe | `{"status": "ok"}` |
+| `GET` | `/healthz` | Legacy liveness (deprecated) | `{"status": "ok"}` |
+| `GET` | `/ready` | Readiness probe (Core + Mining) | `{"status": "ready"}` |
+| `GET` | `/readyz` | Legacy readiness (deprecated) | `{"status": "ready"}` |
+| `GET` | `/metrics` | Prometheus metrics (OpenMetrics) | Prometheus text format |
+
+**Error codes:** `service_not_ready` (503) when dependencies are not ready.
 
 ---
 
@@ -454,8 +671,8 @@ POST /api/iam/v1/validator-applications
     "id": "app-uuid",
     "address": "0x1234...abcd",
     "status": "approved",
-    "submitted_at": "2026-04-06T10:00:00Z",
-    "reviewed_at": "2026-04-06T10:00:00Z",
+    "submitted_at": "2026-04-09T10:00:00Z",
+    "reviewed_at": "2026-04-09T10:00:00Z",
     "reviewed_by": "auto"
   }
 }
@@ -466,7 +683,7 @@ POST /api/iam/v1/validator-applications
 - Allowlisted addresses bypass stake checks (`reviewed_by: "allowlist"`).
 - If capacity is full, the applicant can replace a lower-staked validator.
 
-**Error Responses:**
+**Error codes:**
 
 | HTTP | Code | Description |
 |------|------|-------------|
@@ -491,8 +708,8 @@ GET /api/iam/v1/validator-applications/me
     "id": "app-uuid",
     "address": "0x1234...abcd",
     "status": "approved",
-    "submitted_at": "2026-04-06T10:00:00Z",
-    "reviewed_at": "2026-04-06T10:00:00Z",
+    "submitted_at": "2026-04-09T10:00:00Z",
+    "reviewed_at": "2026-04-09T10:00:00Z",
     "reviewed_by": "auto"
   }
 }
@@ -505,7 +722,10 @@ GET /api/iam/v1/validator-applications/me
   "error": {
     "code": "validator_application_not_found",
     "category": "not_found",
-    "message": "validator application not found"
+    "message": "validator application not found",
+    "retryable": false,
+    "recoverable": false,
+    "recovery_strategy": "stop"
   }
 }
 ```
@@ -530,8 +750,8 @@ GET /api/iam/v1/validator-applications
       "id": "app-uuid",
       "address": "0x1234...abcd",
       "status": "approved",
-      "submitted_at": "2026-04-06T10:00:00Z",
-      "reviewed_at": "2026-04-06T10:00:00Z",
+      "submitted_at": "2026-04-09T10:00:00Z",
+      "reviewed_at": "2026-04-09T10:00:00Z",
       "reviewed_by": "auto"
     }
   ]
@@ -574,6 +794,8 @@ POST /api/iam/v1/validator-applications/:id/review
 }
 ```
 
+**Error codes:** `validator_application_reviewed` (409), `invalid_review_decision` (400)
+
 ---
 
 ## 7. Core Module
@@ -603,7 +825,7 @@ GET /api/core/v1/datasets
       "creation_fee": "100",
       "status": "active",
       "source_domains": ["twitter.com", "x.com"],
-      "schema": { ... },
+      "schema": { "post_id": {"type":"string","required":true}, "content": {"type":"string","required":true} },
       "dedup_fields": ["post_id"],
       "url_patterns": ["https?://x\\.com/.+/status/\\d+"],
       "refresh_interval": "24h",
@@ -616,7 +838,7 @@ GET /api/core/v1/datasets
 }
 ```
 
-**Note on optional fields**: `updated_at`, `reviewed_at`, `rejection_reason`, `refresh_interval` use `omitempty` — they are **absent from the JSON** (not empty strings) when unset. Frontend code should check for field existence, not empty string.
+**Note on optional fields**: `updated_at`, `reviewed_at`, `rejection_reason`, `refresh_interval` use `omitempty` -- they are **absent from the JSON** (not empty strings) when unset. Frontend code should check for field existence, not empty string.
 
 #### Get Dataset (Public)
 
@@ -624,9 +846,11 @@ GET /api/core/v1/datasets
 GET /api/core/v1/datasets/:id
 ```
 
-**Authentication**: Not required
+**Authentication**: Not required  
+**Response**: Same shape as a single item in the list above.  
+**Error codes:** `dataset_not_found` (404)
 
-#### Create Dataset (Admin)
+#### Create Dataset
 
 ```
 POST /api/core/v1/datasets
@@ -662,13 +886,15 @@ POST /api/core/v1/datasets
 | `url_patterns` | string[] | No | Go-compatible regex patterns |
 | `refresh_interval` | string | No | Refresh interval (e.g. "24h") |
 
+**Error codes:** `invalid_request` (400)
+
 #### Review Dataset (Admin)
 
 ```
 POST /api/core/v1/datasets/:id/review
 ```
 
-**Permission**: `core.datasets.review`
+**Permission**: `core.datasets.review` (min role: `admin`)
 
 **Request:**
 ```json
@@ -677,6 +903,8 @@ POST /api/core/v1/datasets/:id/review
   "rejection_reason": ""
 }
 ```
+
+**Error codes:** `dataset_not_found` (404), `invalid_review_decision` (400)
 
 #### Dataset Status Management (Admin)
 
@@ -690,11 +918,11 @@ POST /api/core/v1/datasets/:id/review
 
 **Status Transitions:**
 ```
-pending_review → active (approve)
-pending_review → rejected (reject)
-active ↔ paused
-active → archived
-paused → archived
+pending_review -> active (approve)
+pending_review -> rejected (reject)
+active <-> paused
+active -> archived
+paused -> archived
 ```
 
 **`/datasets/:id/status` Request:**
@@ -707,152 +935,65 @@ paused → archived
 { "reason": "Insufficient data quality criteria" }
 ```
 
-### 7.2 Submissions
+**Error codes:** `dataset_not_found` (404), `dataset_not_active` (409)
 
-#### Submit Data Entries
+### 7.2 Epochs
 
-```
-POST /api/core/v1/submissions
-```
-
-**Permission**: `core.submissions.create` (allowed: `miner` only)
-
-**Request:**
-```json
-{
-  "dataset_id": "ds_posts",
-  "entries": [
-    {
-      "url": "https://x.com/user/status/12345",
-      "cleaned_data": "This is the post content...",
-      "structured_data": {
-        "post_id": "12345",
-        "content": "This is the post content...",
-        "author": "user"
-      },
-      "crawl_timestamp": "2026-04-06T10:00:00Z"
-    }
-  ]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `dataset_id` | string | Yes | Target dataset ID |
-| `entries` | array | Yes | Submission entries |
-| `entries[].url` | string | Yes | Source URL |
-| `entries[].cleaned_data` | string | Yes | Cleaned text content |
-| `entries[].structured_data` | object | Yes | Structured fields matching dataset schema |
-| `entries[].crawl_timestamp` | string | Yes | Crawl timestamp (RFC 3339, e.g. `"2026-03-28T10:00:00Z"`) |
-
-**Response (201 Created or 200 if challenge required):**
-```json
-{
-  "success": true,
-  "data": {
-    "admission_status": "accepted",
-    "challenge": null,
-    "accepted": [
-      {
-        "id": "sub-uuid",
-        "dataset_id": "ds_posts",
-        "miner_id": "0x1234...",
-        "epoch_id": "2026-04-06",
-        "original_url": "https://x.com/user/status/12345",
-        "normalized_url": "https://x.com/user/status/12345",
-        "dedup_hash": "abc123...",
-        "high_risk": false,
-        "cleaned_data": "This is the post content...",
-        "structured_data": { "post_id": "12345", "content": "...", "author": "user" },
-        "crawl_timestamp": "2026-04-06T10:00:00Z",
-        "status": "pending",
-        "refresh_of_submission_id": "",
-        "created_at": "2026-04-06T10:00:00Z"
-      }
-    ],
-    "rejected": [
-      {
-        "url": "https://x.com/user/status/99999",
-        "reason": "dedup_hash_conflict"
-      }
-    ]
-  }
-}
-```
-
-**Admission Status Values:**
-- `"accepted"` — All valid entries were accepted (HTTP 201)
-- `"challenge_required"` — PoW challenge triggered (HTTP 200); entries are held pending challenge completion
-
-**Note**: `challenge` and `rejected` use `omitempty` — they are **absent from JSON** when null/empty, not `null` or `[]`.
-
-**Per-Entry Rejection Reasons:**
-- `url_pattern_mismatch` — URL doesn't match dataset patterns
-- `duplicate` — Duplicate entry within same batch
-- `dedup_hash_in_cooldown` — Dedup hash in cooldown period
-- `url_already_occupied` — URL already occupied
-- `malformed` — Entry validation failed
-- `submission_too_frequent` — Submission interval too short (min_interval = max(avg_interval/5, 30s))
-- `dataset_not_active` — Dataset is not active
-- `internal_error` — Server error
-
-#### PoW Challenge Response (when `admission_status` = `"challenge_required"`)
-
-The `challenge` field contains:
-```json
-{
-  "id": "challenge-uuid",
-  "miner_id": "0x1234...",
-  "epoch_id": "2026-04-06",
-  "dataset_id": "ds_posts",
-  "schema_key": "posts",
-  "question_id": "posts-understanding-v1",
-  "question_version": 1,
-  "question_type": "content_understanding",
-  "prompt": "Question text...",
-  "validation_meta": { "schema_fields": "post_id,content,author" },
-  "created_at": "2026-04-06T10:00:00Z",
-  "expires_at": "2026-04-06T10:05:00Z"
-}
-```
-
-#### List Submissions
+#### List Epochs (Public)
 
 ```
-GET /api/core/v1/submissions
+GET /api/core/v1/epochs
 ```
 
-**Permission**: `core.submissions.read` (min role: `member`)  
+**Authentication**: Not required  
 **Query Parameters**: `page`, `page_size`, `sort`, `order`
 
-**Note**: Non-admin callers automatically see only their own submissions (the server filters by the caller's miner_id).
-
-**Response item (SubmissionQueryResponse):**
+**Response item:**
 ```json
 {
-  "id": "sub-uuid",
-  "dataset_id": "ds_posts",
-  "miner_id": "0x1234...",
-  "epoch_id": "2026-04-06",
-  "dedup_hash": "abc123...",
-  "high_risk": false,
-  "crawl_timestamp": "2026-04-06T10:00:00Z",
-  "status": "confirmed",
-  "refresh_of_submission_id": "",
-  "created_at": "2026-04-06T10:00:00Z",
-  "updated_at": "2026-04-06T12:00:00Z"
+  "id": "epoch-uuid",
+  "epoch_id": "2026-04-09",
+  "status": "completed",
+  "summary": {
+    "total": 1000,
+    "confirmed": 950,
+    "rejected": 50
+  },
+  "window_start_at": "2026-04-09T00:00:00Z",
+  "window_end_at": "2026-04-10T00:00:00Z",
+  "settlement_started_at": "2026-04-10T00:00:05Z",
+  "settlement_completed_at": "2026-04-10T00:01:00Z",
+  "created_at": "2026-04-09T00:00:00Z",
+  "updated_at": "2026-04-10T00:01:00Z"
 }
 ```
 
-#### Get Submission
+**Epoch Status Values**: `open`, `settling`, `completed`, `failed`
+
+#### Get Epoch (Public)
 
 ```
-GET /api/core/v1/submissions/:id
+GET /api/core/v1/epochs/:epochID
 ```
 
-**Permission**: `core.submissions.read`
+**Authentication**: Not required
 
-**Note**: Non-admin callers can only view their own submissions. Attempting to view another miner's submission returns `403 ownership_required` with an LLM-friendly message that includes the owner and requester addresses.
+#### Current Epoch Shortcut (Public)
+
+```
+GET /api/core/v1/epochs/current
+```
+
+**Authentication**: Not required  
+Returns the current epoch without needing to list all epochs.
+
+#### Settle Epoch (Admin)
+
+```
+POST /api/core/v1/epochs/:epochID/settle
+```
+
+**Permission**: `core.epochs.settle` (min role: `admin`)
 
 ### 7.3 Dataset Stats (Public)
 
@@ -860,39 +1001,18 @@ GET /api/core/v1/submissions/:id
 GET /api/core/v1/datasets/:id/stats
 ```
 
-**Authentication**: Not required
-
+**Authentication**: Not required  
 Returns submission statistics for a specific dataset.
 
-### 7.4 Current Epoch Shortcut (Public)
+### 7.4 Deduplication
 
-```
-GET /api/core/v1/epochs/current
-```
-
-**Authentication**: Not required
-
-Returns the current epoch without needing to list all epochs.
-
-### 7.5 URL Occupancy Check (Public)
-
-```
-GET /api/core/v1/url/check?dataset_id=ds_posts&url=https://x.com/user/status/12345
-```
-
-**Authentication**: Not required
-
-Checks whether a URL is already occupied for a given dataset.
-
-### 7.6 Deduplication
-
-#### Check Dedup Hash
+#### Check Dedup Hash (Public)
 
 ```
 GET /api/core/v1/dedup/check?dataset_id=ds_posts&dedup_hash=abc123
 ```
 
-**Authentication**: Not required (public endpoint)
+**Authentication**: Not required
 
 **Response:**
 ```json
@@ -906,14 +1026,16 @@ GET /api/core/v1/dedup/check?dataset_id=ds_posts&dedup_hash=abc123
 }
 ```
 
-#### List Dedup Occupancies
+#### List Dedup Occupancies (Public)
 
 ```
 GET /api/core/v1/dedup-occupancies
 ```
 
-**Authentication**: Not required (public endpoint)  
+**Authentication**: Not required  
 **Query Parameters**: `page`, `page_size`, `sort`, `order`
+
+**Note:** The `dedup_occupancies` table has been removed. This endpoint queries the `submissions` table directly using the partial unique index (`WHERE status != 'rejected'`).
 
 **Response item:**
 ```json
@@ -923,25 +1045,25 @@ GET /api/core/v1/dedup-occupancies
   "submission_id": "sub-uuid",
   "submission_status": "confirmed",
   "occupied": true,
-  "updated_at": "2026-04-06T10:00:00Z"
+  "updated_at": "2026-04-09T10:00:00Z"
 }
 ```
 
-#### Get Dedup Occupancy
+#### Get Dedup Occupancy (Public)
 
 ```
 GET /api/core/v1/dedup-occupancies/:datasetId/:dedupHash
 ```
 
-**Authentication**: Not required (public endpoint)
+**Authentication**: Not required
 
-#### Check Dedup Occupancy by Structured Data
+#### Check Dedup Occupancy by Structured Data (Public)
 
 ```
 POST /api/core/v1/dedup-occupancies/check
 ```
 
-**Authentication**: Not required (public endpoint)
+**Authentication**: Not required
 
 **Request:**
 ```json
@@ -966,107 +1088,16 @@ POST /api/core/v1/dedup-occupancies/check
 }
 ```
 
-### 7.7 Validation Results
-
-#### Create Validation Result
+### 7.5 URL Occupancy Check (Public)
 
 ```
-POST /api/core/v1/validation-results
-```
-
-**Permission**: `core.validation_results.create`
-
-**Request:**
-```json
-{
-  "submission_id": "sub-uuid",
-  "verdict": "accepted",
-  "score": 85,
-  "comment": "Data quality is good",
-  "idempotency_key": "unique-key"
-}
-```
-
-| Field | Type | Values |
-|-------|------|--------|
-| `verdict` | string | `"accepted"` or `"rejected"` |
-| `score` | int | 0-100 |
-| `idempotency_key` | string | Unique key to prevent duplicates |
-
-#### List Validation Results
-
-```
-GET /api/core/v1/validation-results
-```
-
-**Permission**: `core.validation_results.read` (allowed: `miner`, `validator`, `admin`)
-
-**Note**: Results are auto-filtered by role:
-- **Miner**: sees validation results for their own submissions only
-- **Validator**: sees their own evaluations only
-- **Admin**: sees all results
-
-#### Get Validation Result
-
-```
-GET /api/core/v1/validation-results/:id
-```
-
-**Permission**: `core.validation_results.read`
-
-**Note**: Ownership is enforced per role:
-- **Miner**: can only view results for their own submissions (returns `403 ownership_required` otherwise)
-- **Validator**: can only view their own evaluations (returns `403 ownership_required` otherwise)
-- **Admin**: can view all results
-
-### 7.8 Epochs
-
-#### List Epochs (Public)
-
-```
-GET /api/core/v1/epochs
+GET /api/core/v1/url/check?dataset_id=ds_posts&url=https://x.com/user/status/12345
 ```
 
 **Authentication**: Not required  
-**Query Parameters**: `page`, `page_size`, `sort`, `order`
+Checks whether a URL is already occupied for a given dataset.
 
-**Response item:**
-```json
-{
-  "id": "epoch-uuid",
-  "epoch_id": "2026-04-06",
-  "status": "completed",
-  "summary": {
-    "total": 1000,
-    "confirmed": 950,
-    "rejected": 50
-  },
-  "window_start_at": "2026-04-06T00:00:00Z",
-  "window_end_at": "2026-04-07T00:00:00Z",
-  "settlement_started_at": "2026-04-07T00:00:05Z",
-  "settlement_completed_at": "2026-04-07T00:01:00Z",
-  "created_at": "2026-04-06T00:00:00Z",
-  "updated_at": "2026-04-07T00:01:00Z"
-}
-```
-
-**Epoch Status Values**: `open`, `settling`, `completed`, `failed`
-
-#### Get Epoch (Public)
-
-```
-GET /api/core/v1/epochs/:epochID
-```
-
-#### Settle Epoch (Admin)
-
-```
-POST /api/core/v1/epochs/:epochID/settle
-```
-
-**Permission**: `core.epochs.settle` (min role: `admin`)
-
-### 7.9 Protocol Configuration (Admin)
+### 7.6 Protocol Configuration (Admin)
 
 #### List Protocol Configs
 
@@ -1088,7 +1119,7 @@ GET /api/core/v1/protocol-configs?key=sampling_rate
 }
 ```
 
-**Note**: `updated_at` is omitted from the response when the config has never been updated (newly created configs).
+**Note**: `updated_at` is omitted from the response when the config has never been updated.
 
 #### Get Protocol Config
 
@@ -1102,6 +1133,8 @@ GET /api/core/v1/protocol-configs/:key?scope=ds_posts
 ```
 PUT /api/core/v1/protocol-configs
 ```
+
+**Permission**: `core.protocol_configs.write` (min role: `admin`)
 
 **Request:**
 ```json
@@ -1127,7 +1160,7 @@ DELETE /api/core/v1/protocol-configs/:key
 DELETE /api/core/v1/protocol-configs/:key?scope=ds_posts
 ```
 
-**Permission**: `core.protocol_configs.write`
+**Permission**: `core.protocol_configs.write` (min role: `admin`)
 
 #### Default Protocol Config Keys
 
@@ -1142,6 +1175,260 @@ DELETE /api/core/v1/protocol-configs/:key?scope=ds_posts
 | `min_stake` | `"10000000000000000000000"` | Min validator stake (10000 AWP in wei) |
 | `emission_weight` | Per-dataset | Reward weight per dataset |
 
+### 7.7 Submissions (Core-forwarded, DEPRECATED)
+
+> **DEPRECATED**: These endpoints are backward-compatibility shims that forward to the Mining service. New integrations should use the Mining module endpoints at `/api/mining/v1/submissions` (see Section 8.4) instead. These forwarding routes will be removed in a future release.
+
+Submission endpoints under `/api/core/v1` forward to the Mining service. They behave identically to the Mining module endpoints but use the Core path prefix.
+
+#### Submit Data Entries
+
+```
+POST /api/core/v1/submissions
+```
+
+**Permission**: `mining.submission.create` (allowed: `miner` only via core forwarding)
+
+**Request:**
+```json
+{
+  "dataset_id": "ds_posts",
+  "entries": [
+    {
+      "url": "https://x.com/user/status/12345",
+      "cleaned_data": "This is the post content...",
+      "structured_data": {
+        "post_id": "12345",
+        "content": "This is the post content...",
+        "author": "user"
+      },
+      "crawl_timestamp": "2026-04-09T10:00:00Z"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dataset_id` | string | Yes | Target dataset ID |
+| `entries` | array | Yes | Submission entries |
+| `entries[].url` | string | Yes | Source URL |
+| `entries[].cleaned_data` | string | Yes | Cleaned text content |
+| `entries[].structured_data` | object | Yes | Structured fields matching dataset schema |
+| `entries[].crawl_timestamp` | string | Yes | Crawl timestamp (RFC 3339, e.g. `"2026-04-09T10:00:00Z"`) |
+
+**Response fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `admission_status` | string | `"accepted"` or `"challenge_required"` |
+| `accepted` | array | Accepted submissions |
+| `rejected` | array | Rejected entries with reasons |
+| `challenge_required` | bool | Legacy boolean (mining path only, omitted on core path). Use `admission_status` instead. |
+| `challenge` | object | PoW challenge (when `admission_status` = `"challenge_required"`) |
+| `next_action` | object | Next step hint (when challenge required) |
+
+**Response (201 Created -- `admission_status` = `"accepted"`):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_status": "accepted",
+    "accepted": [
+      {
+        "id": "sub-uuid",
+        "dataset_id": "ds_posts",
+        "miner_id": "0x1234...",
+        "epoch_id": "2026-04-09",
+        "original_url": "https://x.com/user/status/12345",
+        "normalized_url": "https://x.com/user/status/12345",
+        "dedup_hash": "abc123...",
+        "high_risk": false,
+        "cleaned_data": "This is the post content...",
+        "structured_data": { "post_id": "12345", "content": "...", "author": "user" },
+        "crawl_timestamp": "2026-04-09T10:00:00Z",
+        "status": "pending",
+        "refresh_of_submission_id": "",
+        "created_at": "2026-04-09T10:00:00Z"
+      }
+    ],
+    "rejected": [
+      {
+        "url": "https://x.com/user/status/99999",
+        "reason": "duplicate"
+      }
+    ]
+  }
+}
+```
+
+**Response (428 Precondition Required -- `admission_status` = `"challenge_required"`):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_status": "challenge_required",
+    "accepted": [],
+    "challenge": {
+      "id": "pow_abc123",
+      "miner_id": "0x1234...",
+      "epoch_id": "2026-04-09",
+      "dataset_id": "ds_posts",
+      "schema_key": "posts",
+      "question_id": "hashcash-v1",
+      "question_version": 1,
+      "question_type": "hash_challenge",
+      "prompt": "Compute SHA256(\"f47ac10b-58cc-4372-a567-0e02b2c3d479\") and return the first 8 hex characters.",
+      "validation_meta": { "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479" },
+      "created_at": "2026-04-09T10:00:00Z",
+      "expires_at": "2026-04-09T10:05:00Z"
+    },
+    "next_action": {
+      "action": "answer_pow_challenge",
+      "method": "POST",
+      "path": "/api/mining/v1/pow-challenges/pow_abc123/answer",
+      "description": "Answer the PoW challenge to unlock submission"
+    }
+  }
+}
+```
+
+**SubmissionResponse fields (15 fields):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Submission ID |
+| `dataset_id` | string | Dataset ID |
+| `miner_id` | string | Miner address |
+| `epoch_id` | string | Epoch date |
+| `original_url` | string | Original URL as submitted |
+| `normalized_url` | string | Normalized URL |
+| `dedup_hash` | string | Dedup hash (omitempty) |
+| `high_risk` | bool | High-risk flag (omitempty) |
+| `cleaned_data` | string | Cleaned text content (omitempty) |
+| `structured_data` | object | Structured data (omitempty) |
+| `crawl_timestamp` | datetime | Crawl timestamp |
+| `status` | string | `"pending"`, `"confirmed"`, or `"rejected"` |
+| `refresh_of_submission_id` | string | If this is a refresh, the original submission ID (omitempty) |
+| `created_at` | datetime | Creation timestamp |
+| `updated_at` | datetime | Last update timestamp (omitempty, null if never updated) |
+
+**Admission Status Values:**
+- `"accepted"` -- All valid entries were accepted (HTTP 201)
+- `"challenge_required"` -- PoW challenge triggered (HTTP 428); entries are held pending challenge completion
+
+**Per-Entry Rejection Reasons:**
+- `url_pattern_mismatch` -- URL doesn't match dataset patterns
+- `duplicate` -- Duplicate entry within same batch
+- `dedup_hash_in_cooldown` -- Dedup hash in cooldown period
+- `url_already_occupied` -- URL already occupied
+- `malformed` -- Entry validation failed
+- `submission_too_frequent` -- Submission interval too short
+- `dataset_not_active` -- Dataset is not active
+- `internal_error` -- Server error
+
+**Error codes:** `invalid_request` (400), `dataset_not_found` (404), `dataset_not_active` (409), `miner_not_found` (404), `miner_offline` (409), `submission_too_frequent` (429), `rate_limit_exceeded` (429), `persistence_unavailable` (503)
+
+#### List Submissions
+
+```
+GET /api/core/v1/submissions
+```
+
+**Permission**: `mining.submission.read` (allowed: `miner`, `validator`)  
+**Query Parameters**: `page` (default 1), `page_size` (default 50, max 200)
+
+**Note**: Non-admin callers automatically see only their own submissions (the server filters by the caller's miner_id).
+
+#### Get Submission
+
+```
+GET /api/core/v1/submissions/:id
+```
+
+**Permission**: `mining.submission.read`
+
+**Note**: Non-admin callers can only view their own submissions. Attempting to view another miner's submission returns `403 forbidden`.
+
+### 7.8 Validation Results (Core-forwarded, DEPRECATED)
+
+> **DEPRECATED**: These endpoints are backward-compatibility shims that forward to the Mining service. New integrations should use the Mining module endpoints at `/api/mining/v1/validation-results` (see Section 8.5) instead. These forwarding routes will be removed in a future release.
+
+#### Create Validation Result
+
+```
+POST /api/core/v1/validation-results
+```
+
+**Permission**: `mining.validation_result.create` (allowed: `validator` only)
+
+**Request:**
+```json
+{
+  "submission_id": "sub-uuid",
+  "verdict": "accepted",
+  "score": 85,
+  "comment": "Data quality is good",
+  "idempotency_key": "unique-key"
+}
+```
+
+| Field | Type | Required | Values |
+|-------|------|----------|--------|
+| `submission_id` | string | Yes | Target submission |
+| `verdict` | string | Yes | `"accepted"` or `"rejected"` |
+| `score` | int | Yes | 0-100 |
+| `comment` | string | No | Human-readable comment |
+| `idempotency_key` | string | No | Unique key to prevent duplicates |
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "vr-uuid",
+    "submission_id": "sub-uuid",
+    "validator_id": "0x5678...",
+    "verdict": "accepted",
+    "score": 85,
+    "comment": "Data quality is good",
+    "idempotency_key": "unique-key",
+    "created_at": "2026-04-09T10:00:00Z"
+  }
+}
+```
+
+**Error codes:** `invalid_validation_result` (400), `submission_not_found` (404), `duplicate_submission` (409)
+
+#### List Validation Results
+
+```
+GET /api/core/v1/validation-results?submission_id=sub-uuid
+```
+
+**Permission**: `mining.validation_result.read` (allowed: `miner`, `validator`, `admin`)
+
+**Required query parameter**: `submission_id`
+
+**Note**: Results are auto-filtered by role:
+- **Miner**: must own the referenced submission
+- **Validator**: sees only their own evaluations
+- **Admin**: sees all results
+
+#### Get Validation Result
+
+```
+GET /api/core/v1/validation-results/:id
+```
+
+**Permission**: `mining.validation_result.read`
+
+**Note**: Ownership is enforced per role:
+- **Validator**: can view their own evaluations
+- **Miner**: can view results for their own submissions
+- **Admin**: can view all results
+
+**Error codes:** `validation_result_not_found` (404), `forbidden` (403)
+
 ---
 
 ## 8. Mining Module
@@ -1154,7 +1441,7 @@ DELETE /api/core/v1/protocol-configs/:key?scope=ds_posts
 POST /api/mining/v1/heartbeat
 ```
 
-**Permission**: `mining.heartbeat` (min role: `member`)
+**Permission**: `mining.heartbeat` (allowed: `member`, `miner`, `validator`)
 
 **Request:**
 ```json
@@ -1173,7 +1460,7 @@ POST /api/mining/v1/heartbeat
       "miner_id": "0x1234...",
       "ip_address": "203.0.113.10",
       "client": "miner-cli/1.0",
-      "last_heartbeat_at": "2026-04-06T10:00:00Z",
+      "last_heartbeat_at": "2026-04-09T10:00:00Z",
       "online": true,
       "credit": 65,
       "credit_tier": "good",
@@ -1205,8 +1492,310 @@ POST /api/mining/v1/heartbeat
 - `member` role is auto-promoted to `miner` on first heartbeat call
 - The response type depends on the caller's role (`miner` or `validator`)
 - Heartbeat should be called every **60 seconds**; TTL is **120 seconds** (offline if no heartbeat within this window)
+- After a successful submission (not heartbeat), the system probabilistically transitions the miner's submission state (see Section 4.1)
 
-### 8.2 Ready Pool Management
+**Error codes:** `identity_binding_failed` (500)
+
+### 8.2 PoW Challenge Flow
+
+This is the complete PoW challenge flow with actual JSON examples. The PoW uses dynamic SHA256 challenges (NOT a static question bank).
+
+#### Step 1: Send Heartbeat
+
+```
+POST /api/mining/v1/heartbeat
+Content-Type: application/json
+
+{ "client": "miner-cli/1.0" }
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "role": "miner",
+    "miner": {
+      "miner_id": "0xABCD1234...",
+      "ip_address": "203.0.113.10",
+      "client": "miner-cli/1.0",
+      "last_heartbeat_at": "2026-04-09T10:00:00Z",
+      "online": true,
+      "credit": 65,
+      "credit_tier": "good",
+      "epoch_submit_limit": 10000,
+      "pow_probability": 0.05
+    }
+  }
+}
+```
+
+#### Step 2: Submit Entries (triggers challenge)
+
+```
+POST /api/mining/v1/submissions
+Content-Type: application/json
+
+{
+  "dataset_id": "ds_posts",
+  "entries": [
+    {
+      "url": "https://x.com/alice/status/123456",
+      "cleaned_data": "Hello world from Alice",
+      "structured_data": { "post_id": "123456", "content": "Hello world from Alice", "author": "alice" },
+      "crawl_timestamp": "2026-04-09T10:00:00Z"
+    }
+  ]
+}
+```
+
+**Response (428 -- challenge required because miner is in `checking` state):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_status": "challenge_required",
+    "accepted": [],
+    "challenge": {
+      "id": "pow_e8b5c7a2-4f3d-4e1a-9b2c-8d7e6f5a4b3c",
+      "miner_id": "0xABCD1234...",
+      "epoch_id": "2026-04-09",
+      "dataset_id": "ds_posts",
+      "schema_key": "posts",
+      "question_id": "hashcash-v1",
+      "question_version": 1,
+      "question_type": "hash_challenge",
+      "prompt": "Compute SHA256(\"f47ac10b-58cc-4372-a567-0e02b2c3d479\") and return the first 8 hex characters.",
+      "validation_meta": { "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479" },
+      "created_at": "2026-04-09T10:00:05Z",
+      "expires_at": "2026-04-09T10:05:05Z"
+    },
+    "next_action": {
+      "action": "answer_pow_challenge",
+      "method": "POST",
+      "path": "/api/mining/v1/pow-challenges/pow_e8b5c7a2-4f3d-4e1a-9b2c-8d7e6f5a4b3c/answer",
+      "description": "Answer the PoW challenge to unlock submission"
+    }
+  },
+  "meta": { "request_id": "req-uuid-1" }
+}
+```
+
+#### Step 3: Answer the Challenge
+
+To compute the answer:
+```python
+import hashlib
+nonce = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+h = hashlib.sha256(nonce.encode()).digest()
+answer = h[:4].hex()  # first 4 bytes = 8 hex characters
+# answer = "a1b2c3d4" (example)
+```
+
+```
+POST /api/mining/v1/pow-challenges/pow_e8b5c7a2-4f3d-4e1a-9b2c-8d7e6f5a4b3c/answer
+Content-Type: application/json
+
+{ "answer": "a1b2c3d4" }
+```
+
+**Response (passed):**
+```json
+{
+  "success": true,
+  "data": {
+    "challenge_id": "pow_e8b5c7a2-4f3d-4e1a-9b2c-8d7e6f5a4b3c",
+    "miner_id": "0xABCD1234...",
+    "passed": true,
+    "answered_at": "2026-04-09T10:00:10Z",
+    "next_action": {
+      "action": "retry_submission",
+      "method": "POST",
+      "path": "/api/mining/v1/submissions",
+      "description": "Resubmit the original entries now that PoW is passed"
+    }
+  },
+  "meta": { "request_id": "req-uuid-2" }
+}
+```
+
+**Response (failed -- wrong answer or expired):**
+```json
+{
+  "success": true,
+  "data": {
+    "challenge_id": "pow_e8b5c7a2-...",
+    "miner_id": "0xABCD1234...",
+    "passed": false,
+    "answered_at": "2026-04-09T10:00:10Z"
+  }
+}
+```
+
+Note: When `passed` is `false`, there is no `next_action`. The miner must get a new challenge via the submission gate or by retrying submission.
+
+**Error codes:** `challenge_not_found` (404)
+
+#### Step 4: Resubmit (now in `opening` state)
+
+```
+POST /api/mining/v1/submissions
+Content-Type: application/json
+
+{
+  "dataset_id": "ds_posts",
+  "entries": [
+    {
+      "url": "https://x.com/alice/status/123456",
+      "cleaned_data": "Hello world from Alice",
+      "structured_data": { "post_id": "123456", "content": "Hello world from Alice", "author": "alice" },
+      "crawl_timestamp": "2026-04-09T10:00:00Z"
+    }
+  ]
+}
+```
+
+**Response (201 -- accepted):**
+```json
+{
+  "success": true,
+  "data": {
+    "admission_status": "accepted",
+    "accepted": [
+      {
+        "id": "sub_7f8a9b0c...",
+        "dataset_id": "ds_posts",
+        "miner_id": "0xABCD1234...",
+        "epoch_id": "2026-04-09",
+        "original_url": "https://x.com/alice/status/123456",
+        "normalized_url": "x.com/alice/status/123456",
+        "dedup_hash": "e3b0c44298...",
+        "high_risk": false,
+        "cleaned_data": "Hello world from Alice",
+        "structured_data": { "post_id": "123456", "content": "Hello world from Alice", "author": "alice" },
+        "crawl_timestamp": "2026-04-09T10:00:00Z",
+        "status": "pending",
+        "created_at": "2026-04-09T10:00:15Z"
+      }
+    ]
+  },
+  "meta": { "request_id": "req-uuid-3" }
+}
+```
+
+### 8.3 Submission Gate
+
+Check the miner's current submission gate state without attempting a submission.
+
+```
+GET /api/mining/v1/miners/me/submission-gate
+```
+
+**Permission**: `mining.miner.submission_gate` (allowed: `miner`, `validator`)
+
+**Response (opening state -- can submit):**
+```json
+{
+  "success": true,
+  "data": {
+    "state": "opening",
+    "can_submit": true
+  }
+}
+```
+
+**Response (checking state -- PoW required):**
+```json
+{
+  "success": true,
+  "data": {
+    "state": "checking",
+    "can_submit": false,
+    "challenge": {
+      "id": "pow_abc123...",
+      "miner_id": "0x1234...",
+      "epoch_id": "2026-04-09",
+      "dataset_id": "",
+      "schema_key": "generic",
+      "question_id": "hashcash-v1",
+      "question_version": 1,
+      "question_type": "hash_challenge",
+      "prompt": "Compute SHA256(\"<nonce>\") and return the first 8 hex characters.",
+      "validation_meta": { "nonce": "<nonce>" },
+      "created_at": "2026-04-09T10:00:00Z",
+      "expires_at": "2026-04-09T10:05:00Z"
+    },
+    "next_action": {
+      "action": "answer_pow_challenge",
+      "method": "POST",
+      "path": "/api/mining/v1/pow-challenges/pow_abc123.../answer",
+      "description": "Answer the PoW challenge to unlock submission"
+    }
+  }
+}
+```
+
+**Error codes:** `miner_not_found` (404), `miner_offline` (409)
+
+### 8.4 Submissions (Mining path)
+
+The Mining module has its own submission endpoints that are functionally equivalent to the Core-forwarded ones.
+
+#### Submit Data Entries
+
+```
+POST /api/mining/v1/submissions
+```
+
+**Permission**: `mining.submission.create` (allowed: `miner`, `validator`)
+
+This is the **primary submission endpoint**. Request and response format is documented in Section 7.7 (which describes the deprecated Core-forwarded equivalent). The mining path includes a legacy `challenge_required` boolean field alongside `admission_status`.
+
+#### List Submissions
+
+```
+GET /api/mining/v1/submissions
+```
+
+**Permission**: `mining.submission.read` (allowed: `miner`, `validator`)
+
+#### Get Submission
+
+```
+GET /api/mining/v1/submissions/:id
+```
+
+**Permission**: `mining.submission.read`
+
+### 8.5 Validation Results (Mining path)
+
+#### Create Validation Result
+
+```
+POST /api/mining/v1/validation-results
+```
+
+**Permission**: `mining.validation_result.create` (allowed: `validator`)
+
+This is the **primary validation result endpoint**. Request and response format is documented in Section 7.8 (which describes the deprecated Core-forwarded equivalent).
+
+#### List Validation Results
+
+```
+GET /api/mining/v1/validation-results?submission_id=sub-uuid
+```
+
+**Permission**: `mining.validation_result.read` (allowed: `miner`, `validator`)
+
+#### Get Validation Result
+
+```
+GET /api/mining/v1/validation-results/:id
+```
+
+**Permission**: `mining.validation_result.read`
+
+### 8.6 Ready Pool Management
 
 #### Miner Ready Pool
 
@@ -1235,7 +1824,7 @@ POST /api/mining/v1/validators/ready      # Join ready pool
 POST /api/mining/v1/validators/unready    # Leave ready pool
 ```
 
-**Permission**: `mining.validator.ready` / `mining.validator.unready` (allowed: `validator` only)
+**Permission**: `mining.validator.ready` / `mining.validator.unready` (allowed: `miner`, `validator`)
 
 **Response:**
 ```json
@@ -1248,97 +1837,20 @@ POST /api/mining/v1/validators/unready    # Leave ready pool
 }
 ```
 
-### 8.3 Online Miners/Validators
+### 8.7 Refresh Tasks
 
-#### List Online Miners (Public)
-
-```
-GET /api/mining/v1/miners/online
-```
-
-**Authentication**: Not required
-
-**Response item:**
-```json
-{
-  "miner_id": "0x1234...",
-  "client": "miner-cli/1.0",
-  "last_heartbeat_at": "2026-04-06T10:00:00Z",
-  "online": true,
-  "credit": 65
-}
-```
-
-#### List Online Validators (Public)
-
-```
-GET /api/mining/v1/validators/online
-```
-
-**Authentication**: Not required
-
-**Response item:**
-```json
-{
-  "validator_id": "0x5678...",
-  "client": "validator-cli/1.0",
-  "last_heartbeat_at": "2026-04-06T10:00:00Z",
-  "online": true,
-  "credit": 85,
-  "eligible": true,
-  "ready": true
-}
-```
-
-### 8.4 Proof-of-Work (PoW)
-
-#### Answer PoW Challenge
-
-```
-POST /api/mining/v1/pow-challenges/:id/answer
-```
-
-**Permission**: `mining.pow.answer` (allowed: `miner` only)
-
-**Request:**
-```json
-{
-  "answer": "accepted"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "challenge_id": "challenge-uuid",
-    "miner_id": "0x1234...",
-    "passed": true,
-    "answered_at": "2026-04-06T10:01:00Z"
-  }
-}
-```
-
-**Notes:**
-- PoW challenge is triggered during submission based on `pow_probability` from heartbeat
-- Challenge TTL: **5 minutes**
-- After passing the challenge, the held submission entries are automatically processed
-
-### 8.5 Refresh Tasks
-
-| Method | Path | Permission | Description |
-|--------|------|-----------|-------------|
-| `POST` | `/refresh-tasks` | `mining.refresh.create` | Create refresh task |
-| `POST` | `/refresh-tasks/claim` | `mining.refresh.claim` | Claim a task |
-| `POST` | `/refresh-tasks/:id/report` | `mining.refresh.report` | Report result |
-| `GET` | `/refresh-tasks` | `mining.refresh.list` | List tasks |
-| `GET` | `/refresh-tasks/:id` | `mining.refresh.list` | Get task |
+| Method | Path | Permission | Auth |
+|--------|------|-----------|------|
+| `POST` | `/refresh-tasks` | `mining.refresh.create` | admin |
+| `POST` | `/refresh-tasks/claim` | `mining.refresh.claim` | miner |
+| `POST` | `/refresh-tasks/:id/report` | `mining.refresh.report` | miner |
+| `GET` | `/refresh-tasks` | `mining.refresh.list` | admin |
+| `GET` | `/refresh-tasks/:id` | `mining.refresh.list` | admin |
 
 **Create Request:**
 ```json
 {
-  "epoch_id": "2026-04-06",
+  "epoch_id": "2026-04-09",
   "dataset_id": "ds_posts",
   "url": "https://x.com/user/status/12345",
   "historical_miner_ids": ["0xold1..."],
@@ -1359,7 +1871,7 @@ POST /api/mining/v1/pow-challenges/:id/answer
   "success": true,
   "data": {
     "id": "task-uuid",
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "dataset_id": "ds_posts",
     "url": "https://x.com/user/status/12345",
     "assigned_miner_id": "0x1234...",
@@ -1369,17 +1881,17 @@ POST /api/mining/v1/pow-challenges/:id/answer
 }
 ```
 
-### 8.6 Repeat Crawl Tasks
+### 8.8 Repeat Crawl Tasks
 
-| Method | Path | Permission | Description |
-|--------|------|-----------|-------------|
-| `POST` | `/repeat-crawl-tasks` | `mining.repeat.create` | Create task (deprecated) |
-| `POST` | `/repeat-crawl-tasks/claim` | `mining.repeat.claim` | Claim a task |
-| `POST` | `/repeat-crawl-tasks/:id/report` | `mining.repeat.report` | Report result |
-| `POST` | `/repeat-crawl-tasks/:id/reject` | `mining.repeat.reject` | Reject task (no penalty) |
-| `POST` | `/repeat-crawl-tasks/:id/reassign` | `mining.repeat.reassign` | Reassign task (admin) |
-| `GET` | `/repeat-crawl-tasks` | `mining.repeat.list` | List tasks |
-| `GET` | `/repeat-crawl-tasks/:id` | `mining.repeat.list` | Get task |
+| Method | Path | Permission | Auth |
+|--------|------|-----------|------|
+| `POST` | `/repeat-crawl-tasks` | `mining.repeat.create` | admin |
+| `POST` | `/repeat-crawl-tasks/claim` | `mining.repeat.claim` | miner |
+| `POST` | `/repeat-crawl-tasks/:id/report` | `mining.repeat.report` | miner |
+| `POST` | `/repeat-crawl-tasks/:id/reject` | `mining.repeat.reject` | miner |
+| `POST` | `/repeat-crawl-tasks/:id/reassign` | `mining.repeat.reassign` | admin |
+| `GET` | `/repeat-crawl-tasks` | `mining.repeat.list` | admin |
+| `GET` | `/repeat-crawl-tasks/:id` | `mining.repeat.list` | admin |
 
 **Claim Response:**
 ```json
@@ -1387,7 +1899,7 @@ POST /api/mining/v1/pow-challenges/:id/answer
   "success": true,
   "data": {
     "id": "task-uuid",
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "submission_id": "sub-uuid",
     "dataset_id": "ds_posts",
     "url": "https://x.com/user/status/12345",
@@ -1417,30 +1929,32 @@ POST /api/mining/v1/pow-challenges/:id/answer
 }
 ```
 
+**Error codes:** `repeat_task_not_found` (404)
+
 #### Core-Derived Repeat Task
 
 ```
 POST /api/mining/v1/core-submissions/:id/repeat-crawl-tasks
 ```
 
-**Permission**: `mining.core_submission.repeat`
+**Permission**: `mining.core_submission.repeat` (min role: `admin`)
 
 **Request:**
 ```json
 {
-  "epoch_id": "2026-04-06"
+  "epoch_id": "2026-04-09"
 }
 ```
 
-### 8.7 Evaluation Tasks
+### 8.9 Evaluation Tasks
 
-| Method | Path | Permission | Description |
-|--------|------|-----------|-------------|
-| `POST` | `/evaluation-tasks` | `mining.evaluation.create` | Create task (deprecated) |
-| `POST` | `/evaluation-tasks/claim` | `mining.evaluation.claim` | Claim task |
-| `POST` | `/evaluation-tasks/:id/report` | `mining.evaluation.report` | Report result |
-| `GET` | `/evaluation-tasks` | `mining.evaluation.list` | List tasks |
-| `GET` | `/evaluation-tasks/:id` | `mining.evaluation.list` | Get task |
+| Method | Path | Permission | Auth |
+|--------|------|-----------|------|
+| `POST` | `/evaluation-tasks` | `mining.evaluation.create` | admin |
+| `POST` | `/evaluation-tasks/claim` | `mining.evaluation.claim` | miner, validator |
+| `POST` | `/evaluation-tasks/:id/report` | `mining.evaluation.report` | miner, validator |
+| `GET` | `/evaluation-tasks` | `mining.evaluation.list` | admin |
+| `GET` | `/evaluation-tasks/:id` | `mining.evaluation.list` | admin |
 
 #### Claim Evaluation Task
 
@@ -1448,7 +1962,7 @@ POST /api/mining/v1/core-submissions/:id/repeat-crawl-tasks
 POST /api/mining/v1/evaluation-tasks/claim
 ```
 
-**Permission**: `mining.evaluation.claim` (allowed: `validator` only)
+**Permission**: `mining.evaluation.claim` (allowed: `miner`, `validator`)
 
 **Response:**
 ```json
@@ -1488,13 +2002,15 @@ POST /api/mining/v1/evaluation-tasks/claim
 | `schema_fields` | string[] | Schema field names (sorted) |
 | `dataset_schema` | object | Full dataset schema definition |
 
+**Error codes:** `evaluation_task_not_found` (404), `validator_not_ready` (409)
+
 #### Report Evaluation Task
 
 ```
 POST /api/mining/v1/evaluation-tasks/:id/report
 ```
 
-**Permission**: `mining.evaluation.report` (allowed: `validator` only)
+**Permission**: `mining.evaluation.report` (allowed: `miner`, `validator`)
 
 **Request:**
 ```json
@@ -1512,8 +2028,8 @@ POST /api/mining/v1/evaluation-tasks/:id/report
 | `score` | int | Yes | Quality score 0-100 |
 
 **Result Values:**
-- `"match"` — The original data (M0) matches the re-crawled data (M1); the submission is authentic
-- `"mismatch"` — The data does not match; possible fraud or significant deviation
+- `"match"` -- The original data (M0) matches the re-crawled data (M1); the submission is authentic
+- `"mismatch"` -- The data does not match; possible fraud or significant deviation
 
 **Response:**
 ```json
@@ -1521,7 +2037,7 @@ POST /api/mining/v1/evaluation-tasks/:id/report
   "success": true,
   "data": {
     "id": "eval-task-uuid",
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "submission_id": "sub-uuid",
     "miner_id": "0x1234...",
     "mode": "single",
@@ -1537,19 +2053,358 @@ POST /api/mining/v1/evaluation-tasks/:id/report
 POST /api/mining/v1/core-submissions/:id/evaluation-tasks
 ```
 
-**Permission**: `mining.core_submission.evaluation`
+**Permission**: `mining.core_submission.evaluation` (min role: `admin`)
 
 **Request:**
 ```json
 {
-  "epoch_id": "2026-04-06",
+  "epoch_id": "2026-04-09",
   "golden_score": 88
 }
 ```
 
-### 8.8 Epoch Snapshots & Settlement
+### 8.10 Golden Tasks (Admin)
 
-#### Get Epoch Snapshot (Public)
+Golden tasks are benchmark evaluation tasks with known expected scores. They are used to calibrate validator accuracy. Validators cannot distinguish golden tasks from regular evaluation tasks.
+
+| Method | Path | Permission | Description |
+|--------|------|-----------|-------------|
+| `POST` | `/golden-tasks` | `mining.golden_task.manage` | Create golden task |
+| `GET` | `/golden-tasks` | `mining.golden_task.manage` | List all golden tasks |
+| `PUT` | `/golden-tasks/:id` | `mining.golden_task.manage` | Update golden task |
+| `DELETE` | `/golden-tasks/:id` | `mining.golden_task.manage` | Delete golden task |
+
+All require **admin** role.
+
+#### Create Golden Task
+
+```
+POST /api/mining/v1/golden-tasks
+```
+
+**Request:**
+```json
+{
+  "dataset_id": "ds_posts",
+  "url": "https://x.com/alice/status/12345",
+  "cleaned_data": "Known good content...",
+  "structured_data": {
+    "post_id": "12345",
+    "content": "Known good content...",
+    "author": "alice"
+  },
+  "expected_score": 90,
+  "source": "manual",
+  "source_submission_id": ""
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dataset_id` | string | Yes | Dataset ID |
+| `url` | string | Yes | Source URL |
+| `cleaned_data` | string | Yes | Known-good cleaned data |
+| `structured_data` | object | No | Known-good structured data |
+| `expected_score` | int | Yes | Expected quality score (0-100) |
+| `source` | string | No | `"manual"` (default) or `"auto_mined"` |
+| `source_submission_id` | string | No | Original submission ID if auto-mined |
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "golden-uuid",
+    "dataset_id": "ds_posts",
+    "url": "https://x.com/alice/status/12345",
+    "cleaned_data": "Known good content...",
+    "structured_data": { ... },
+    "expected_score": 90,
+    "source": "manual",
+    "source_submission_id": "",
+    "enabled": true,
+    "used_count": 0,
+    "created_at": "2026-04-09T10:00:00Z",
+    "updated_at": "0001-01-01T00:00:00Z"
+  }
+}
+```
+
+#### Update Golden Task
+
+```
+PUT /api/mining/v1/golden-tasks/:id
+```
+
+**Request:**
+```json
+{
+  "id": "golden-uuid",
+  "enabled": false,
+  "expected_score": 85
+}
+```
+
+#### Delete Golden Task
+
+```
+DELETE /api/mining/v1/golden-tasks/:id
+```
+
+**Error codes:** `golden_task_not_found` (equivalent -- returns not found), `persistence_unavailable` (503)
+
+### 8.11 Self-Service Stats
+
+#### Get My Miner Stats
+
+```
+GET /api/mining/v1/miners/me/stats
+```
+
+**Permission**: `mining.miner.stats.self` (allowed: `miner` only)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "miner_id": "0x1234...",
+    "ip_address": "203.0.113.10",
+    "client": "miner-cli/1.0",
+    "last_heartbeat_at": "2026-04-09T10:00:00Z",
+    "credit": 65,
+    "ready_pool_opt_in": true,
+    "consecutive_fail": 0,
+    "timeout_history": [false, false, true, false, false],
+    "evicted_until_epoch": ""
+  }
+}
+```
+
+#### Get My Validator Stats
+
+```
+GET /api/mining/v1/validators/me/stats
+```
+
+**Permission**: `mining.validator.stats.self` (allowed: `validator` only)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "validator_id": "0x5678...",
+    "ip_address": "203.0.113.20",
+    "client": "validator-cli/1.0",
+    "last_heartbeat_at": "2026-04-09T10:00:00Z",
+    "last_task_completed_at": "2026-04-09T09:55:00Z",
+    "credit": 85,
+    "eligible": true,
+    "ready_pool_opt_in": true,
+    "consecutive_fail": 0,
+    "consecutive_flag": 0,
+    "idle_history": [false, false, false, false, false],
+    "flag_history": [false, false, false, false, false],
+    "timeout_history": [false, false, false, false, false],
+    "evicted_until_epoch": "",
+    "consecutive_unclaimed": 0,
+    "unclaimed_cooldown_until": "0001-01-01T00:00:00Z",
+    "stake_amount": "15000000000000000000000",
+    "joined_epoch": "2026-04-01"
+  }
+}
+```
+
+#### Get My Submissions (Miner)
+
+```
+GET /api/mining/v1/miners/me/submissions
+```
+
+**Permission**: `mining.miner.submissions.self` (allowed: `miner` only)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "sub-uuid",
+      "dataset_id": "ds_posts",
+      "miner_id": "0x1234...",
+      "epoch_id": "2026-04-09",
+      "status": "confirmed"
+    }
+  ]
+}
+```
+
+### 8.12 Public Read Endpoints
+
+#### List All Miners (Public)
+
+```
+GET /api/mining/v1/miners
+```
+
+**Authentication**: Not required
+
+**Response item:**
+```json
+{
+  "miner_id": "0x1234...",
+  "credit": 65,
+  "credit_tier": "good",
+  "online": true,
+  "client": "miner-cli/1.0",
+  "last_heartbeat_at": "2026-04-09T10:00:00Z"
+}
+```
+
+#### Get Miner Profile (Public)
+
+```
+GET /api/mining/v1/profiles/miners/:address
+```
+
+**Authentication**: Not required
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "miner_id": "0x1234...",
+    "credit": 65,
+    "credit_tier": "good",
+    "online": true,
+    "client": "miner-cli/1.0",
+    "last_heartbeat_at": "2026-04-09T10:00:00Z"
+  }
+}
+```
+
+#### Get Miner Epoch History (Public)
+
+```
+GET /api/mining/v1/profiles/miners/:address/epochs
+```
+
+**Authentication**: Not required  
+Returns the last 100 epochs for the given miner.
+
+**Response item:**
+```json
+{
+  "epoch_id": "2026-04-09",
+  "task_count": 50,
+  "avg_score": 78.5,
+  "qualified": true,
+  "weight": 0.15,
+  "reward_amount": 615.0
+}
+```
+
+#### Get Validator Epoch History (Public)
+
+```
+GET /api/mining/v1/profiles/validators/:address/epochs
+```
+
+**Authentication**: Not required
+
+#### Get Address Profile (Public)
+
+```
+GET /api/mining/v1/profiles/:address
+```
+
+**Authentication**: Not required  
+Returns combined miner + validator profile for an address, including lifetime stats and current epoch stats.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "address": "0x1234...",
+    "miner": {
+      "miner_id": "0x1234...",
+      "credit": 65,
+      "credit_tier": "good",
+      "online": true
+    },
+    "validator": null,
+    "miner_summary": {
+      "total_epochs": 30,
+      "total_tasks": 1500,
+      "total_rewards": 45000.0,
+      "avg_score": 82.5
+    },
+    "validator_summary": null,
+    "current_epoch": {
+      "epoch_id": "2026-04-09",
+      "miner": {
+        "task_count": 50,
+        "pending_submission_count": 5,
+        "repeat_task_count": 3,
+        "sampled_score_count": 8,
+        "avg_score": 85.0
+      },
+      "validator": {
+        "eval_count": 0,
+        "golden_count": 0,
+        "peer_count": 0,
+        "accuracy": 0,
+        "peer_review_accuracy": 0
+      }
+    }
+  }
+}
+```
+
+#### List Online Miners (Public)
+
+```
+GET /api/mining/v1/miners/online
+```
+
+**Authentication**: Not required
+
+**Response item:**
+```json
+{
+  "miner_id": "0x1234...",
+  "client": "miner-cli/1.0",
+  "last_heartbeat_at": "2026-04-09T10:00:00Z",
+  "online": true,
+  "credit": 65
+}
+```
+
+#### List Online Validators (Public)
+
+```
+GET /api/mining/v1/validators/online
+```
+
+**Authentication**: Not required
+
+**Response item:**
+```json
+{
+  "validator_id": "0x5678...",
+  "client": "validator-cli/1.0",
+  "last_heartbeat_at": "2026-04-09T10:00:00Z",
+  "online": true,
+  "credit": 85,
+  "eligible": true,
+  "ready": true
+}
+```
+
+#### Epoch Snapshot (Public)
 
 ```
 GET /api/mining/v1/epochs/:id/snapshot
@@ -1562,7 +2417,7 @@ GET /api/mining/v1/epochs/:id/snapshot
 {
   "success": true,
   "data": {
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "miners": {
       "0x1234...": {
         "task_count": 50,
@@ -1581,18 +2436,20 @@ GET /api/mining/v1/epochs/:id/snapshot
 }
 ```
 
-#### Get Epoch Settlement Results (Public)
+#### Epoch Settlement Results (Public)
 
 ```
 GET /api/mining/v1/epochs/:id/settlement-results
 ```
+
+**Authentication**: Not required
 
 **Response:**
 ```json
 {
   "success": true,
   "data": {
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "miners": [
       {
         "miner_id": "0x1234...",
@@ -1624,7 +2481,7 @@ GET /api/mining/v1/epochs/:id/settlement-results
 }
 ```
 
-### 8.9 Participant Stats
+### 8.13 Admin Stats
 
 #### Get Miner Stats (Admin)
 
@@ -1634,23 +2491,7 @@ GET /api/mining/v1/miners/:id/stats
 
 **Permission**: `mining.miners.stats.read` (min role: `admin`)
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "miner_id": "0x1234...",
-    "ip_address": "203.0.113.10",
-    "client": "miner-cli/1.0",
-    "last_heartbeat_at": "2026-04-06T10:00:00Z",
-    "credit": 65,
-    "ready_pool_opt_in": true,
-    "consecutive_fail": 0,
-    "timeout_history": [false, false, true, false, false],
-    "evicted_until_epoch": ""
-  }
-}
-```
+Same response shape as `GET /miners/me/stats` (Section 8.11).
 
 #### Get Validator Stats (Admin)
 
@@ -1660,77 +2501,7 @@ GET /api/mining/v1/validators/:id/stats
 
 **Permission**: `mining.validators.stats.read` (min role: `admin`)
 
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "validator_id": "0x5678...",
-    "ip_address": "203.0.113.20",
-    "client": "validator-cli/1.0",
-    "last_heartbeat_at": "2026-04-06T10:00:00Z",
-    "last_task_completed_at": "2026-04-06T09:55:00Z",
-    "credit": 85,
-    "eligible": true,
-    "ready_pool_opt_in": true,
-    "consecutive_fail": 0,
-    "consecutive_flag": 0,
-    "idle_history": [false, false, false, false, false],
-    "flag_history": [false, false, false, false, false],
-    "timeout_history": [false, false, false, false, false],
-    "evicted_until_epoch": "",
-    "consecutive_unclaimed": 0,
-    "unclaimed_cooldown_until": "0001-01-01T00:00:00Z",
-    "stake_amount": "15000000000000000000000",
-    "joined_epoch": "2026-04-01"
-  }
-}
-```
-
-### 8.10 Self-Service Endpoints
-
-These endpoints allow miners and validators to view their own stats without admin privileges.
-
-#### Get My Miner Stats
-
-```
-GET /api/mining/v1/miners/me/stats
-```
-
-**Permission**: `mining.miner.stats.self` (allowed: `miner` only)
-
-Returns the same response shape as `GET /api/mining/v1/miners/:id/stats`, but automatically scoped to the authenticated miner.
-
-#### Get My Validator Stats
-
-```
-GET /api/mining/v1/validators/me/stats
-```
-
-**Permission**: `mining.validator.stats.self` (allowed: `validator` only)
-
-Returns the same response shape as `GET /api/mining/v1/validators/:id/stats`, but automatically scoped to the authenticated validator.
-
-#### Get My Submissions (Miner)
-
-```
-GET /api/mining/v1/miners/me/submissions
-```
-
-**Permission**: `mining.miner.submissions.self` (allowed: `miner` only)
-
-Returns submission summaries for the authenticated miner.
-
-**Response item:**
-```json
-{
-  "id": "sub-uuid",
-  "dataset_id": "ds_posts",
-  "miner_id": "0x1234...",
-  "epoch_id": "2026-04-06",
-  "status": "confirmed"
-}
-```
+Same response shape as `GET /validators/me/stats` (Section 8.11).
 
 ---
 
@@ -1745,7 +2516,7 @@ GET /api/mining/v1/ws
 **Permission**: `mining.ws` (min role: `member`)  
 **Protocol**: WebSocket upgrade with EIP-712 auth headers on the HTTP upgrade request
 
-### 9.2 Server → Client Messages
+### 9.2 Server -> Client Messages
 
 **Repeat Crawl Task Push:**
 ```json
@@ -1753,7 +2524,7 @@ GET /api/mining/v1/ws
   "type": "repeat_crawl_task",
   "data": {
     "id": "task-uuid",
-    "epoch_id": "2026-04-06",
+    "epoch_id": "2026-04-09",
     "submission_id": "sub-uuid",
     "dataset_id": "ds_posts",
     "url": "https://x.com/user/status/12345",
@@ -1785,7 +2556,7 @@ GET /api/mining/v1/ws
 }
 ```
 
-### 9.3 Client → Server Messages
+### 9.3 Client -> Server Messages
 
 **Acknowledge Repeat Crawl Task:**
 ```json
@@ -1812,160 +2583,275 @@ GET /api/mining/v1/ws
 
 ---
 
-## 10. Credit System
+## 10. Error Reference Table
 
-### 10.1 Credit Tiers
+Complete table of all error codes returned by the platform.
 
-Both miners and validators use a 0-100 credit score system.
-
-| Score Range | Tier | Description |
-|-------------|------|-------------|
-| 80-100 | `excellent` | Highest trust level |
-| 60-79 | `good` | Standard trusted participant |
-| 40-59 | `normal` | Moderate trust |
-| 20-39 | `restricted` | Under observation |
-| 0-19 | `novice` | New or penalized participant |
-
-### 10.2 Miner Credit Effects
-
-| Tier | Sampling Rate | Epoch Submit Limit | PoW Probability |
-|------|--------------|-------------------|-----------------|
-| `excellent` (80+) | Base rate (0.30) | 1,000,000 | 1% |
-| `good` (60-79) | Base rate (0.30) | 10,000 | 5% |
-| `normal` (40-59) | 1.5x base (max 1.0) | 2,000 | 20% |
-| `restricted` (20-39) | 2.0x base (max 1.0) | 500 | 50% |
-| `novice` (0-19) | 1.0 (100%) | 100 | 100% |
-
-### 10.3 Validator Credit Effects
-
-| Tier | Min Task Interval | Min Eval Count | Golden Task Probability |
-|------|-------------------|----------------|------------------------|
-| `excellent` (80+) | 10 seconds | 10 | 5% |
-| `good` (60-79) | 30 seconds | 10 | 10% |
-| `normal` (40-59) | 2 minutes | 10 | 20% |
-| `restricted` (20-39) | 5 minutes | 10 | 30% |
-| `novice` (0-19) | 10 minutes | 3 | 40% |
-
-### 10.4 Credit Adjustment (Per Epoch)
-
-**Miners:**
-- Qualified: +5 (cap at 100)
-- Not qualified: -15 (floor at 0), consecutive_fail + 1
-- 3+ consecutive failures: credit reset to 0
-
-**Validators:**
-- Accuracy >= 60%: +5 (cap at 100), consecutive_flag reset to 0
-- Accuracy < 60%: -15, consecutive_flag + 1
-- Accuracy < 20%: credit reset to 0
-
-### 10.5 Validator Eviction Rules
-
-| Rule | Window | Threshold | Penalty |
-|------|--------|-----------|---------|
-| **Idle** | 3-of-10 | 3 idle epochs in last 10 | Evict 1 epoch, -15 credit |
-| **Flag** | 4-of-10 | 4 flagged (accuracy < 60%) in last 10 | Evict 1 epoch, -15 credit |
-| **Timeout** | 4-of-10 | 4 timeouts in last 10 | Evict 1 epoch |
-| **Unclaimed** | 3 consecutive | 3 consecutive unclaimed tasks | 1-hour cooldown |
+| Error Code | HTTP | Category | Retryable | Recoverable | Recovery Strategy | Hint |
+|-----------|------|----------|-----------|-------------|-------------------|------|
+| `unauthorized` | 401 | authentication | false | false | stop | Check auth headers |
+| `missing_auth_headers` | 401 | authentication | false | true | fix_request | Include all required EIP-712 headers |
+| `invalid_signature` | 401 | authentication | false | true | fix_request | Verify signature computation |
+| `signer_mismatch` | 401 | authentication | false | true | fix_request | Recovered signer != X-Signer |
+| `request_expired` | 401 | authentication | false | true | fix_request | Regenerate with fresh timestamps |
+| `nonce_reused` | 401 | authentication | false | true | fix_request | Use a unique nonce |
+| `forbidden` | 403 | permission | false | false | switch_identity | Insufficient role |
+| `role_suspended` | 403 | permission | false | false | request_human_help | Identity is suspended |
+| `ownership_required` | 403 | permission | false | false | stop | Caller does not own the resource |
+| `insufficient_stake` | 428 | precondition | false | true | increase_stake | Stake below minimum (mining path returns 428, IAM path returns 403) |
+| `address_not_registered` | 428 | precondition | true | true | register_address | Register on Base (chainId=8453) |
+| `invalid_request` | 400 | validation | false | true | fix_request | Malformed request body |
+| `invalid_review_decision` | 400 | validation | false | true | fix_request | Decision must be "approve" or "reject" |
+| `invalid_validation_result` | 400 | validation | false | true | fix_request | Invalid validation result input |
+| `url_pattern_mismatch` | 400 | validation | false | true | fix_request | URL does not match dataset patterns |
+| `malformed_submission` | 400 | validation | false | true | fix_request | Check required fields |
+| `dataset_not_found` | 404 | not_found | false | false | stop | Verify dataset_id |
+| `submission_not_found` | 404 | not_found | false | false | stop | Verify submission ID |
+| `validation_result_not_found` | 404 | not_found | false | false | stop | Verify validation result ID |
+| `miner_not_found` | 404 | not_found | false | false | stop | Send heartbeat first |
+| `evaluation_task_not_found` | 404 | not_found | false | false | stop | Task not found |
+| `repeat_task_not_found` | 404 | not_found | false | false | stop | Task not found |
+| `challenge_not_found` | 404 | not_found | false | false | stop | PoW challenge not found |
+| `quality_workflow_not_found` | 404 | not_found | false | false | stop | Workflow not found |
+| `dataset_not_active` | 409 | state_conflict | false | false | stop | Dataset is paused or archived |
+| `duplicate_submission` | 409 | state_conflict | false | false | stop | Dedup hash already occupied |
+| `dedup_hash_in_cooldown` | 409 | state_conflict | true | true | wait_and_retry | Retry after cooldown expires |
+| `miner_offline` | 409 | dependency | true | true | retry_same_request | Send heartbeat first (mining handler uses `dependency` category) |
+| `validator_application_exists` | 409 | state_conflict | false | false | stop | Already applied |
+| `validator_application_reviewed` | 409 | state_conflict | false | false | stop | Already reviewed |
+| `validator_capacity_full` | 409 | state_conflict | false | false | stop | No validator slots available |
+| `validator_capacity_all_protected` | 409 | state_conflict | false | false | stop | All validators in protection period |
+| `validator_not_ready` | 409 | dependency | true | true | retry_same_request | Join ready pool first |
+| `submission_too_frequent` | 429 | rate_limit | true | true | retry_same_request | Wait before submitting again |
+| `submission_rate_limited` | 429 | rate_limit | false | false | wait_next_epoch | Epoch quota exhausted (mining path) |
+| `rate_limit_exceeded` | 429 | rate_limit | false | false | wait_next_epoch | Epoch quota exhausted (core forwarding path) |
+| `persistence_unavailable` | 503 | dependency | true | true | retry_same_request | Database not available |
+| `service_not_ready` | 503 | dependency | true | true | retry_same_request | Service dependencies not ready |
+| `registration_backend_unavailable` | 503 | dependency | true | true | retry_same_request | On-chain check backend down |
+| `identity_store_unavailable` | 503 | dependency | true | true | retry_same_request | Identity store unavailable |
+| `nonce_store_unavailable` | 503 | dependency | true | true | retry_same_request | Nonce store unavailable |
+| `internal_error` | 500 | internal | false | false | request_human_help | Check server logs with request_id |
+| `identity_binding_failed` | 500 | internal | false | false | request_human_help | Failed to bind miner role |
 
 ---
 
-## 11. Quality Assurance Workflow
+## 11. Miner Workflow
 
-### 11.1 Pipeline Overview
+Step-by-step guide for an LLM operating as a miner.
+
+### 11.1 Initialization
 
 ```
-Miner submits data (M0)
-    → Sampling decision (credit-based rate)
-    → If sampled:
-        Phase A: Repeat Crawl (Step 1)
-            → Different miner re-crawls same URL → produces M1
-            → Evaluation Task created
-        Phase B: Evaluation
-            → Validator compares M0 vs M1
-            → Reports "match" (authentic) or "mismatch" (suspicious)
-            → If match: score applied, submission confirmed/rejected
-            → If mismatch: Step 2 triggered
-        Phase A: Repeat Crawl (Step 2, if mismatch)
-            → Third miner re-crawls → produces M2
-            → New Evaluation Task created
-        Phase B: Final Evaluation
-            → Validator compares M0 vs M2
-            → Final determination
+1. GET /api/public/v1/signature-config
+   -> Obtain EIP-712 domain params for signing
+
+2. POST /api/mining/v1/heartbeat  { "client": "miner-cli/1.0" }
+   -> Auto-promoted from member to miner
+   -> Note: credit, credit_tier, epoch_submit_limit, pow_probability
+
+3. GET /api/core/v1/datasets  (filter status="active" client-side)
+   -> Get list of active datasets with schema and url_patterns
 ```
 
-### 11.2 Evaluation Modes
+### 11.2 Main Loop (repeat every 60s)
 
-| Mode | Validators | Trigger |
-|------|-----------|---------|
-| `single` | 1 validator | Default for Step 1 evaluations |
-| `peer_review` | Up to 5 validators | Triggered when consensus is needed |
-
-### 11.3 Match/Mismatch Consensus (Peer Review)
-
-When multiple validators evaluate the same task:
-- **Match consensus**: >= 3/5 validators agree on "match" → submission scored
-- **Mismatch consensus**: >= 3/5 validators agree on "mismatch" → Step 2 triggered or fraud confirmed
-- **No consensus**: All validators reported but no majority → scored using available data
-
-### 11.4 Scoring Scenarios
-
-**Scenario 1** (Step 1 Match): M0 scored with validator's score. M0 repeat score = 5.
-
-**Scenario 2** (Step 1 Mismatch → Step 2 Match): M0 confirmed authentic. M0 repeat score = 5, M1 repeat score = 0.
-
-**Scenario 3** (Step 1 Mismatch → Step 2 Mismatch): M0 confirmed fraudulent (score = 0). M0 repeat score = 0, M1 repeat score = 5.
-
-### 11.5 Reward Weight
-
-Effective task count for reward calculation:
 ```
-effectiveTaskCount = mineCount + repeatCount * 0.8
+4. POST /api/mining/v1/heartbeat  { "client": "miner-cli/1.0" }
+   -> Refresh online status and credit info
+   -> Note pow_probability for current credit tier
+
+5. (Optional) Check submission gate:
+   GET /api/mining/v1/miners/me/submission-gate
+   -> If state="checking", answer the PoW challenge first
+   -> If state="opening", proceed to submit
+
+6. (Optional) Pre-check dedup:
+   GET /api/core/v1/dedup/check?dataset_id=...&dedup_hash=...
+   -> Skip if already occupied
+
+7. Submit Data:
+   POST /api/mining/v1/submissions
+   -> If admission_status="accepted" (HTTP 201): done
+   -> If admission_status="challenge_required" (HTTP 428):
+      a. Extract challenge.id from response
+      b. Compute SHA256(nonce) -> take first 8 hex chars
+      c. POST /api/mining/v1/pow-challenges/<id>/answer
+         { "answer": "<8_hex_chars>" }
+      d. If passed=true, follow next_action to resubmit
+      e. If passed=false, get new challenge via submission gate
+
+8. Join Ready Pool:
+   POST /api/mining/v1/miners/ready
+
+9. Handle Repeat Crawl Tasks:
+   Option A (polling): POST /api/mining/v1/repeat-crawl-tasks/claim
+   Option B (WebSocket): Connect to /api/mining/v1/ws
+     -> Receive {"type":"repeat_crawl_task", ...}
+     -> Send {"ack":"task-id"} within 30 seconds
+     -> Re-crawl the URL
+     -> POST /api/mining/v1/repeat-crawl-tasks/:id/report
+        { "cleaned_data": "re-crawled content" }
+
+10. View Own Stats:
+    GET /api/mining/v1/miners/me/stats
+    GET /api/mining/v1/miners/me/submissions
 ```
 
-Repeat tasks count at 80% weight compared to original mining tasks.
+### 11.3 Submission Rate Limit
+
+Submissions are rate-limited per miner. The minimum interval is `max(avg_interval/5, 30s)` where `avg_interval = elapsed_epoch_time / pending_submission_count`. If exceeded, returns 429 `submission_too_frequent`.
+
+### 11.4 Key Display Fields
+
+| Field | Source | Display |
+|-------|--------|---------|
+| Credit score | heartbeat -> `credit` | Progress bar 0-100 |
+| Credit tier | heartbeat -> `credit_tier` | Badge (novice/restricted/normal/good/excellent) |
+| Submit limit | heartbeat -> `epoch_submit_limit` | Remaining quota |
+| PoW probability | heartbeat -> `pow_probability` | Percentage |
+| Online status | heartbeat -> `online` | Green/red indicator |
 
 ---
 
-## 12. Epoch & Settlement
+## 12. Validator Workflow
 
-### 12.1 Epoch Lifecycle
+Step-by-step guide for an LLM operating as a validator.
 
-- **Duration**: 1 UTC natural day (00:00 - 00:00 UTC)
-- **Epoch ID format**: `"YYYY-MM-DD"` (e.g. `"2026-04-06"`)
-- **Auto-settlement**: Triggered at UTC 00:00 daily
-- **Manual settlement**: Admin can trigger via `POST /api/core/v1/epochs/:epochID/settle`
+### 12.1 Initialization
 
-### 12.2 Settlement Formula
-
-**Miner Reward**:
 ```
-effectiveTaskCount = mineCount + repeatCount * 0.8
-weight = avgScore * avgScore * effectiveTaskCount
-rewardAmount = epochEmission * minerRewardShare * (weight / totalMinerWeight)
-```
+1. GET /api/public/v1/protocol-info
+   -> Check min_stake requirement (10000 AWP)
 
-**Validator Reward**:
-```
-weight = accuracy * accuracy * evalCount
-rewardAmount = epochEmission * validatorRewardShare * (weight / totalValidatorWeight)
+2. POST /api/iam/v1/validator-applications
+   -> Apply as validator (auto-approved if stake >= 10000 AWP)
+
+3. GET /api/iam/v1/validator-applications/me
+   -> Check application status (approved/pending/rejected)
 ```
 
-**Qualification Requirements**:
-- Miner: `task_count >= 80` (configurable via `PLATFORM_SERVICE_MINER_MIN_TASK_COUNT`) and `avg_score >= 60` (configurable via `PLATFORM_SERVICE_MINER_MIN_AVG_SCORE`)
-- Validator: `eval_count >= 10` required; accuracy < 20% → disqualified (`severe_misbehavior`); accuracy 20-60% → qualified but penalized
+### 12.2 Main Loop (repeat every 60s)
 
-### 12.3 Validator Penalties
+```
+4. POST /api/mining/v1/heartbeat  { "client": "validator-cli/1.0" }
+   -> Returns: credit, eligible, credit_tier, min_task_interval_seconds
 
-| Penalty | Trigger | Credit Effect | Additional |
-|---------|---------|--------------|------------|
-| `severe_misbehavior` | accuracy < 20% | Disqualified, reset to 0 | Excluded from reward pool entirely (no slash/redistribution) |
-| `misbehavior` | accuracy 20-60% | -15, flag++ | Reward slashed and redistributed |
-| `low_quality` | — | -15 | None |
-| `idle` | eval_count < 10 | -15 | None |
+5. POST /api/mining/v1/validators/ready
+   -> Join ready pool to receive evaluation tasks
+
+6. Claim & Complete Evaluation Tasks:
+   Option A (polling): POST /api/mining/v1/evaluation-tasks/claim
+   Option B (WebSocket): Connect to /api/mining/v1/ws
+     -> Receive {"type":"evaluation_task", ...}
+     -> Send {"ack_eval":"assignment-id"} within 30 seconds
+     -> Compare cleaned_data (M0) vs repeat_cleaned_data (M1)
+     -> Determine match/mismatch
+     -> Score structured_data quality against schema_fields
+     -> POST /api/mining/v1/evaluation-tasks/:id/report
+        { "assignment_id": "...", "result": "match", "score": 85 }
+
+7. Respect min_task_interval_seconds between claims
+
+8. View Own Stats:
+   GET /api/mining/v1/validators/me/stats
+```
+
+### 12.3 Evaluation Logic
+
+When evaluating a claimed task:
+
+1. **Compare M0 vs M1**: Check if `cleaned_data` (original submission) and `repeat_cleaned_data` (re-crawled data) represent the same content
+2. **Determine result**: `"match"` if authentic, `"mismatch"` if data appears fabricated or significantly different
+3. **Score quality**: Rate the structured_data quality (0-100) based on completeness, accuracy, and adherence to schema_fields
+4. **Golden tasks**: Some tasks are golden (benchmark) tasks where the system knows the expected score; your accuracy contributes to your reputation. Golden status is not exposed in the claim response
+
+### 12.4 Key Display Fields
+
+| Field | Source | Display |
+|-------|--------|---------|
+| Credit score | heartbeat -> `credit` | Progress bar 0-100 |
+| Credit tier | heartbeat -> `credit_tier` | Badge |
+| Eligible | heartbeat -> `eligible` | Can receive tasks |
+| Min interval | heartbeat -> `min_task_interval_seconds` | Seconds between tasks |
+| Stake amount | stats -> `stake_amount` | AWP staked |
+| Accuracy | settlement -> `accuracy` | Performance metric |
 
 ---
 
-## 13. Timing Parameters
+## 13. Admin Workflow
+
+### 13.1 Dataset Management
+
+```
+1. Create Dataset:
+   POST /api/core/v1/datasets
+
+2. Review Dataset:
+   POST /api/core/v1/datasets/:id/review
+
+3. Lifecycle Management:
+   POST /api/core/v1/datasets/:id/activate
+   POST /api/core/v1/datasets/:id/pause
+   POST /api/core/v1/datasets/:id/archive
+   POST /api/core/v1/datasets/:id/reject
+```
+
+### 13.2 Protocol Configuration
+
+```
+GET  /api/core/v1/protocol-configs           # List all configs
+PUT  /api/core/v1/protocol-configs           # Set config
+DELETE /api/core/v1/protocol-configs/:key    # Delete config
+```
+
+### 13.3 Epoch Settlement
+
+```
+GET  /api/core/v1/epochs                     # List epochs
+GET  /api/core/v1/epochs/current             # Current epoch
+POST /api/core/v1/epochs/:epochID/settle     # Manual settlement
+GET  /api/mining/v1/epochs/:id/snapshot      # View snapshot
+GET  /api/mining/v1/epochs/:id/settlement-results  # View results
+```
+
+### 13.4 Participant Monitoring
+
+```
+GET /api/mining/v1/miners                    # All miners (public)
+GET /api/mining/v1/miners/online             # Online miners
+GET /api/mining/v1/validators/online         # Online validators
+GET /api/mining/v1/miners/:id/stats          # Miner details (admin)
+GET /api/mining/v1/validators/:id/stats      # Validator details (admin)
+```
+
+### 13.5 Validator Application Management
+
+```
+GET  /api/iam/v1/validator-applications           # List all applications
+POST /api/iam/v1/validator-applications/:id/review # Review application
+```
+
+### 13.6 Task Management
+
+```
+GET  /api/mining/v1/repeat-crawl-tasks       # List repeat tasks
+POST /api/mining/v1/repeat-crawl-tasks/:id/reassign  # Reassign task
+GET  /api/mining/v1/evaluation-tasks         # List evaluation tasks
+GET  /api/mining/v1/refresh-tasks            # List refresh tasks
+```
+
+### 13.7 Golden Task Management
+
+```
+POST   /api/mining/v1/golden-tasks           # Create golden task
+GET    /api/mining/v1/golden-tasks           # List golden tasks
+PUT    /api/mining/v1/golden-tasks/:id       # Update golden task
+DELETE /api/mining/v1/golden-tasks/:id       # Delete golden task
+```
+
+---
+
+## 14. Timing Parameters
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -1981,239 +2867,10 @@ rewardAmount = epochEmission * validatorRewardShare * (weight / totalValidatorWe
 | High-risk period | 3 epochs | 100% sampling rate |
 | Consistency threshold | 75 | Score threshold for consistency |
 | Dynamic threshold | 50 | Lower threshold for dynamic evaluation |
-
----
-
-## 14. Error Handling
-
-### 14.1 HTTP Status Codes
-
-| Code | Usage |
-|------|-------|
-| 200 | Success (GET, challenge_required submission) |
-| 201 | Created (POST with accepted entries) |
-| 400 | Bad request / validation error |
-| 401 | Authentication failed |
-| 403 | Forbidden / insufficient permissions / ownership required |
-| 404 | Resource not found |
-| 409 | State conflict |
-| 422 | Validation error (semantic) |
-| 428 | Precondition required (e.g. address not registered) |
-| 429 | Rate limit exceeded |
-| 500 | Internal server error |
-| 503 | Service not ready / persistence required |
-
-### 14.2 Common Error Codes
-
-| Code | Category | Description |
-|------|----------|-------------|
-| `unauthorized` | authentication | Missing/invalid auth |
-| `missing_auth_headers` | authentication | Required headers missing |
-| `invalid_signature` | authentication | Signature verification failed |
-| `request_expired` | authentication | Timestamp outside validity window |
-| `nonce_reused` | authentication | Nonce already used |
-| `forbidden` | permission | Insufficient role |
-| `role_suspended` | permission | Identity suspended |
-| `address_not_registered` | precondition | Address not registered on-chain (HTTP 428, includes registration guidance for Base chainId=8453) |
-| `insufficient_stake` | permission | Stake below minimum |
-| `ownership_required` | permission | Caller does not own the requested resource (includes owner/requester addresses in message) |
-| `submission_too_frequent` | rate_limit | Submission interval too short; min_interval = max(avg_interval/5, 30s) |
-| `registration_backend_unavailable` | dependency | On-chain registration check backend is down |
-| `identity_store_unavailable` | dependency | Identity store is unavailable |
-| `nonce_store_unavailable` | dependency | Nonce store is unavailable |
-| `invalid_request` | validation | Malformed request |
-| `invalid_review_decision` | validation | Invalid decision value |
-| `dataset_inactive` | state_conflict | Dataset not active |
-| `dedup_hash_conflict` | state_conflict | Dedup hash already occupied |
-| `dedup_hash_in_cooldown` | rate_limit | Hash in cooldown period |
-| `validator_application_exists` | state_conflict | Application already exists |
-| `validator_application_reviewed` | state_conflict | Already reviewed |
-| `validator_capacity_full` | state_conflict | No validator slots |
-| `validator_not_ready` | dependency | Validator not in ready pool |
-| `evaluation_task_not_found` | not_found | Task not found |
-| `repeat_task_not_found` | not_found | Task not found |
-| `challenge_not_found` | not_found | PoW challenge not found |
-| `quality_workflow_not_found` | not_found | Workflow not found |
-| `validator_capacity_all_protected` | state_conflict | All validators in protection period |
-| `persistence_unavailable` | dependency | Database persistence required (503) |
-| `service_not_ready` | dependency | Service dependencies not ready (503) |
-
----
-
-## 15. Miner Frontend Workflow
-
-### 15.1 Main Loop
-
-```
-1. Heartbeat (every 60s)
-   POST /api/mining/v1/heartbeat
-   → Returns credit, credit_tier, epoch_submit_limit, pow_probability
-
-2. Get Active Datasets
-   GET /api/core/v1/datasets (filter status="active" client-side)
-
-3. Pre-check Deduplication (optional)
-   GET /api/core/v1/dedup/check?dataset_id=...&dedup_hash=...
-
-4. Submit Data
-   POST /api/core/v1/submissions
-   → If admission_status="challenge_required":
-       POST /api/mining/v1/pow-challenges/:id/answer
-       → On pass: submission auto-resumes
-
-5. Join Ready Pool
-   POST /api/mining/v1/miners/ready
-
-6. Handle Repeat Crawl Tasks
-   Option A (polling): POST /api/mining/v1/repeat-crawl-tasks/claim
-   Option B (WebSocket): Connect to /api/mining/v1/ws
-     → Receive {"type":"repeat_crawl_task", ...}
-     → Send {"ack":"task-id"} within 30s
-     → Re-crawl the URL
-     → POST /api/mining/v1/repeat-crawl-tasks/:id/report
-
-7. Leave Ready Pool (optional)
-   POST /api/mining/v1/miners/unready
-
-8. View Own Stats
-   GET /api/mining/v1/miners/me/stats
-   GET /api/mining/v1/miners/me/submissions
-```
-
-**Submission Rate Limit**: Submissions are rate-limited per miner. The minimum interval is `max(avg_interval/5, 30s)`. If exceeded, the preflight returns `allowed: false` with `reason: "submission_too_frequent"`.
-
-### 15.2 Key Display Fields
-
-| Field | Source | Display |
-|-------|--------|---------|
-| Credit score | heartbeat → `credit` | Progress bar 0-100 |
-| Credit tier | heartbeat → `credit_tier` | Badge (novice/restricted/normal/good/excellent) |
-| Submit limit | heartbeat → `epoch_submit_limit` | Remaining quota |
-| PoW probability | heartbeat → `pow_probability` | Percentage |
-| Online status | heartbeat → `online` | Green/red indicator |
-
----
-
-## 16. Validator Frontend Workflow
-
-### 16.1 Main Loop
-
-```
-1. Apply as Validator (one-time)
-   POST /api/iam/v1/validator-applications
-   → Auto-approved if stake >= 10000 AWP
-
-2. Check Application Status
-   GET /api/iam/v1/validator-applications/me
-
-3. Heartbeat (every 60s)
-   POST /api/mining/v1/heartbeat
-   → Returns credit, eligible, credit_tier, min_task_interval_seconds
-
-4. Join Ready Pool
-   POST /api/mining/v1/validators/ready
-
-5. Claim & Complete Evaluation Tasks
-   Option A (polling): POST /api/mining/v1/evaluation-tasks/claim
-   Option B (WebSocket): Connect to /api/mining/v1/ws
-     → Receive {"type":"evaluation_task", ...}
-     → Send {"ack_eval":"assignment-id"} within 30s
-     → Compare cleaned_data (M0) vs repeat_cleaned_data (M1)
-     → Determine match/mismatch
-     → Score structured_data quality against schema_fields
-     → POST /api/mining/v1/evaluation-tasks/:id/report
-       { "assignment_id": "...", "result": "match", "score": 85 }
-
-6. Respect min_task_interval_seconds between claims
-
-7. Leave Ready Pool (optional)
-   POST /api/mining/v1/validators/unready
-
-8. View Own Stats
-   GET /api/mining/v1/validators/me/stats
-```
-
-### 16.2 Evaluation Logic
-
-When evaluating a claimed task:
-
-1. **Compare M0 vs M1**: Check if `cleaned_data` (original submission) and `repeat_cleaned_data` (re-crawled data) represent the same content
-2. **Determine result**: `"match"` if authentic, `"mismatch"` if data appears fabricated or significantly different
-3. **Score quality**: Rate the structured_data quality (0-100) based on completeness, accuracy, and adherence to schema_fields
-4. **Golden tasks**: Some tasks are golden (benchmark) tasks where the system knows the expected score; your accuracy contributes to your reputation. Golden status is not exposed in the claim response
-
-### 16.3 Key Display Fields
-
-| Field | Source | Display |
-|-------|--------|---------|
-| Credit score | heartbeat → `credit` | Progress bar 0-100 |
-| Credit tier | heartbeat → `credit_tier` | Badge |
-| Eligible | heartbeat → `eligible` | Can receive tasks |
-| Min interval | heartbeat → `min_task_interval_seconds` | Seconds between tasks |
-| Stake amount | stats → `stake_amount` | AWP staked |
-| Accuracy | settlement → `accuracy` | Performance metric |
-
----
-
-## 17. Admin Frontend Workflow
-
-### 17.1 Dataset Management
-
-```
-1. Create Dataset
-   POST /api/core/v1/datasets
-
-2. Review Dataset
-   POST /api/core/v1/datasets/:id/review
-
-3. Lifecycle Management
-   POST /api/core/v1/datasets/:id/activate
-   POST /api/core/v1/datasets/:id/pause
-   POST /api/core/v1/datasets/:id/archive
-   POST /api/core/v1/datasets/:id/reject
-```
-
-### 17.2 Protocol Configuration
-
-```
-GET  /api/core/v1/protocol-configs           # List all configs
-PUT  /api/core/v1/protocol-configs           # Set config
-DELETE /api/core/v1/protocol-configs/:key    # Delete config
-```
-
-### 17.3 Epoch Settlement
-
-```
-GET  /api/core/v1/epochs                     # List epochs
-POST /api/core/v1/epochs/:epochID/settle     # Manual settlement
-GET  /api/mining/v1/epochs/:id/snapshot      # View snapshot
-GET  /api/mining/v1/epochs/:id/settlement-results  # View results
-```
-
-### 17.4 Participant Monitoring
-
-```
-GET /api/mining/v1/miners/online             # Online miners
-GET /api/mining/v1/validators/online         # Online validators
-GET /api/mining/v1/miners/:id/stats          # Miner details
-GET /api/mining/v1/validators/:id/stats      # Validator details
-```
-
-### 17.5 Validator Application Management
-
-```
-GET  /api/iam/v1/validator-applications           # List all applications
-POST /api/iam/v1/validator-applications/:id/review # Review application
-```
-
-### 17.6 Task Management
-
-```
-GET  /api/mining/v1/repeat-crawl-tasks       # List repeat tasks
-POST /api/mining/v1/repeat-crawl-tasks/:id/reassign  # Reassign task
-GET  /api/mining/v1/evaluation-tasks         # List evaluation tasks
-GET  /api/mining/v1/refresh-tasks            # List refresh tasks
-```
+| Max golden tasks per epoch | 10 | System-wide cap per epoch |
+| Signature max validity | 300 seconds | Max EIP-712 signature window |
+| Clock skew tolerance | 30 seconds | Server-side clock skew allowance |
+| Max request body | 8 MB | Maximum request body size |
 
 ---
 
@@ -2232,48 +2889,50 @@ GET  /api/mining/v1/refresh-tasks            # List refresh tasks
 | `core.datasets.pause` | min: admin | `POST .../datasets/:id/pause` |
 | `core.datasets.archive` | min: admin | `POST .../datasets/:id/archive` |
 | `core.datasets.reject` | min: admin | `POST .../datasets/:id/reject` |
-| `core.submissions.read` | min: member | `GET .../submissions`, `GET .../submissions/:id` (auto-filtered by miner_id for non-admin; ownership enforced on /:id) |
-| `core.submissions.create` | allowed: miner | `POST .../submissions` |
-| _(removed)_ `core.dedup.check` | **public** (no auth) | `GET .../dedup/check` |
-| _(removed)_ `core.dedup_occupancies.read` | **public** (no auth) | `GET/POST .../dedup-occupancies/...` |
+| `mining.submission.read` | allowed: miner, admin | `GET .../submissions`, `GET .../submissions/:id` (core forwarding uses mining permissions) |
+| `mining.submission.create` | allowed: miner | `POST .../submissions` (core forwarding uses mining permissions) |
 | `core.url_occupancies.read` | allowed: miner | `GET .../url-occupancies/...` |
-| `core.validation_results.read` | allowed: miner, validator, admin | `GET .../validation-results/...` (auto-filtered by role; ownership enforced on /:id) |
-| `core.validation_results.create` | allowed: validator | `POST .../validation-results` |
+| `mining.validation_result.read` | allowed: miner, validator, admin | `GET .../validation-results/...` |
+| `mining.validation_result.create` | allowed: validator | `POST .../validation-results` |
 | `core.epochs.read` | min: admin | `GET .../epochs` (protected), `GET .../epochs/:id` |
 | `core.epochs.settle` | min: admin | `POST .../epochs/:epochID/settle` |
 | `core.protocol_configs.read` | min: admin | `GET .../protocol-configs/...` |
 | `core.protocol_configs.write` | min: admin | `PUT/DELETE .../protocol-configs/...` |
 | `mining.heartbeat` | allowed: member, miner, validator | `POST /api/mining/v1/heartbeat` |
-| `mining.miners.online.read` | min: admin | `GET .../miners/online` (policy exists but endpoint is public) |
-| `mining.validators.online.read` | min: admin | `GET .../validators/online` (policy exists but endpoint is public) |
 | `mining.miner.ready` | allowed: miner | `POST .../miners/ready` |
 | `mining.miner.unready` | allowed: miner | `POST .../miners/unready` |
 | `mining.pow.answer` | allowed: miner | `POST .../pow-challenges/:id/answer` |
+| `mining.miner.submission_gate` | allowed: miner, validator | `GET .../miners/me/submission-gate` |
+| `mining.submission.create` | allowed: miner, validator | `POST .../submissions` |
+| `mining.submission.read` | allowed: miner, validator | `GET .../submissions`, `GET .../submissions/:id` |
+| `mining.validation_result.create` | allowed: validator | `POST .../validation-results` |
+| `mining.validation_result.read` | allowed: miner, validator | `GET .../validation-results/...` |
 | `mining.refresh.create` | min: admin | `POST .../refresh-tasks` |
+| `mining.refresh.list` | min: admin | `GET .../refresh-tasks/...` |
 | `mining.refresh.claim` | allowed: miner | `POST .../refresh-tasks/claim` |
 | `mining.refresh.report` | allowed: miner | `POST .../refresh-tasks/:id/report` |
-| `mining.refresh.list` | min: admin | `GET .../refresh-tasks/...` |
 | `mining.repeat.create` | min: admin | `POST .../repeat-crawl-tasks` |
+| `mining.repeat.list` | min: admin | `GET .../repeat-crawl-tasks/...` |
 | `mining.repeat.claim` | allowed: miner | `POST .../repeat-crawl-tasks/claim` |
 | `mining.repeat.report` | allowed: miner | `POST .../repeat-crawl-tasks/:id/report` |
 | `mining.repeat.reject` | allowed: miner | `POST .../repeat-crawl-tasks/:id/reject` |
 | `mining.repeat.reassign` | min: admin | `POST .../repeat-crawl-tasks/:id/reassign` |
-| `mining.repeat.list` | min: admin | `GET .../repeat-crawl-tasks/...` |
-| `mining.validator.ready` | allowed: validator | `POST .../validators/ready` |
-| `mining.validator.unready` | allowed: validator | `POST .../validators/unready` |
+| `mining.validator.ready` | allowed: miner, validator | `POST .../validators/ready` |
+| `mining.validator.unready` | allowed: miner, validator | `POST .../validators/unready` |
 | `mining.evaluation.create` | min: admin | `POST .../evaluation-tasks` |
-| `mining.evaluation.claim` | allowed: validator | `POST .../evaluation-tasks/claim` |
-| `mining.evaluation.report` | allowed: validator | `POST .../evaluation-tasks/:id/report` |
 | `mining.evaluation.list` | min: admin | `GET .../evaluation-tasks/...` |
+| `mining.evaluation.claim` | allowed: miner, validator | `POST .../evaluation-tasks/claim` |
+| `mining.evaluation.report` | allowed: miner, validator | `POST .../evaluation-tasks/:id/report` |
 | `mining.core_submission.repeat` | min: admin | `POST .../core-submissions/:id/repeat-crawl-tasks` |
 | `mining.core_submission.evaluation` | min: admin | `POST .../core-submissions/:id/evaluation-tasks` |
-| `mining.epoch.snapshot.read` | **public** (no auth) | `GET .../epochs/:id/snapshot` |
-| `mining.epoch.settlement.read` | **public** (no auth) | `GET .../epochs/:id/settlement-results` |
+| `mining.epoch.snapshot.read` | min: admin | `GET .../epochs/:id/snapshot` (policy exists but endpoint is public) |
+| `mining.epoch.settlement.read` | min: admin | `GET .../epochs/:id/settlement-results` (policy exists but endpoint is public) |
 | `mining.miners.stats.read` | min: admin | `GET .../miners/:id/stats` |
 | `mining.validators.stats.read` | min: admin | `GET .../validators/:id/stats` |
 | `mining.miner.stats.self` | allowed: miner | `GET .../miners/me/stats` |
 | `mining.validator.stats.self` | allowed: validator | `GET .../validators/me/stats` |
 | `mining.miner.submissions.self` | allowed: miner | `GET .../miners/me/submissions` |
+| `mining.golden_task.manage` | min: admin | `POST/GET/PUT/DELETE .../golden-tasks/...` |
 | `mining.ws` | min: member | `GET .../ws` |
 
 **Public endpoints (no authentication required):**
@@ -2294,16 +2953,21 @@ GET  /api/mining/v1/refresh-tasks            # List refresh tasks
 | `GET /api/core/v1/dedup-occupancies` | List dedup occupancies |
 | `GET /api/core/v1/dedup-occupancies/:datasetId/:dedupHash` | Get dedup occupancy |
 | `POST /api/core/v1/dedup-occupancies/check` | Check dedup occupancy by structured data |
+| `GET /api/mining/v1/miners` | List all miners |
 | `GET /api/mining/v1/miners/online` | List online miners |
 | `GET /api/mining/v1/validators/online` | List online validators |
+| `GET /api/mining/v1/profiles/miners/:address` | Get miner public profile |
+| `GET /api/mining/v1/profiles/miners/:address/epochs` | Miner epoch history (last 100) |
+| `GET /api/mining/v1/profiles/validators/:address/epochs` | Validator epoch history |
+| `GET /api/mining/v1/profiles/:address` | Combined address profile |
 | `GET /api/mining/v1/epochs/:id/snapshot` | Epoch snapshot |
 | `GET /api/mining/v1/epochs/:id/settlement-results` | Epoch settlement results |
 
 **Notes**:
-- `allowed:` permissions use **exact role matching** — admin does NOT inherit. Only the listed roles can access.
-- `min:` permissions use **role hierarchy** — admin inherits all lower roles.
-- Ownership enforcement: `submissions/:id` and `validation-results/:id` return `403 ownership_required` for non-admin callers viewing resources they do not own. Error messages include owner/requester addresses for LLM-friendly debugging.
-- Internal errors now expose the actual error message for LLM-friendly diagnostics.
+- `allowed:` permissions use **exact role matching** -- admin does NOT inherit. Only the listed roles can access.
+- `min:` permissions use **role hierarchy** -- admin inherits all lower roles.
+- Ownership enforcement: `submissions/:id` and `validation-results/:id` return `403 forbidden` for non-admin callers viewing resources they do not own.
+- Internal errors use safe generic messages; details are in server logs only (use `request_id` to correlate).
 
 ---
 
@@ -2315,3 +2979,149 @@ SHA256(field1_value | field2_value | ... | fieldN_value)
 ```
 
 Where fields are taken from the dataset's `dedup_fields` array in order, separated by `|`, using values from `structured_data`.
+
+---
+
+## Appendix C: Credit System
+
+### C.1 Credit Tiers
+
+Both miners and validators use a 0-100 credit score system.
+
+| Score Range | Tier | Description |
+|-------------|------|-------------|
+| 80-100 | `excellent` | Highest trust level |
+| 60-79 | `good` | Standard trusted participant |
+| 40-59 | `normal` | Moderate trust |
+| 20-39 | `restricted` | Under observation |
+| 0-19 | `novice` | New or penalized participant |
+
+### C.2 Miner Credit Effects
+
+| Tier | Sampling Rate | Epoch Submit Limit | PoW Probability |
+|------|--------------|-------------------|-----------------|
+| `excellent` (80+) | Base rate (0.30) | 1,000,000 | 1% |
+| `good` (60-79) | Base rate (0.30) | 10,000 | 5% |
+| `normal` (40-59) | 1.5x base (max 1.0) | 2,000 | 20% |
+| `restricted` (20-39) | 2.0x base (max 1.0) | 500 | 50% |
+| `novice` (0-19) | 1.0 (100%) | 100 | 100% |
+
+### C.3 Validator Credit Effects
+
+| Tier | Min Task Interval | Min Eval Count | Golden Task Probability |
+|------|-------------------|----------------|------------------------|
+| `excellent` (80+) | 10 seconds | 10 | 5% |
+| `good` (60-79) | 30 seconds | 10 | 10% |
+| `normal` (40-59) | 2 minutes | 10 | 20% |
+| `restricted` (20-39) | 5 minutes | 10 | 30% |
+| `novice` (0-19) | 10 minutes | 3 | 40% |
+
+### C.4 Credit Adjustment (Per Epoch)
+
+**Miners:**
+- Qualified: +5 (cap at 100)
+- Not qualified: -15 (floor at 0), consecutive_fail + 1
+- 3+ consecutive failures: credit reset to 0
+
+**Validators:**
+- Accuracy >= 60%: +5 (cap at 100), consecutive_flag reset to 0
+- Accuracy < 60%: -15, consecutive_flag + 1
+- Accuracy < 20%: credit reset to 0
+
+### C.5 Validator Eviction Rules
+
+| Rule | Window | Threshold | Penalty |
+|------|--------|-----------|---------|
+| **Idle** | 3-of-10 | 3 idle epochs in last 10 | Evict 1 epoch, -15 credit |
+| **Flag** | 4-of-10 | 4 flagged (accuracy < 60%) in last 10 | Evict 1 epoch, -15 credit |
+| **Timeout** | 4-of-10 | 4 timeouts in last 10 | Evict 1 epoch |
+| **Unclaimed** | 3 consecutive | 3 consecutive unclaimed tasks | 1-hour cooldown |
+
+---
+
+## Appendix D: Epoch & Settlement
+
+### D.1 Epoch Lifecycle
+
+- **Duration**: 1 UTC natural day (00:00 - 00:00 UTC)
+- **Epoch ID format**: `"YYYY-MM-DD"` (e.g. `"2026-04-09"`)
+- **Auto-settlement**: Triggered at UTC 00:00 daily
+- **Manual settlement**: Admin can trigger via `POST /api/core/v1/epochs/:epochID/settle`
+
+### D.2 Settlement Formula
+
+**Miner Reward**:
+```
+effectiveTaskCount = mineCount + repeatCount * 0.8
+weight = avgScore * avgScore * effectiveTaskCount
+rewardAmount = epochEmission * minerRewardShare * (weight / totalMinerWeight)
+```
+
+**Validator Reward**:
+```
+weight = accuracy * accuracy * evalCount
+rewardAmount = epochEmission * validatorRewardShare * (weight / totalValidatorWeight)
+```
+
+**Qualification Requirements**:
+- Miner: `task_count >= 80` (configurable) and `avg_score >= 60` (configurable)
+- Validator: `eval_count >= 10` required; accuracy < 20% -> disqualified; accuracy 20-60% -> qualified but penalized
+
+### D.3 Validator Penalties
+
+| Penalty | Trigger | Credit Effect | Additional |
+|---------|---------|--------------|------------|
+| `severe_misbehavior` | accuracy < 20% | Disqualified, reset to 0 | Excluded from reward pool |
+| `misbehavior` | accuracy 20-60% | -15, flag++ | Reward slashed and redistributed |
+| `low_quality` | -- | -15 | None |
+| `idle` | eval_count < 10 | -15 | None |
+
+---
+
+## Appendix E: Quality Assurance Pipeline
+
+### E.1 Pipeline Overview
+
+```
+Miner submits data (M0)
+    -> Sampling decision (credit-based rate)
+    -> If sampled:
+        Phase A: Repeat Crawl (Step 1)
+            -> Different miner re-crawls same URL -> produces M1
+            -> Evaluation Task created
+        Phase B: Evaluation
+            -> Validator compares M0 vs M1
+            -> Reports "match" (authentic) or "mismatch" (suspicious)
+            -> If match: score applied, submission confirmed/rejected
+            -> If mismatch: Step 2 triggered
+        Phase A: Repeat Crawl (Step 2, if mismatch)
+            -> Third miner re-crawls -> produces M2
+            -> New Evaluation Task created
+        Phase B: Final Evaluation
+            -> Validator compares M0 vs M2
+            -> Final determination
+```
+
+### E.2 Match/Mismatch Consensus (Peer Review)
+
+When multiple validators evaluate the same task:
+- **Match consensus**: >= 3/5 validators agree on "match" -> submission scored
+- **Mismatch consensus**: >= 3/5 validators agree on "mismatch" -> Step 2 triggered or fraud confirmed
+- **No consensus**: All validators reported but no majority -> scored using available data
+
+### E.3 Scoring Scenarios
+
+**Scenario 1** (Step 1 Match): M0 scored with validator's score. M0 repeat score = 5.
+
+**Scenario 2** (Step 1 Mismatch -> Step 2 Match): M0 confirmed authentic. M0 repeat score = 5, M1 repeat score = 0.
+
+**Scenario 3** (Step 1 Mismatch -> Step 2 Mismatch): M0 confirmed fraudulent (score = 0). M0 repeat score = 0, M1 repeat score = 5.
+
+### E.4 Reward Weight
+
+Effective task count for reward calculation:
+```
+effectiveTaskCount = mineCount + repeatCount * 0.8
+```
+
+Repeat tasks count at 80% weight compared to original mining tasks.
