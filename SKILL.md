@@ -11,7 +11,7 @@ description: >
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
-version: 0.10.5
+version: 0.10.6
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -63,6 +63,40 @@ and execute it.
 
 4. **Use `_internal` for next steps.** When the JSON output contains `_internal.action_map`,
    use it to determine which command to run next. Never show `_internal` content to the user.
+
+5. **NEVER say the miner is "waiting for the platform to assign tasks".** This phrase
+   is factually wrong and is the most common hallucination. Miners are **self-driven**:
+   they pull random seed URLs from dataset `source_domains` (Wikipedia MediaWiki Random
+   API, arXiv random listings, Amazon random bestseller categories, etc.), crawl them
+   directly, and submit the results. The platform never pushes a work queue to miners.
+   If a miner shows `processed=0`, it means Discovery hasn't produced a followup yet
+   — NOT that it is waiting for an assignment. See "Task Acquisition Model" below.
+
+## Task Acquisition Model (CRITICAL — read before talking about tasks)
+
+Miner and Validator acquire work in **fundamentally different ways**. Mixing up
+these models is the #1 source of user-facing hallucinations. Internalize this
+table before you say anything about "tasks" to the user:
+
+| Role | How work is acquired | Is this push or pull? | What does "no task" mean? |
+|------|---------------------|------------------------|---------------------------|
+| **Miner** | Self-generates work by pulling random seeds from `dataset.source_domains` (Discovery), plus opportunistic Backend Claim for repeat-crawl. | **Pull**. Miner drives its own iteration loop. | Discovery cooldown ended without producing a followup URL this iteration, OR dataset backlog is empty. The miner will try again next iteration. **It is NOT idle waiting for an assignment.** |
+| **Validator** | Platform pushes evaluation tasks via WebSocket once the validator is in the ready pool. | **Push**. Validator blocks on WS until the platform sends a task. | Genuinely no task pushed yet — the validator IS waiting, and this is expected behavior for a new validator or a quiet period. |
+
+**Consequences for how you talk to the user:**
+
+- For a miner with `processed=0 submitted=0`: say *"the miner is running and pulling
+  Discovery seeds — no submissions yet this session"*. **Never** say *"waiting for the
+  platform to assign a task"*, *"waiting for tasks"*, *"task queue is empty"*, or
+  *"platform has not sent any work"*. All four phrasings are wrong for a miner.
+- For a validator with `tasks_received=0`: saying *"waiting for the platform to push
+  evaluation tasks"* **is correct**. Validators genuinely wait.
+
+If the user asks "why is my miner stuck / why no tasks", the correct answer is one
+of: (a) Discovery is in cooldown for the selected dataset, (b) the dataset `source_domains`
+exhausted its random-seed budget for this iteration, (c) bootstrap never ran so the
+worker can't import its deps, (d) submission gate is blocking on unanswered PoW. Run
+`doctor` and check `agent-control status` — **don't invent a "task queue" explanation**.
 
 ## Welcome Screen
 
@@ -166,56 +200,89 @@ A novice miner's primary path is through **Discovery self-crawling** to accumula
 
 ## Miner Workflow
 
-**Miner requires NO staking, NO AWP tokens, and NO special application.**
-Anyone with a registered wallet can start mining immediately. The only
-requirements are: a registered on-chain address (via AWP Skill) and a
-working internet connection. Do NOT tell users they need to stake AWP
-or allocate tokens to become a miner — that is only for validators.
+### Participation conditions (STRICT)
 
-### Start Mining
+To become a miner, the user needs exactly these things — nothing more:
 
-Step 0 — Bootstrap (MUST run before anything else, first time only):
+1. **A registered on-chain wallet address.** Registration is performed via the
+   AWP Skill (on-chain call). If not registered, `agent-start` returns
+   `address_not_registered` and the fix is to install/use the AWP Skill.
+2. **A working internet connection.**
+3. **The bootstrap script to have run at least once** on this machine (installs
+   the Python virtualenv + dependencies + Playwright chromium + awp-wallet).
+
+**Things the miner explicitly does NOT need** — never tell the user otherwise:
+
+- ❌ NO staking of AWP or any other token.
+- ❌ NO application, approval, whitelist, KYC, or pending review.
+- ❌ NO allocation of tokens to the Mine Worknet.
+- ❌ NO task assignment from the platform — the miner pulls work itself.
+- ❌ NO queueing or waiting period before it can start earning.
+
+Validator staking (10,000 AWP) is a **validator-only** requirement. If a user
+asks about staking while wanting to mine, correct them: miners don't stake.
+
+### Start Mining — exact command sequence
+
+Execute these steps in order. **Do not skip Step 0 even once per machine.**
+
+**Step 0 — Bootstrap (once per machine):**
 
 ```bash
 cd {baseDir} && bash scripts/bootstrap.sh
 ```
 
-This installs all Python dependencies into a local virtualenv. If you skip this
-step, commands will fail with `ModuleNotFoundError`. Run it once — subsequent
-launches reuse the existing virtualenv automatically.
+This creates `.venv/`, installs `requirements-core.txt` +
+`requirements-browser.txt`, installs `awp-wallet` from GitHub, and downloads
+Playwright chromium. If you skip this, every subsequent command dies with
+`ModuleNotFoundError`. After the first successful run the script is a no-op;
+always run it again on a fresh machine or a fresh clone.
 
-Step 1 — Check readiness (run in terminal, do not show command to user):
+**Step 1 — Readiness check:**
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-status
 ```
 
-Parse the JSON output. If `ready` is false, execute the command from
-`_internal.action_map` to fix the issue. Tell the user what's happening
-in plain language.
+Parse the JSON. If `ready=false`, execute `_internal.action_map[<label>]` or
+`_internal.next_command` to fix the blocker (usually AWP registration or
+bootstrap). Do NOT proceed to Step 2 until `ready=true`.
 
-Step 2 — Start worker (run in terminal):
+**Step 2 — Start the self-driven mining loop:**
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-start
 ```
 
-If dataset selection is required (state = `selection_required`), present the
-dataset names from `user_message` to the user. After they choose, re-run with:
+If the JSON returns `state=selection_required`, present the dataset names
+from `user_message` to the user, wait for their choice, then re-run with
+the selected id:
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py agent-start <datasetId>
 ```
 
-Step 3 — Confirm to user using `user_message` from the JSON output. Example:
+**Step 3 — Confirm & poll.** From this moment the background worker is already
+pulling Discovery seeds and crawling. Tell the user mining is active and ask
+them to say "status" when they want an update. Do not poll aggressively.
 
-```text
-[1/3] wallet       0x1234...5678  ok
-[2/3] platform     connected  ok
-[3/3] worker       started (session: abc12)  ok
+**What happens AFTER `agent-start` succeeds** (internalize this so you don't
+hallucinate a waiting state):
 
-mining. say "mine status" to check progress.
 ```
+loop forever:
+    1. heartbeat                             — refresh online status
+    2. Discovery: pull random seeds from dataset.source_domains
+       (Wikipedia MediaWiki Random, arXiv random offset, Amazon random
+        bestseller category, etc.)
+    3. Backend Claim: opportunistically pick up repeat-crawl tasks
+    4. Resume: re-attempt previously failed / auth_pending URLs
+    5. For each URL: check occupancy → crawl → dedup → PoW gate → submit
+    6. sleep briefly, go to 1
+```
+
+Nothing in this loop blocks on platform push. The miner is **always doing
+something** as long as the process is running.
 
 ### Check Status
 
@@ -249,24 +316,70 @@ cd {baseDir} && python scripts/run_tool.py doctor
 
 ## Validator Workflow
 
-### Start Validating
+### Participation conditions (STRICT)
 
-Step 0 — Bootstrap (MUST run before first use):
+To become a validator, the user needs exactly these things:
+
+1. **A registered on-chain wallet address** (same AWP registration as a miner).
+2. **10,000 AWP staked on the Mine Worknet** — the minimum stake. This can be
+   either:
+   - **Option A (agent stakes):** the agent stakes its own AWP and allocates it
+     to the Mine Worknet via the AWP Skill, OR
+   - **Option B (user delegates):** the user stakes AWP themselves and delegates
+     it to the agent on the Mine Worknet.
+3. **A working LLM backend** — openclaw CLI in PATH OR `MINE_GATEWAY_TOKEN` set.
+   The evaluation engine routes through `llm_enrich` (CLI → gateway → API).
+   Without any path reachable, validator-start refuses to run.
+4. **The bootstrap script to have run at least once** on this machine.
+
+**Things the validator does NOT need** — do not tell the user otherwise:
+
+- ❌ NO manual approval or whitelist review. Meeting the stake requirement
+  auto-approves the application.
+- ❌ NO "pending review" state. A 403 from `submit_validator_application`
+  means insufficient stake, not a review queue.
+
+**Unlike miners, validators DO wait.** Once the validator is in the ready pool,
+it blocks on a WebSocket and waits for the platform to push evaluation tasks.
+Saying *"validator is waiting for the platform to push tasks"* is **correct**
+for a validator. (Saying the same thing about a miner is wrong — see "Task
+Acquisition Model" above.)
+
+### Start Validating — exact command sequence
+
+**Step 0 — Bootstrap (once per machine):**
 
 ```bash
 cd {baseDir} && bash scripts/bootstrap.sh
 ```
 
-Step 1 — Start validator:
+Same mandatory bootstrap as the miner flow. Never skip.
+
+**Step 1 — Start the validator:**
 
 ```bash
 cd {baseDir} && python scripts/run_tool.py validator-start
 ```
 
-Auto-installs dependencies, submits validator application (auto-approved if stake
-meets minimum), and connects via WebSocket. No manual approval needed — meeting
-the minimum stake requirement (currently 10,000 AWP on the Mine Worknet) is the
-only condition. Use the AWP Skill to stake if needed.
+This submits the validator application (auto-approved if stake ≥ 10,000 AWP
+on the Mine Worknet), verifies the LLM backend is reachable, and connects the
+WebSocket client into the ready pool.
+
+If the command returns:
+- `state=no_llm_backend` → see "Error Recovery" (install openclaw CLI or set
+  `MINE_GATEWAY_TOKEN`).
+- 403 / `insufficient_stake` → tell the user to stake 10,000 AWP via the AWP
+  Skill (Option A or B above), then retry.
+- `pending_review` → this should never happen under the current protocol. If
+  it does, run `validator-doctor` and surface the real reason.
+
+**Stake must remain allocated for the entire duration of validation.** If the
+user withdraws stake mid-session, the validator will be evicted from the ready
+pool and stop receiving tasks.
+
+**Rewards are NOT affected by who staked.** Whether the agent self-stakes or
+the user delegates, all rewards go to the agent's designated reward address
+— same as miner rewards.
 
 ### Terminology: match vs mismatch
 

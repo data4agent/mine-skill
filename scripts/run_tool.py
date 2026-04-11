@@ -1179,12 +1179,26 @@ def run_agent_control(action: str = "status") -> str:
             rewards_info = ""
             if total_rewards is not None:
                 rewards_info = f" Total rewards: {total_rewards} aMine ({total_epochs or '?'} epochs)."
-            user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}{rewards_info}"
+            # Explicit reminder so the host LLM cannot invent "waiting for task
+            # assignment" — miners are self-driven, they pull Discovery seeds
+            # directly from dataset source_domains every iteration.
+            role_note = (
+                "Miner is self-driven: it pulls random seed URLs from the selected "
+                "dataset and crawls them directly — it does NOT wait for the platform "
+                "to assign tasks."
+            )
+            user_msg = f"Mining is running (session: {session_id}). {progress} {credit} {session_stats}{rewards_info} {role_note}"
             # Diagnostic hints for common issues
             if submitted == 0 and processed > 0 and errors_count > 0:
                 user_msg += " Note: items processed but none submitted — check errors in log for submission failures."
             elif submitted == 0 and processed == 0 and errors_count == 0:
-                user_msg += " Note: no items processed yet — Discovery may be in cooldown or dataset has no available URLs."
+                user_msg += (
+                    " Note: no submissions yet this session — Discovery is still "
+                    "generating seed URLs from dataset source_domains. This is "
+                    "normal during the first iteration. Do NOT describe this as "
+                    "'waiting for the platform to assign tasks' — the miner pulls "
+                    "work itself, it is never assigned."
+                )
             if recent_errors:
                 user_msg += f" Warning: {len(recent_errors)} recent error(s) in log."
             user_acts = ["Pause mining", "Stop mining"]
@@ -1437,7 +1451,15 @@ def render_validator_status() -> str:
                     f"NOT that the platform rejected anything."
                 )
             else:
-                detail_parts.append("No tasks evaluated yet — waiting for platform to assign tasks.")
+                # Validators DO wait for the platform to push tasks via
+                # WebSocket — this is the correct behavior for a validator in
+                # the ready pool. Unlike the miner, this is genuinely a "waiting"
+                # state, and saying so to the user is accurate.
+                detail_parts.append(
+                    "No tasks evaluated yet — validator is in the ready pool and "
+                    "waiting for the platform to push evaluation tasks via WebSocket. "
+                    "This is expected for a new validator or a quiet period."
+                )
             # Enrich with profile data for historical stats
             try:
                 from common import resolve_wallet_config
