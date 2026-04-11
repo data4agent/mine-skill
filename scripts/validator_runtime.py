@@ -498,6 +498,29 @@ class ValidatorRuntime:
                             log.warning(alert)
                             self._send_notification(alert)
                     self._write_status()
+
+            elif msg.type == "cooldown":
+                # Platform signals post-task cooldown with a precise sleep
+                # duration — respect it instead of using min_task_interval.
+                retry_after = int(msg.data.get("retry_after_seconds", 30))
+                cooldown_msg = msg.data.get("message", "")
+                log.info("Cooldown received via WS: %ds (%s)", retry_after, cooldown_msg)
+                self._record_action(f"cooldown {retry_after}s", {"message": cooldown_msg})
+                self._stop_event.wait(timeout=retry_after)
+
+            elif msg.type == "error":
+                # Platform reports a claim/ack/reject failure or cooldown via
+                # WS error message. Log it and handle validator_cooldown by
+                # sleeping the precise retry_after_seconds.
+                error_code = str(msg.raw.get("code") or "")
+                error_msg = str(msg.raw.get("message") or "")
+                retry_after = msg.raw.get("retry_after_seconds")
+                log.warning("WS error: code=%s message=%s", error_code, error_msg)
+                self._record_action(f"ws_error: {error_code}", {"message": error_msg})
+                if error_code == "validator_cooldown" and isinstance(retry_after, (int, float)) and retry_after > 0:
+                    log.info("Validator cooldown via WS error: sleeping %ds", int(retry_after))
+                    self._stop_event.wait(timeout=int(retry_after))
+
             else:
                 log.debug("Ignoring message type=%s", msg.type)
 
@@ -515,6 +538,12 @@ class ValidatorRuntime:
             with self._platform_lock:
                 claim_data = self._platform.claim_evaluation_task()
             if not claim_data:
+                return
+            # Handle 409 validator_cooldown sentinel from _claim
+            if isinstance(claim_data, dict) and claim_data.get("_cooldown"):
+                retry_after = int(claim_data.get("retry_after_seconds", 30))
+                log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
+                self._stop_event.wait(timeout=retry_after)
                 return
             msg = WSMessage({"type": "evaluation_task", "data": claim_data})
             self._inc_stat("tasks_received")

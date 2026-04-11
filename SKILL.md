@@ -11,7 +11,7 @@ description: >
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
-version: 0.10.8
+version: 0.10.9
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -344,6 +344,20 @@ it blocks on a WebSocket and waits for the platform to push evaluation tasks.
 Saying *"validator is waiting for the platform to push tasks"* is **correct**
 for a validator. (Saying the same thing about a miner is wrong — see "Task
 Acquisition Model" above.)
+
+### Validator WebSocket message types
+
+The platform pushes these message types via `/api/mining/v1/ws`:
+
+| Type | When | What the validator does |
+|------|------|------------------------|
+| `evaluation_task` | New task assigned | ACK within 30s → fetch details → evaluate → report |
+| `cooldown` | After task completion | Sleep `retry_after_seconds` before accepting next task |
+| `error` | Claim/ack/reject failure | Log the error; if `code=validator_cooldown`, sleep `retry_after_seconds` |
+
+If the validator falls back to HTTP polling (`POST /api/mining/v1/evaluation-tasks/claim`):
+- 404 = no task available (normal)
+- 409 `validator_cooldown` = cooldown active; response includes `retry_after_seconds`
 
 ### Start Validating — exact command sequence
 
