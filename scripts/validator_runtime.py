@@ -88,6 +88,11 @@ class ValidatorRuntime:
         self._last_action = ""
         self._last_action_at = ""
         self._recent_actions: list[dict[str, str]] = []
+        # Real-time phase for external status readers (host LLM).
+        # Values: "starting", "waiting_for_task", "evaluating",
+        #         "cooldown", "stopped".
+        self._phase = "starting"
+        self._phase_detail = ""  # e.g. "28s remaining" for cooldown
 
         # File paths for persistence
         suffix = f"-{self._validator_id}" if self._validator_id else ""
@@ -139,6 +144,8 @@ class ValidatorRuntime:
             "eligible": eligible,
             "in_ready_pool": in_pool,
             "ws_connected": self._ws.connected,
+            "phase": self._phase,
+            "phase_detail": self._phase_detail,
             "stats": self._snapshot_stats(),
             "last_action": self._last_action,
             "last_action_at": self._last_action_at,
@@ -374,6 +381,8 @@ class ValidatorRuntime:
             self._running = False
         self._stop_event.set()
 
+        self._phase = "stopped"
+        self._phase_detail = ""
         log.info("ValidatorRuntime stopping")
 
         try:
@@ -437,8 +446,15 @@ class ValidatorRuntime:
     # Internal loops
     # ------------------------------------------------------------------
 
+    def _set_phase(self, phase: str, detail: str = "") -> None:
+        """Update the externally visible phase and write status."""
+        self._phase = phase
+        self._phase_detail = detail
+        self._write_status()
+
     def _main_loop(self) -> None:
         """WS receive loop with HTTP polling fallback."""
+        self._set_phase("waiting_for_task")
         consecutive_ws_failures = 0
         while self._running:
             if not self._ws.connected:
@@ -484,6 +500,7 @@ class ValidatorRuntime:
                     log.info("Paused — ignoring evaluation_task %s", msg.assignment_id)
                     continue
                 try:
+                    self._set_phase("evaluating", f"task {msg.task_id}")
                     self._handle_evaluation_task(msg)
                 except Exception as exc:
                     self._inc_stat("errors")
@@ -497,7 +514,8 @@ class ValidatorRuntime:
                             alert = f"WARNING: {consec} consecutive evaluation failures!"
                             log.warning(alert)
                             self._send_notification(alert)
-                    self._write_status()
+                finally:
+                    self._set_phase("waiting_for_task")
 
             elif msg.type == "cooldown":
                 # Platform signals post-task cooldown with a precise sleep
@@ -506,7 +524,9 @@ class ValidatorRuntime:
                 cooldown_msg = msg.data.get("message", "")
                 log.info("Cooldown received via WS: %ds (%s)", retry_after, cooldown_msg)
                 self._record_action(f"cooldown {retry_after}s", {"message": cooldown_msg})
+                self._set_phase("cooldown", f"{retry_after}s")
                 self._stop_event.wait(timeout=retry_after)
+                self._set_phase("waiting_for_task")
 
             elif msg.type == "error":
                 # Platform reports a claim/ack/reject failure or cooldown via
@@ -519,7 +539,9 @@ class ValidatorRuntime:
                 self._record_action(f"ws_error: {error_code}", {"message": error_msg})
                 if error_code == "validator_cooldown" and isinstance(retry_after, (int, float)) and retry_after > 0:
                     log.info("Validator cooldown via WS error: sleeping %ds", int(retry_after))
+                    self._set_phase("cooldown", f"{int(retry_after)}s")
                     self._stop_event.wait(timeout=int(retry_after))
+                    self._set_phase("waiting_for_task")
 
             else:
                 log.debug("Ignoring message type=%s", msg.type)
@@ -646,13 +668,16 @@ class ValidatorRuntime:
         })
         self._write_status()
 
-        # Step 5: Wait min_task_interval before accepting next task
-        # No need to re-call /validators/ready — ready pool membership persists
-        # until explicitly leaving or being evicted. Heartbeat keeps online status.
+        # Step 5: Wait min_task_interval before accepting next task.
+        # The platform may also send a WS "cooldown" message with a precise
+        # retry_after_seconds — that is handled in _main_loop and overrides
+        # this local interval. This sleep is the fallback when no WS cooldown
+        # message arrives.
         with self._lock:
             wait_seconds = self._min_task_interval
         if wait_seconds > 0:
             log.info("Waiting %ds (min_task_interval) before next task", wait_seconds)
+            self._set_phase("cooldown", f"{wait_seconds}s (min_task_interval)")
             self._stop_event.wait(timeout=wait_seconds)
 
     def _heartbeat_loop(self) -> None:
