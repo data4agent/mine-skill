@@ -571,18 +571,67 @@ class AgentWorker:
         return f"completed {iteration} iterations"
 
     def run_worker(self, *, interval: int = 60, max_iterations: int = 1) -> dict[str, Any]:
+        """Run the mining iteration loop.
+
+        With ``max_iterations=0`` this is the long-lived background worker
+        path — it never returns until the session is marked ``stopped``. The
+        per-iteration print/log output is what makes the session log file
+        non-empty; without it the log stays at 0 bytes and users think the
+        worker is hung.
+        """
+        log = logging.getLogger("agent.worker")
+        log.info(
+            "worker starting: interval=%ds max_iterations=%s",
+            interval,
+            "infinite" if max_iterations == 0 else max_iterations,
+        )
         iterations: list[dict[str, Any]] = []
         iteration = 0
+        consecutive_empty = 0
         while max_iterations == 0 or iteration < max_iterations:
             iteration += 1
             self._proactive_session_renew()
-            iterations.append(self.run_iteration(iteration))
+            log.info("iteration %d: starting", iteration)
+            summary = self.run_iteration(iteration)
+            iterations.append(summary)
+
+            # Summary line — always emitted so the log file has a heartbeat
+            # even when there's no work. This is what proves the worker is
+            # alive and pulling; without it a user sees 0 bytes and assumes
+            # the process is stuck.
+            processed = summary.get("processed_items", 0)
+            submitted = summary.get("submitted_items", 0)
+            discovered = summary.get("discovery_items", 0)
+            claimed = summary.get("claimed_items", 0)
+            resumed = summary.get("resumed_items", 0)
+            errors = summary.get("errors") or []
+            log.info(
+                "iteration %d: done processed=%d submitted=%d discovery=%d claimed=%d resumed=%d errors=%d",
+                iteration, processed, submitted, discovered, claimed, resumed, len(errors),
+            )
+            if errors:
+                for err in errors[:5]:
+                    log.warning("iteration %d error: %s", iteration, err)
+
             if str(self.state_store.load_session().get("mining_state") or "idle") == "stopped":
+                log.info("worker stopping: mining_state=stopped")
                 break
             if max_iterations == 1 or (max_iterations != 0 and iteration >= max_iterations):
                 break
-            self.state_store.save_session({"last_wait_seconds": interval})
-            time.sleep(interval)
+
+            # Back off when consecutive iterations find nothing to do. This
+            # mirrors run_loop's behavior and keeps the log file readable
+            # (long sleeps are logged before they start).
+            if not processed and not discovered and not claimed and not resumed:
+                consecutive_empty += 1
+                wait = min(interval * (2 ** min(consecutive_empty, 3)), 300)
+            else:
+                consecutive_empty = 0
+                wait = interval
+            self.state_store.save_session({"last_wait_seconds": wait})
+            log.info("iteration %d: sleeping %ds", iteration, wait)
+            time.sleep(wait)
+        log.info("worker finished: total_iterations=%d", iteration)
         return {
             "completed_iterations": iteration,
             "iterations": iterations,
