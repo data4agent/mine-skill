@@ -62,7 +62,7 @@ install_requirements() {
     "$VENV_DIR/bin/python" -m playwright install chromium 2>/dev/null || \
       echo "WARNING: Playwright browser install failed. Amazon/LinkedIn crawling may not work."
   fi
-  if [[ "$INSTALL_PROFILE" == "full" ]]; then
+  if [[ "$INSTALL_PROFILE" == "full" && -f requirements-dev.txt ]]; then
     "$VENV_DIR/bin/python" -m pip install -r requirements-dev.txt
   fi
 }
