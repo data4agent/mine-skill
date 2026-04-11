@@ -1,7 +1,7 @@
-"""OpenClaw agent execution aligned with awp-core/s1-benchmark-skill.
+"""OpenClaw agent CLI execution for LLM enrichment.
 
 This module is the preferred execution path for mine LLM enrich calls. It
-mirrors the benchmark worker's approach:
+mirrors the OpenClaw worker approach:
 
 - resolve the OpenClaw binary up front
 - use a dedicated agent instead of `main`
@@ -42,7 +42,7 @@ _agent_lock = threading.Lock()
 
 @dataclass(slots=True)
 class EnrichResponse:
-    """Response from benchmark-skill style agent enrichment."""
+    """Response from OpenClaw CLI style agent enrichment."""
 
     content: str
     success: bool
@@ -56,7 +56,7 @@ class OpenClawAgentError(RuntimeError):
     """Raised when the OpenClaw agent CLI call fails."""
 
 
-def benchmark_skill_available() -> bool:
+def openclaw_cli_available() -> bool:
     """Return whether an OpenClaw CLI binary is available."""
     return bool(_resolve_openclaw_path(required=False))
 
@@ -78,7 +78,7 @@ def _session_dir_for_agent(agent_id: str) -> Path:
 
 
 def _resolve_openclaw_path(*, required: bool = True) -> str:
-    """Find the OpenClaw binary using the same heuristics as benchmark-worker."""
+    """Find the OpenClaw binary using the same heuristics as OpenClaw worker."""
     global _openclaw_bin
 
     if _openclaw_bin:
@@ -182,7 +182,7 @@ def _create_agent(agent_id: str) -> bool:
 
 
 def _purge_agent_sessions(agent_id: str) -> None:
-    """Delete benchmark-style transcript files so each call starts clean."""
+    """Delete OpenClaw transcript files so each call starts clean."""
     session_dir = _session_dir_for_agent(agent_id)
     if not session_dir.is_dir():
         return
@@ -289,13 +289,13 @@ def call_agent(
     timeout: float = DEFAULT_CLI_TIMEOUT,
     purge_sessions: bool = True,
 ) -> EnrichResponse:
-    """Call the dedicated OpenClaw agent with benchmark-skill session hygiene."""
+    """Call the dedicated OpenClaw agent with OpenClaw CLI session hygiene."""
     if time.monotonic() < _rate_limit_until:
         remaining = int(_rate_limit_until - time.monotonic())
         return EnrichResponse(
             content="",
             success=False,
-            source="benchmark_skill",
+            source="openclaw_cli",
             error=f"rate limit backoff in effect ({remaining}s remaining)",
         )
 
@@ -303,7 +303,7 @@ def call_agent(
         agent_id = ensure_agent()
         openclaw = _resolve_openclaw_path()
     except OpenClawAgentError as exc:
-        return EnrichResponse(content="", success=False, source="benchmark_skill", error=str(exc))
+        return EnrichResponse(content="", success=False, source="openclaw_cli", error=str(exc))
 
     if purge_sessions:
         _purge_agent_sessions(agent_id)
@@ -323,7 +323,7 @@ def call_agent(
             text=True,
         )
     except (FileNotFoundError, OSError) as exc:
-        return EnrichResponse(content="", success=False, source="benchmark_skill", error=str(exc))
+        return EnrichResponse(content="", success=False, source="openclaw_cli", error=str(exc))
 
     timed_out = False
     deadline = time.monotonic() + timeout
@@ -345,7 +345,7 @@ def call_agent(
         return EnrichResponse(
             content="",
             success=False,
-            source="benchmark_skill",
+            source="openclaw_cli",
             error=f"CLI timeout ({timeout}s)",
         )
 
@@ -356,7 +356,7 @@ def call_agent(
         return EnrichResponse(
             content="",
             success=False,
-            source="benchmark_skill",
+            source="openclaw_cli",
             error=error_msg,
         )
 
@@ -364,7 +364,7 @@ def call_agent(
         return EnrichResponse(
             content="",
             success=False,
-            source="benchmark_skill",
+            source="openclaw_cli",
             error="empty response",
         )
 
@@ -373,14 +373,14 @@ def call_agent(
         return EnrichResponse(
             content="",
             success=False,
-            source="benchmark_skill",
+            source="openclaw_cli",
             error="unable to extract response content",
         )
 
     return EnrichResponse(
         content=content,
         success=True,
-        source="benchmark_skill",
+        source="openclaw_cli",
         model="openclaw/agent",
     )
 
@@ -397,6 +397,6 @@ async def enrich_with_llm(
     *,
     timeout: float = DEFAULT_CLI_TIMEOUT,
 ) -> EnrichResponse:
-    """Async wrapper around the benchmark-skill style OpenClaw agent call."""
+    """Async wrapper around the OpenClaw CLI style OpenClaw agent call."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: call_agent(prompt, timeout=timeout))

@@ -608,15 +608,14 @@ def _wikipedia_random_articles(wiki_host: str, count: int = 10) -> list[str]:
 
 
 def _discovery_seed_urls(domain: str) -> list[str]:
+    """Generate seed URLs for discover-crawl. Only used for Amazon and generic platforms.
+    arXiv and Wikipedia use direct API calls in DatasetDiscoverySource.collect() instead.
+    """
     raw = domain.strip()
     seed_url = raw if "://" in raw else f"https://{raw.strip('/')}/"
     parsed = urlparse(seed_url)
     host = (parsed.netloc or parsed.path).lower()
     normalized_path = parsed.path.rstrip("/")
-    if (host == "wikipedia.org" or host.endswith(".wikipedia.org")) and normalized_path in {"", "/"}:
-        if host == "wikipedia.org":
-            host = "en.wikipedia.org"
-        return [canonicalize_url(f"{parsed.scheme or 'https'}://{host}/wiki/Main_Page")]
     # Amazon: pick a random bestseller category to diversify across miners
     if (host.endswith(".amazon.com") or host == "amazon.com" or host.endswith(".amazon.co.uk") or host == "amazon.co.uk" or host.endswith(".amazon.de") or host == "amazon.de") and normalized_path in {"", "/"}:
         import random as _rnd
@@ -630,17 +629,4 @@ def _discovery_seed_urls(domain: str) -> list[str]:
         cat = _rnd.choice(_amazon_categories)
         scheme = parsed.scheme or "https"
         return [canonicalize_url(f"{scheme}://{host}/gp/bestsellers/{cat}/")]
-    # arXiv: seed from recent archive listings so one-hop discovery reaches /abs/<id> pages
-    if (host == "arxiv.org" or host.endswith(".arxiv.org")) and normalized_path in {"", "/"}:
-        scheme = parsed.scheme or "https"
-        return [
-            canonicalize_url(f"{scheme}://{host}/list/cs/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/math/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/physics/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/q-bio/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/q-fin/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/stat/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/eess/recent"),
-            canonicalize_url(f"{scheme}://{host}/list/econ/recent"),
-        ]
     return [canonicalize_url(seed_url)]

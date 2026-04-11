@@ -214,18 +214,6 @@ class PlatformClient:
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
-    def fetch_miner_stats(self, miner_id: str = "") -> dict[str, Any]:
-        """GET /api/mining/v1/miners/:id/stats"""
-        if not miner_id:
-            miner_id = self._signer.get_address() if self._signer else ""
-        return self._request_optional_data("GET", f"/api/mining/v1/miners/{miner_id}/stats")
-
-    def fetch_validator_stats(self, validator_id: str = "") -> dict[str, Any]:
-        """GET /api/mining/v1/validators/:id/stats"""
-        if not validator_id:
-            validator_id = self._signer.get_address() if self._signer else ""
-        return self._request_optional_data("GET", f"/api/mining/v1/validators/{validator_id}/stats")
-
     def _claim(self, path: str) -> dict[str, Any] | None:
         try:
             payload = self._request("POST", path, {})
