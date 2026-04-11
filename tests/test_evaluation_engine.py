@@ -127,8 +127,8 @@ class TestEngineEvaluate:
         )
         assert result.score == 60
 
-    def test_zero_score_match_rejected(self) -> None:
-        """match but score=0 -> rejected."""
+    def test_zero_score_match_still_accepted(self) -> None:
+        """match + score=0 → verdict 仍然是 accepted（score 只反映质量不影响 verdict）。"""
 
         def mock_llm(prompt: str) -> str:
             return '{"result": "match", "score": 0}'
@@ -140,7 +140,7 @@ class TestEngineEvaluate:
             schema_fields=["title"],
         )
         assert result.result == "match"
-        assert result.verdict == "rejected"
+        assert result.verdict == "accepted"
         assert result.score == 0
 
 
@@ -196,11 +196,12 @@ class TestExtractResultAndScore:
         result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
         assert result == "mismatch"
 
-    def test_missing_score_defaults_zero(self) -> None:
+    def test_missing_score_defaults_70(self) -> None:
+        """score 缺失时使用默认分 70，不惩罚 miner。"""
         parsed = {"result": "match"}
         result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
         assert result == "match"
-        assert score == 0
+        assert score == 70
 
     def test_float_score(self) -> None:
         parsed = {"result": "match", "score": 72.5}
@@ -213,6 +214,57 @@ class TestExtractResultAndScore:
         result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
         assert result == "match"
         assert score == 65
+
+    def test_score_fraction_format(self) -> None:
+        """LLM returns '85/100' format — should parse to 85."""
+        parsed = {"result": "match", "score": "85/100"}
+        result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
+        assert result == "match"
+        assert score == 85
+
+    def test_score_percent_format(self) -> None:
+        """LLM returns '90%' format — should parse to 90."""
+        parsed = {"result": "match", "score": "90%"}
+        result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
+        assert result == "match"
+        assert score == 90
+
+    def test_score_around_format(self) -> None:
+        """LLM returns 'around 75' — should parse to 75."""
+        parsed = {"result": "match", "score": "around 75"}
+        result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
+        assert result == "match"
+        assert score == 75
+
+    def test_score_null_defaults_70(self) -> None:
+        """score: null should default to 70."""
+        parsed = {"result": "match", "score": None}
+        result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
+        assert result == "match"
+        assert score == 70
+
+    def test_score_unparseable_string_defaults_70(self) -> None:
+        """score: 'high' should default to 70."""
+        parsed = {"result": "match", "score": "high quality"}
+        result, score = EvaluationEngine._extract_result_and_score(parsed, "", True)
+        assert result == "match"
+        assert score == 70
+
+    def test_text_fallback_match_no_score_defaults_70(self) -> None:
+        """Text with match but no extractable score — should default 70."""
+        result, score = EvaluationEngine._extract_result_and_score(
+            None, "The data looks correct and authentic.", True
+        )
+        assert result == "match"
+        assert score == 70
+
+    def test_text_fallback_mismatch_no_score_zero(self) -> None:
+        """Text with mismatch keywords — score stays 0 even without extractable score."""
+        result, score = EvaluationEngine._extract_result_and_score(
+            None, "This is clearly fabricated data.", True
+        )
+        assert result == "mismatch"
+        assert score == 0
 
 
 # ---------------------------------------------------------------------------
@@ -242,33 +294,33 @@ class TestOptimizeForEval:
         assert "Para two" in result
 
     def test_long_text_heading_removal(self) -> None:
-        """Text exceeding 20k chars should have low-value heading content removed."""
-        main_content = "Important content. " * 500
-        references = "## References\n" + "Reference item. " * 500
-        see_also = "## See Also\n" + "See also item. " * 500
+        """Text exceeding limit should have low-value heading content removed."""
+        main_content = "Important content. " * 1500
+        references = "## References\n" + "Reference item. " * 1500
+        see_also = "## See Also\n" + "See also item. " * 1500
         text = main_content + "\n\n" + references + "\n\n" + see_also
-        if len(text) < 20000:
-            text += "x" * (20001 - len(text))
+        if len(text) < 50000:
+            text += "x" * (50001 - len(text))
 
         result = _optimize_for_eval(text)
         assert "Important content" in result
         assert "## References" not in result
 
     def test_long_text_dedup(self) -> None:
-        """Duplicate paragraphs in text exceeding 20k should be removed."""
+        """Duplicate paragraphs in text exceeding limit should be removed."""
         paragraph = "This is a reasonably long paragraph with enough words to be deduped properly."
-        text = ("\n\n".join([paragraph] * 300))
-        if len(text) < 20000:
-            text += "x" * (20001 - len(text))
+        text = ("\n\n".join([paragraph] * 800))
+        if len(text) < 50000:
+            text += "x" * (50001 - len(text))
         result = _optimize_for_eval(text)
         assert len(result) < len(text)
 
     def test_long_text_truncated(self) -> None:
-        """Text exceeding 20k limit should ultimately be truncated."""
-        text = "A" * 50000
+        """Text exceeding limit should ultimately be truncated."""
+        text = "A" * 100000
         result = _optimize_for_eval(text)
-        # Truncated to _EVAL_MAX_CHARS (20000) + rsplit adjustment + "\n..." suffix
-        assert len(result) <= 20005
+        # Truncated to _EVAL_MAX_CHARS (50000) + rsplit adjustment + "\n..." suffix
+        assert len(result) <= 50005
 
     def test_empty_text(self) -> None:
         assert _optimize_for_eval("") == ""

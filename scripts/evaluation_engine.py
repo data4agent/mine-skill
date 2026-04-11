@@ -186,13 +186,14 @@ class EvaluationEngine:
             sections.append("Set result to \"match\" (no re-crawl data to compare).")
             sections.append("Score structured_data quality (0-100) based on:")
 
-        sections.append("   - Completeness (30%): are all required schema fields present and non-empty?")
-        sections.append("   - Accuracy (40%): do values correctly reflect the original data?")
-        sections.append("   - Type correctness (15%): do values match their schema-defined types?")
-        sections.append("   - Information sufficiency (15%): is obvious information from the source missing?")
+        sections.append("   - Completeness (30 points): are all required schema fields present and non-empty?")
+        sections.append("   - Accuracy (40 points): do values correctly reflect the original data?")
+        sections.append("   - Type correctness (15 points): do values match their schema-defined types?")
+        sections.append("   - Information sufficiency (15 points): is obvious information from the source missing?")
+        sections.append("   Total: 100 points maximum. A perfect extraction with all fields correct scores 100.")
         sections.append("")
-        sections.append("## Output (strict JSON only, no markdown)")
-        sections.append('{"result": "match" or "mismatch", "score": 0-100}')
+        sections.append("## Output (strict JSON only, no markdown, no explanation)")
+        sections.append('{"result": "match" or "mismatch", "score": <integer 0 to 100>}')
 
         prompt = "\n".join(sections)
 
@@ -216,9 +217,12 @@ class EvaluationEngine:
                     score=0,
                 )
 
+            # match 始终 verdict="accepted"——score 只反映数据质量高低，
+            # 不影响 match/mismatch 判定。之前 score=0 时 verdict="rejected"
+            # 导致宿主 LLM 误解为"被平台拒绝"。
             return EvaluationResult(
                 result="match",
-                verdict="accepted" if eval_score > 0 else "rejected",
+                verdict="accepted",
                 consistent=True,
                 score=eval_score,
             )
@@ -233,6 +237,55 @@ class EvaluationEngine:
                 score=50,
             )
 
+    # score 解析失败时的默认分——避免因为 LLM 返回格式问题惩罚 miner。
+    # 70 分 = "数据大概率有效但无法精确评分"。
+    _DEFAULT_SCORE_ON_PARSE_FAILURE = 70
+
+    @staticmethod
+    def _parse_score_value(raw: Any) -> int | None:
+        """尝试从各种 LLM 输出格式中提取整数分值。
+
+        支持: 85, 85.5, "85", "85/100", "85%", "around 85", "~85",
+        "score: 85", null/None, 空字符串。
+        返回 None 表示无法解析。
+        """
+        if raw is None:
+            return None
+
+        s = str(raw).strip()
+        if not s:
+            return None
+
+        # 直接数字 (int/float)
+        try:
+            return int(float(s))
+        except (TypeError, ValueError):
+            pass
+
+        # "85/100" 或 "85 / 100"
+        m = re.match(r"(\d+(?:\.\d+)?)\s*/\s*100", s)
+        if m:
+            return int(float(m.group(1)))
+
+        # "85%" 或 "85 %"
+        m = re.match(r"(\d+(?:\.\d+)?)\s*%", s)
+        if m:
+            return int(float(m.group(1)))
+
+        # "around 85", "~85", "approximately 85"
+        m = re.search(r"(?:around|approximately|about|~)\s*(\d+(?:\.\d+)?)", s, re.IGNORECASE)
+        if m:
+            return int(float(m.group(1)))
+
+        # 最后兜底：字符串里的第一个纯数字
+        m = re.search(r"\b(\d{1,3})\b", s)
+        if m:
+            val = int(m.group(1))
+            if 0 <= val <= 100:
+                return val
+
+        return None
+
     @staticmethod
     def _extract_result_and_score(
         parsed: dict[str, Any] | None,
@@ -244,6 +297,8 @@ class EvaluationEngine:
         Handles: key case variations, value case, non-JSON text, missing fields.
         Returns (result, score) tuple.
         """
+        default_score = EvaluationEngine._DEFAULT_SCORE_ON_PARSE_FAILURE
+
         # Try from parsed JSON first (keys already lowercased)
         if parsed:
             raw_result = str(parsed.get("result", ""))
@@ -256,24 +311,23 @@ class EvaluationEngine:
                 eval_result = "mismatch"
             elif not raw_result:
                 # Result key empty — use parsed score if available, else text fallback
-                try:
-                    score = int(float(str(raw_score)))
-                    if score > 0:
-                        return "match", max(0, min(100, score))
-                except (TypeError, ValueError):
-                    pass
+                score = EvaluationEngine._parse_score_value(raw_score)
+                if score is not None and score > 0:
+                    return "match", max(0, min(100, score))
                 return EvaluationEngine._extract_result_and_score(None, raw_response, has_repeat)
             else:
                 # Ambiguous verdict — fall back to raw text extraction
                 return EvaluationEngine._extract_result_and_score(None, raw_response, has_repeat)
 
             # Normalize score value
-            try:
-                eval_score = int(float(str(raw_score)))
-            except (TypeError, ValueError):
-                eval_score = 0
-
-            return eval_result, eval_score
+            score = EvaluationEngine._parse_score_value(raw_score)
+            if score is None:
+                log.warning(
+                    "[eval] score 解析失败，使用默认分 %d (raw_score=%r, response=%s)",
+                    default_score, raw_score, raw_response[:200],
+                )
+                score = default_score
+            return eval_result, score
 
         # Fallback: extract from raw text when JSON parsing failed entirely
         text = raw_response.lower()
@@ -285,7 +339,6 @@ class EvaluationEngine:
             eval_result = "match"
 
         # Detect score from text (look for number near "score")
-        eval_score = 0
         score_patterns = [
             r'score["\s:]*(\d+)',
             r'(\d+)["\s]*/?\s*100',
@@ -297,16 +350,25 @@ class EvaluationEngine:
                 try:
                     val = int(m.group(1))
                     if 0 <= val <= 100:
-                        eval_score = val
-                        break
+                        return eval_result, val
                 except ValueError:
                     pass
 
-        return eval_result, eval_score
+        # 文本中也找不到分数——对 match 使用默认分
+        if eval_result == "match":
+            log.warning(
+                "[eval] 文本 fallback 无法提取分数，使用默认分 %d (response=%s)",
+                default_score, raw_response[:200],
+            )
+            return eval_result, default_score
+        return eval_result, 0
 
 
-# Max chars for each M0/M1 text sent to LLM (~5000 tokens)
-_EVAL_MAX_CHARS = 20000
+# M0/M1 每侧最大字符数。Accuracy 占 40% 评分权重，LLM 必须看到足够多的
+# 源文本才能验证结构化数据——之前 20000 chars (~5K tokens) 导致长页面被
+# 大幅截断后 LLM 无法核对，给出 0 分。50000 chars (~12.5K tokens/侧) 在
+# 现代 128K+ context 模型上完全安全。
+_EVAL_MAX_CHARS = 50000
 
 _LOW_VALUE_HEADING = re.compile(
     r"(?im)^#{1,3}\s*("

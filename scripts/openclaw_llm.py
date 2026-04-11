@@ -269,7 +269,7 @@ def _extract_text_from_agent_response(data: dict[str, Any]) -> str | None:
 def parse_json_response(response: str) -> dict[str, Any]:
     """Extract JSON object from LLM response.
 
-    Handles markdown code fences and embedded JSON in free text.
+    Handles markdown code fences, nested braces, and embedded JSON in free text.
     """
     stripped = response.strip()
 
@@ -289,7 +289,18 @@ def parse_json_response(response: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Find first { ... } in text
+    # Bracket-matching extraction: find the first balanced { ... } in text.
+    # This handles arbitrary nesting depth, unlike the old single-level regex.
+    candidate = _extract_first_json_object(response)
+    if candidate:
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: simple regex for shallow objects (e.g. {"result":"match","score":85})
     json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
     matches = re.findall(json_pattern, response, re.DOTALL)
     for match in matches:
@@ -302,3 +313,33 @@ def parse_json_response(response: str) -> dict[str, Any]:
 
     log.warning("Could not parse JSON from response: %s", response[:200])
     return {}
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    """Find the first balanced { ... } substring using bracket counting."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
