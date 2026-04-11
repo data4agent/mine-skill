@@ -1475,6 +1475,20 @@ def render_validator_status() -> str:
             match_count = stats.get("tasks_match", stats.get("tasks_accepted", 0))
             mismatch_count = stats.get("tasks_mismatch", stats.get("tasks_rejected", 0))
             in_pool = vstatus.get("in_ready_pool", False)
+            # Real-time phase so host LLM knows *exactly* what the validator
+            # is doing right now — eliminates guessing / hallucination about
+            # "waiting" vs "evaluating" vs "cooling down".
+            phase = vstatus.get("phase", "")
+            phase_detail = vstatus.get("phase_detail", "")
+            phase_descriptions = {
+                "waiting_for_task": "idle — waiting for the platform to push an evaluation task via WebSocket (this is normal)",
+                "evaluating": f"actively evaluating a task ({phase_detail})" if phase_detail else "actively evaluating a task",
+                "cooldown": f"in cooldown ({phase_detail}) — will accept the next task after cooldown expires" if phase_detail else "in cooldown between tasks",
+                "starting": "starting up",
+                "stopped": "stopped",
+            }
+            phase_text = phase_descriptions.get(phase, f"phase: {phase}")
+            detail_parts.append(f"Current activity: {phase_text}.")
             detail_parts.append(f"Ready pool: {'joined' if in_pool else 'not joined (retrying on next heartbeat)'}.")
             detail_parts.append(f"WebSocket: {'connected' if ws_ok else 'reconnecting (normal during idle periods)'}.")
             detail_parts.append(f"Eligible: {'yes' if eligible else 'no (check heartbeat)'}.")
@@ -1487,14 +1501,8 @@ def render_validator_status() -> str:
                     f"NOT that the platform rejected anything."
                 )
             else:
-                # Validators DO wait for the platform to push tasks via
-                # WebSocket — this is the correct behavior for a validator in
-                # the ready pool. Unlike the miner, this is genuinely a "waiting"
-                # state, and saying so to the user is accurate.
                 detail_parts.append(
-                    "No tasks evaluated yet — validator is in the ready pool and "
-                    "waiting for the platform to push evaluation tasks via WebSocket. "
-                    "This is expected for a new validator or a quiet period."
+                    "No tasks evaluated yet."
                 )
             # Enrich with profile data for historical stats
             try:

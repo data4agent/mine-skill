@@ -215,14 +215,41 @@ class PlatformClient:
         return data if isinstance(data, dict) else {}
 
     def _claim(self, path: str) -> dict[str, Any] | None:
+        """POST a claim request. Returns task data, None (no task), or a
+        cooldown sentinel ``{"_cooldown": True, "retry_after_seconds": N}``
+        when the platform returns 409 ``validator_cooldown``.
+        """
         try:
             payload = self._request("POST", path, {})
         except PlatformApiError as api_err:
-            if api_err.status_code in (404, 409):
+            if api_err.status_code == 404:
+                return None
+            if api_err.status_code == 409:
+                # 409 validator_cooldown carries retry_after_seconds — surface
+                # it so callers can sleep precisely instead of guessing.
+                if api_err.code == "validator_cooldown" and api_err.response:
+                    err_body = api_err.response if isinstance(api_err.response, dict) else {}
+                    error_data = err_body.get("error") if isinstance(err_body.get("error"), dict) else {}
+                    retry_after = error_data.get("retry_after_seconds")
+                    if isinstance(retry_after, (int, float)) and retry_after > 0:
+                        return {"_cooldown": True, "retry_after_seconds": int(retry_after)}
                 return None
             raise
         except httpx.HTTPStatusError as error:
-            if error.response.status_code in (404, 409):
+            if error.response.status_code == 404:
+                return None
+            if error.response.status_code == 409:
+                # Parse 409 body for validator_cooldown + retry_after_seconds
+                try:
+                    body = error.response.json()
+                except ValueError:
+                    return None
+                if isinstance(body, dict):
+                    err_obj = body.get("error")
+                    if isinstance(err_obj, dict) and err_obj.get("code") == "validator_cooldown":
+                        retry = err_obj.get("retry_after_seconds")
+                        if isinstance(retry, (int, float)) and retry > 0:
+                            return {"_cooldown": True, "retry_after_seconds": int(retry)}
                 return None
             raise
         data = payload.get("data")
@@ -392,8 +419,12 @@ class PlatformClient:
                                 raise error from renew_exc
                             renewed_session = True
                             continue
-                # Retryable server error or explicitly marked as retryable
-                if (status_code >= 500 or status_code == 429 or error_retryable) and attempt < max_attempts:
+                # Retryable server error or explicitly marked as retryable.
+                # 409 Conflict is excluded from auto-retry even when the body
+                # says retryable=true — it means "retry after cooldown", not
+                # "retry immediately". Callers (e.g. _claim) handle 409 by
+                # parsing retry_after_seconds from the response.
+                if (status_code >= 500 or status_code == 429 or (error_retryable and status_code != 409)) and attempt < max_attempts:
                     if status_code == 429:
                         # Respect Retry-After header or use longer backoff for rate limits
                         retry_after = error.response.headers.get("Retry-After")
