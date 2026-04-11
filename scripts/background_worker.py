@@ -93,7 +93,17 @@ def start_background_worker(
     output_root = Path(os.environ.get("CRAWLER_OUTPUT_ROOT", str(project_root / "output" / "agent-runs"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / f"{session_id}.log"
-    command = [sys.executable, str(script_path), "run-worker", str(interval), "0"]
+    # -u forces stdout/stderr to be unbuffered. Without this, Python block-
+    # buffers stdout when it's redirected to a file (not a TTY), so the first
+    # several KB of worker output sit in the BufferedWriter forever and the
+    # log file looks like 0 bytes even though the worker is running fine.
+    command = [sys.executable, "-u", str(script_path), "run-worker", str(interval), "0"]
+
+    # Subprocess inherits its environment; force PYTHONUNBUFFERED as a
+    # belt-and-braces for any child-of-child Python processes (e.g. tooling
+    # invoked inside the worker) that don't inherit the -u flag.
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
 
     with log_path.open("a", encoding="utf-8") as handle:
         process = subprocess.Popen(
@@ -102,6 +112,7 @@ def start_background_worker(
             stdout=handle,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            env=env,
             start_new_session=True,
             creationflags=_creationflags(),
         )

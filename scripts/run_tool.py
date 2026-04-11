@@ -121,6 +121,42 @@ def _bootstrap_command() -> str:
     return "./scripts/bootstrap.sh"
 
 
+def _configure_background_logging() -> None:
+    """Route INFO+ log records to stdout for the background worker.
+
+    The default Python root logger only emits WARNING+ to stderr, which made
+    every log.info() call in the mining loop silently disappear — producing a
+    0-byte log file that looked like a stuck worker. By installing a plain
+    stream handler on the root logger we capture every INFO message into
+    whatever stdout is pointing at (the background worker's log file, after
+    Popen redirection).
+
+    Called only from the `run-worker` subcommand. Does NOT interfere with
+    interactive commands, which keep Python's default silent behavior.
+    """
+    import logging
+
+    root = logging.getLogger()
+    # Guard against double-configuration when the worker re-execs itself.
+    if getattr(root, "_mine_bg_configured", False):
+        return
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)-5s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+    )
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    # Noisy third-party libraries we don't want in the log.
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("websocket").setLevel(logging.WARNING)
+    root._mine_bg_configured = True  # type: ignore[attr-defined]
+
+
 def _project_root() -> Path:
     return SCRIPT_DIR.parent
 
@@ -1940,6 +1976,10 @@ def main() -> int:
         return 0
 
     if namespace.command == "run-validator-worker":
+        # Same logging/buffering fix as the miner run-worker path. Without
+        # this, validator_runtime's log.info() calls ("WS connected",
+        # "evaluation reported to platform", etc.) never reach the log file.
+        _configure_background_logging()
         session_id = namespace.args[0] if namespace.args else None
         from common import (
             resolve_validator_state_root,
@@ -2219,6 +2259,12 @@ def main() -> int:
             max_iter = int(namespace.args[1]) if len(namespace.args) > 1 else 1
         except ValueError:
             raise SystemExit("run-worker: expected integer arguments for interval and max_iterations")
+        # Configure logging so background-worker INFO-level messages actually
+        # reach the log file. Without this the default Python logger only
+        # emits WARNING+ to stderr, and every log.info("heartbeat ok") /
+        # log.info("discovery iteration") call is silently dropped —
+        # producing a 0-byte log file that looks like a hung worker.
+        _configure_background_logging()
         print(json.dumps(worker.run_worker(interval=interval, max_iterations=max_iter), ensure_ascii=False, indent=2))
         return 0
 

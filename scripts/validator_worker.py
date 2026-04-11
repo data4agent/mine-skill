@@ -79,12 +79,19 @@ def start_background(state_root: Path | None = None) -> dict[str, Any]:
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / f"{session_id}.log"
 
+    # -u forces stdout/stderr unbuffered; without it Python block-buffers
+    # when stdout is redirected to a file, producing a 0-byte log file that
+    # looks like a hung worker. See matching fix in scripts/background_worker.py.
     command = [
         sys.executable,
+        "-u",
         str(script_path),
         "run-validator-worker",
         session_id,
     ]
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
 
     with log_path.open("a", encoding="utf-8") as handle:
         process = subprocess.Popen(
@@ -93,6 +100,7 @@ def start_background(state_root: Path | None = None) -> dict[str, Any]:
             stdout=handle,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            env=env,
             start_new_session=True,
             creationflags=_creationflags(),
         )
