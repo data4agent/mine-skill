@@ -54,16 +54,34 @@ check_host_dependencies() {
 }
 
 install_requirements() {
-  "$VENV_DIR/bin/python" -m pip install -r requirements-core.txt
+  echo "Installing core dependencies..."
+  "$VENV_DIR/bin/python" -m pip install -r requirements-core.txt || {
+    echo "WARNING: Some core dependencies failed to install. Retrying individually..."
+    # pip install -r can fail entirely if ONE package fails to build
+    # (e.g. crawl4ai, PyMuPDF on exotic platforms). Fall back to
+    # installing each line individually so websockets/markdownify/etc.
+    # still get installed even if a native-extension package fails.
+    while IFS= read -r line; do
+      line="${line%%#*}"           # strip comments
+      line="$(echo "$line" | xargs)"  # trim whitespace
+      [[ -z "$line" ]] && continue
+      "$VENV_DIR/bin/python" -m pip install "$line" || \
+        echo "WARNING: failed to install $line (continuing)"
+    done < requirements-core.txt
+  }
   if [[ "$INSTALL_PROFILE" == "browser" || "$INSTALL_PROFILE" == "full" ]]; then
-    "$VENV_DIR/bin/python" -m pip install -r requirements-browser.txt
+    if [[ -f requirements-browser.txt ]]; then
+      "$VENV_DIR/bin/python" -m pip install -r requirements-browser.txt || \
+        echo "WARNING: Some browser dependencies failed to install."
+    fi
     # Download Playwright browser binaries (chromium only to save space)
     echo "Installing Playwright browsers..."
     "$VENV_DIR/bin/python" -m playwright install chromium 2>/dev/null || \
       echo "WARNING: Playwright browser install failed. Amazon/LinkedIn crawling may not work."
   fi
   if [[ "$INSTALL_PROFILE" == "full" && -f requirements-dev.txt ]]; then
-    "$VENV_DIR/bin/python" -m pip install -r requirements-dev.txt
+    "$VENV_DIR/bin/python" -m pip install -r requirements-dev.txt || \
+      echo "WARNING: Dev dependencies failed to install (non-fatal)."
   fi
 }
 
