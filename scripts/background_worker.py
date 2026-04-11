@@ -83,6 +83,24 @@ def _terminate_process_windows(pid: int) -> bool:
         api.CloseHandle(handle)
 
 
+def _resolve_worker_python(project_root: Path) -> str:
+    """Pick the best Python for the background worker.
+
+    Explicitly resolves the project .venv so the background worker always
+    runs inside the venv even when the parent process is system Python.
+    Previously this used ``sys.executable`` and relied on the parent having
+    been re-exec'd via ``_ensure_local_venv_python`` — but that chain breaks
+    when the host agent's invocation bypasses the re-exec, leaving the
+    background worker on system Python with missing deps (websockets, etc.).
+    """
+    from common import resolve_local_venv_python
+
+    venv_python = resolve_local_venv_python(project_root)
+    if venv_python is not None:
+        return str(venv_python)
+    return sys.executable
+
+
 def start_background_worker(
     *,
     project_root: Path,
@@ -93,17 +111,19 @@ def start_background_worker(
     output_root = Path(os.environ.get("CRAWLER_OUTPUT_ROOT", str(project_root / "output" / "agent-runs"))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / f"{session_id}.log"
+    python_bin = _resolve_worker_python(project_root)
     # -u forces stdout/stderr to be unbuffered. Without this, Python block-
     # buffers stdout when it's redirected to a file (not a TTY), so the first
     # several KB of worker output sit in the BufferedWriter forever and the
     # log file looks like 0 bytes even though the worker is running fine.
-    command = [sys.executable, "-u", str(script_path), "run-worker", str(interval), "0"]
+    command = [python_bin, "-u", str(script_path), "run-worker", str(interval), "0"]
 
-    # Subprocess inherits its environment; force PYTHONUNBUFFERED as a
-    # belt-and-braces for any child-of-child Python processes (e.g. tooling
-    # invoked inside the worker) that don't inherit the -u flag.
+    # Force PYTHONUNBUFFERED for child-of-child processes, and remove
+    # MINE_SKIP_VENV_REEXEC so the background worker's run_tool.py can
+    # self-correct if our resolved python turns out wrong.
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    env.pop("MINE_SKIP_VENV_REEXEC", None)
 
     with log_path.open("a", encoding="utf-8") as handle:
         process = subprocess.Popen(
