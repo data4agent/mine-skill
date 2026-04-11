@@ -1,13 +1,14 @@
 """Evaluation Engine for Validator."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from openclaw_llm import call_openclaw, parse_json_response
+from openclaw_llm import parse_json_response
 
 log = logging.getLogger("validator.evaluation")
 
@@ -23,6 +24,51 @@ class EvaluationResult:
     score: int  # 0-100, meaningful only when result="match"
 
 
+def _default_llm_call(
+    prompt: str,
+    *,
+    timeout: float,
+    model_config: dict[str, Any] | None,
+) -> str:
+    """Sync wrapper around the shared llm_enrich routing.
+
+    Priority: OpenClaw CLI → OpenClaw gateway → direct API. Raises RuntimeError
+    with the underlying failure reason when nothing is available so validator
+    callers can handle it uniformly.
+
+    This lets the validator keep running via gateway/API even on hosts where the
+    ``openclaw`` binary is not installed (e.g. when the skill is invoked from a
+    different agent host). The miner already uses this routing — sharing the
+    path avoids a second parallel LLM integration.
+    """
+    from crawler.enrich.generative.llm_enrich import enrich_with_llm
+
+    async def _run() -> str:
+        result = await enrich_with_llm(
+            prompt,
+            model_config=model_config,
+            timeout=timeout,
+        )
+        if not result.success:
+            raise RuntimeError(result.error or "LLM call failed")
+        return result.content
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Called from inside an already-running loop (rare for the
+            # validator, but be defensive). Offload to a fresh loop in a thread
+            # to avoid nested-loop errors.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(lambda: asyncio.run(_run())).result()
+    except RuntimeError:
+        # No current loop — create one.
+        pass
+    return asyncio.run(_run())
+
+
 class EvaluationEngine:
     """
     Single-pass evaluation engine for data quality assessment.
@@ -36,17 +82,26 @@ class EvaluationEngine:
         *,
         llm_call: Callable[[str], str] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
+        model_config: dict[str, Any] | None = None,
     ):
         """
         Initialize the evaluation engine.
 
         Args:
-            llm_call: Optional callable for LLM calls. If None, uses default openclaw CLI.
+            llm_call: Optional callable for LLM calls. If None, uses the shared
+                llm_enrich routing (CLI → gateway → API) so the validator works
+                on hosts that don't have the openclaw binary installed.
             timeout: Timeout in seconds for LLM calls.
+            model_config: Optional model config dict for gateway/API fallback.
+                When empty, only the CLI path is available.
         """
         self.timeout = timeout
+        self.model_config = model_config or {}
         if llm_call is None:
-            self.llm_call = lambda prompt: call_openclaw(prompt, timeout=timeout)
+            cfg = self.model_config
+            self.llm_call = lambda prompt: _default_llm_call(
+                prompt, timeout=timeout, model_config=cfg
+            )
         else:
             self.llm_call = llm_call
 

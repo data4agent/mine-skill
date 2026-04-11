@@ -11,7 +11,7 @@ description: >
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
-version: 0.10.3
+version: 0.10.4
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -268,6 +268,21 @@ meets minimum), and connects via WebSocket. No manual approval needed — meetin
 the minimum stake requirement (currently 10,000 AWP on the Mine Worknet) is the
 only condition. Use the AWP Skill to stake if needed.
 
+### Terminology: match vs mismatch
+
+When reporting validator status to the user, use the correct terminology:
+
+- **match** — the validator judged that the miner's data is consistent with the
+  re-crawled version. A score (0-100) reflects data quality.
+- **mismatch** — the validator judged that the miner's data is NOT consistent
+  with the re-crawl (e.g. fabricated, stale, or significantly different content).
+
+**Both verdicts are submitted to the platform as valid evaluations.** A mismatch
+is NOT a rejection of the validator's work — it is the validator correctly
+flagging bad miner data. Do NOT describe mismatch as "rejected by the platform"
+or "submission failed". The correct framing is: "the validator evaluated X tasks
+and reported them to the platform (Y match, Z mismatch)."
+
 ### Check Status / Stop
 
 ```bash
@@ -338,6 +353,26 @@ If the validator returns `403`, `permission denied`, or `insufficient_stake`:
 **Do NOT** suggest the user is "pending review" or needs manual approval when the
 error is 403 — it means insufficient stake, not a review issue. Anyone who meets
 the stake requirement can become a validator immediately.
+
+If `validator-doctor` or `validator-start` reports `no_llm_backend` / "no LLM
+backend available":
+
+1. The validator's evaluation engine routes LLM calls through (in order):
+   **OpenClaw CLI → OpenClaw gateway → OpenAI-compatible API**. At least one
+   path must be reachable, otherwise every evaluation task fails.
+2. Two ways to fix it — pick whichever matches the host environment:
+   - **Option A — install the OpenClaw CLI** so that `which openclaw` succeeds.
+     This is the preferred option when the skill runs inside an OpenClaw host.
+   - **Option B — configure a gateway / API fallback** by exporting
+     `MINE_GATEWAY_TOKEN` (and optionally `MINE_GATEWAY_BASE_URL` /
+     `MINE_GATEWAY_MODEL` if the defaults don't match). This lets the validator
+     run on any host without the CLI.
+3. Re-run `python scripts/run_tool.py validator-doctor` to confirm
+   `llm_backend.ok = true` before retrying `validator-start`.
+
+Do **not** try to work around this by editing evaluation prompts or disabling
+the LLM call — the validator protocol requires an LLM-scored verdict for every
+task, so a working backend is mandatory.
 
 If you see `missing_auth_headers` or `signer_mismatch`, it means something
 bypassed `run_tool.py`. Stop and use the commands listed above instead.

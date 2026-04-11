@@ -1031,10 +1031,79 @@ def resolve_validator_readiness(*, auto_install_deps: bool = False) -> dict[str,
         result["warnings"].append(f"platform connection failed: {exc}")
     result["checks"]["platform"] = platform_check
 
+    # 5. LLM backend (openclaw CLI / gateway / API). Validator evaluation
+    # cannot function without at least one working LLM path, so this is a
+    # hard gate on can_start — previously the validator would start and then
+    # fail every task with "openclaw not found".
+    llm_check = check_validator_llm_backend()
+    result["checks"]["llm_backend"] = llm_check
+    if not llm_check["ok"]:
+        result["state"] = "no_llm_backend"
+        result["warnings"].append(llm_check.get("error") or "no LLM backend available")
+
     # Final decision
-    all_ok = deps["ok"] and signer_check["ok"]
+    all_ok = deps["ok"] and signer_check["ok"] and llm_check["ok"]
     result["can_start"] = all_ok
     if all_ok:
         result["state"] = "ready"
 
     return result
+
+
+def resolve_validator_model_config() -> dict[str, Any]:
+    """Load the validator's LLM model config via the shared loader.
+
+    Returns an empty dict when no gateway/API config is set — in that case the
+    CLI path must be available for evaluation to work.
+    """
+    try:
+        from crawler.schema_runtime.model_config import load_model_config
+    except ImportError:
+        return {}
+    try:
+        return load_model_config(None, use_openclaw=True) or {}
+    except Exception:
+        return {}
+
+
+def check_validator_llm_backend() -> dict[str, Any]:
+    """Check whether at least one LLM execution path is available.
+
+    The validator evaluation engine routes through ``crawler.enrich.generative.llm_enrich``
+    which supports OpenClaw CLI → gateway → API. This helper reports which
+    methods are available so validator-doctor and validator-start can give
+    a precise error message when everything is missing.
+    """
+    try:
+        from crawler.enrich.generative.llm_enrich import (
+            available_methods,
+            llm_execution_available,
+        )
+    except ImportError as exc:
+        return {
+            "ok": False,
+            "available_methods": [],
+            "model_config_loaded": False,
+            "error": f"llm_enrich import failed: {exc}",
+        }
+
+    model_config = resolve_validator_model_config()
+    methods = available_methods(model_config)
+    ok = llm_execution_available(model_config)
+    if ok:
+        return {
+            "ok": True,
+            "available_methods": methods,
+            "model_config_loaded": bool(model_config),
+        }
+    return {
+        "ok": False,
+        "available_methods": methods,
+        "model_config_loaded": bool(model_config),
+        "error": (
+            "no LLM backend available: the openclaw CLI is not in PATH and no "
+            "gateway/API fallback is configured. Either install openclaw (so "
+            "`which openclaw` succeeds) or set MINE_GATEWAY_TOKEN (plus "
+            "MINE_GATEWAY_BASE_URL / MINE_GATEWAY_MODEL if non-default)."
+        ),
+    }

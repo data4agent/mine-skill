@@ -1417,14 +1417,25 @@ def render_validator_status() -> str:
             stats = vstatus.get("stats", {})
             received = stats.get("tasks_received", 0)
             evaluated = stats.get("tasks_evaluated", 0)
-            accepted = stats.get("tasks_accepted", 0)
-            rejected = stats.get("tasks_rejected", 0)
+            # match/mismatch are the validator's verdicts on miner data.
+            # BOTH are reported to the platform as valid evaluations — the
+            # wording below is deliberate to stop host LLMs from parroting
+            # "accepted/rejected" and hallucinating that "rejected" means the
+            # platform refused the submission.
+            match_count = stats.get("tasks_match", stats.get("tasks_accepted", 0))
+            mismatch_count = stats.get("tasks_mismatch", stats.get("tasks_rejected", 0))
             in_pool = vstatus.get("in_ready_pool", False)
             detail_parts.append(f"Ready pool: {'joined' if in_pool else 'not joined (retrying on next heartbeat)'}.")
             detail_parts.append(f"WebSocket: {'connected' if ws_ok else 'reconnecting (normal during idle periods)'}.")
             detail_parts.append(f"Eligible: {'yes' if eligible else 'no (check heartbeat)'}.")
             if evaluated > 0:
-                detail_parts.append(f"Tasks: {received} received, {evaluated} evaluated ({accepted} accepted, {rejected} rejected).")
+                detail_parts.append(
+                    f"Tasks reported to platform: {evaluated} (received {received}). "
+                    f"Validator verdicts: {match_count} match, {mismatch_count} mismatch. "
+                    f"Both match and mismatch verdicts are submitted as valid evaluations — "
+                    f"'mismatch' means the validator judged the miner data inconsistent with the re-crawl, "
+                    f"NOT that the platform rejected anything."
+                )
             else:
                 detail_parts.append("No tasks evaluated yet — waiting for platform to assign tasks.")
             # Enrich with profile data for historical stats
@@ -1534,6 +1545,17 @@ def run_validator_start() -> str:
             fix_commands.append(f'pip install {" ".join(pip_names)}')
         elif state == "signer_unavailable":
             fix_commands.append("# set VALIDATOR_PRIVATE_KEY or ensure awp-wallet is available")
+        elif state == "no_llm_backend":
+            # Give the agent-runner explicit, actionable fix steps so the
+            # wrapper agent can surface them to the user in plain language.
+            fix_commands.append(
+                "# Option A: install the openclaw CLI so `which openclaw` succeeds"
+            )
+            fix_commands.append(
+                "# Option B: export MINE_GATEWAY_TOKEN (and optionally "
+                "MINE_GATEWAY_BASE_URL, MINE_GATEWAY_MODEL) to route evaluation "
+                "through the OpenClaw gateway or any OpenAI-compatible API"
+            )
         return json.dumps({
             "state": state,
             "user_message": f"Validator is not ready: {'; '.join(readiness['warnings'])}",
@@ -1716,7 +1738,22 @@ def run_validator_doctor() -> str:
     if reg_check.get("registration_required") and not reg_check.get("registered"):
         fix_commands.append("python scripts/run_tool.py validator-start  # auto-registers on start")
 
-    # 7. Config
+    # 7. LLM backend (openclaw CLI / gateway / API)
+    llm_backend = readiness.get("checks", {}).get("llm_backend", {})
+    checks.append({
+        "name": "llm_backend",
+        "ok": llm_backend.get("ok", False),
+        "available_methods": llm_backend.get("available_methods", []),
+        "model_config_loaded": llm_backend.get("model_config_loaded", False),
+        "error": llm_backend.get("error", ""),
+    })
+    if not llm_backend.get("ok"):
+        fix_commands.append(
+            "# install openclaw CLI (so `which openclaw` succeeds) OR export "
+            "MINE_GATEWAY_TOKEN to use the OpenClaw gateway / API fallback"
+        )
+
+    # 8. Config
     validator_id = resolve_validator_id()
     ws_url = resolve_ws_url()
     eval_timeout = resolve_eval_timeout()
@@ -1729,7 +1766,7 @@ def run_validator_doctor() -> str:
         "platform_url": readiness.get("checks", {}).get("platform", {}).get("url", ""),
     })
 
-    # 8. Background process
+    # 9. Background process
     running = snapshot.get("status") == "running"
     checks.append({
         "name": "background_process",
@@ -1948,6 +1985,7 @@ def main() -> int:
             from evaluation_engine import EvaluationEngine
             from ws_client import ValidatorWSClient
             from lib.platform_client import PlatformClient
+            from common import resolve_validator_model_config
 
             platform = PlatformClient(
                 base_url=resolve_platform_base_url(),
@@ -1967,7 +2005,13 @@ def main() -> int:
                 on_auth_refresh=_refresh_ws_auth,
             )
 
-            engine = EvaluationEngine(timeout=resolve_eval_timeout())
+            # Load LLM backend config once so both the initial engine and any
+            # auto-restart rebuild share the same routing configuration.
+            validator_model_config = resolve_validator_model_config()
+            engine = EvaluationEngine(
+                timeout=resolve_eval_timeout(),
+                model_config=validator_model_config,
+            )
 
             runtime = ValidatorRuntime(
                 platform_client=platform,
@@ -2006,7 +2050,10 @@ def main() -> int:
                         auth_headers=_refresh_ws_auth(),
                         on_auth_refresh=_refresh_ws_auth,
                     )
-                    engine = EvaluationEngine(timeout=resolve_eval_timeout())
+                    engine = EvaluationEngine(
+                        timeout=resolve_eval_timeout(),
+                        model_config=validator_model_config,
+                    )
                     runtime = ValidatorRuntime(
                         platform_client=platform,
                         ws_client=ws,

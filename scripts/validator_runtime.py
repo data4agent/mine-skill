@@ -69,8 +69,14 @@ class ValidatorRuntime:
         self._stats: dict[str, int] = {
             "tasks_received": 0,
             "tasks_evaluated": 0,
-            "tasks_accepted": 0,
-            "tasks_rejected": 0,
+            # match/mismatch are the validator's verdict on the miner data
+            # — NOT "accepted/rejected by the platform". Both verdicts are
+            # reported to the platform via report_evaluation and count as
+            # valid evaluations. Previously these were named tasks_accepted /
+            # tasks_rejected, which made the host LLM consistently hallucinate
+            # that "rejected" meant the platform refused the submission.
+            "tasks_match": 0,
+            "tasks_mismatch": 0,
             "errors": 0,
             "consecutive_failures": 0,
         }
@@ -152,6 +158,13 @@ class ValidatorRuntime:
         try:
             data = json.loads(self._status_file.read_text(encoding="utf-8"))
             prev = data.get("stats", {})
+            # Backward-compat: old status files used tasks_accepted/tasks_rejected
+            # before the rename to tasks_match/tasks_mismatch. Map them so a
+            # validator upgraded mid-epoch doesn't lose its running totals.
+            if "tasks_match" not in prev and "tasks_accepted" in prev:
+                prev["tasks_match"] = prev.get("tasks_accepted", 0)
+            if "tasks_mismatch" not in prev and "tasks_rejected" in prev:
+                prev["tasks_mismatch"] = prev.get("tasks_rejected", 0)
             for key in self._stats:
                 if key == "consecutive_failures":
                     continue  # reset on fresh start
@@ -257,13 +270,20 @@ class ValidatorRuntime:
 
         log.info("ValidatorRuntime starting (id=%s)", self._validator_id)
 
-        # Initialize OpenClaw agent for LLM evaluation calls
+        # Optionally initialize OpenClaw agent workspace. This is only needed
+        # when the CLI path is actually available — the evaluation engine
+        # routes through llm_enrich (CLI → gateway → API), so on hosts without
+        # openclaw we fall through silently instead of spamming warnings.
         try:
-            import openclaw_llm
-            agent_id = openclaw_llm.init(instance_id=self._validator_id)
-            log.info("OpenClaw agent initialized: %s", agent_id)
+            from crawler.enrich.generative.openclaw_agent import openclaw_cli_available
+            if openclaw_cli_available():
+                import openclaw_llm
+                agent_id = openclaw_llm.init(instance_id=self._validator_id)
+                log.info("OpenClaw agent initialized: %s", agent_id)
+            else:
+                log.info("OpenClaw CLI not installed — using llm_enrich gateway/API routing for evaluation")
         except Exception as exc:
-            log.warning("OpenClaw init failed: %s (will retry on first eval)", exc)
+            log.warning("OpenClaw init skipped: %s", exc)
 
         # Restore stats from previous run (#9)
         self._restore_stats()
@@ -572,13 +592,13 @@ class ValidatorRuntime:
         self._set_stat("consecutive_failures", 0)
 
         if eval_result.result == "match":
-            self._inc_stat("tasks_accepted")
+            self._inc_stat("tasks_match")
             action = f"match score={eval_result.score} task={task_id}"
-            log.info("Evaluation reported: %s", action)
+            log.info("Evaluation reported to platform: %s", action)
         else:
-            self._inc_stat("tasks_rejected")
+            self._inc_stat("tasks_mismatch")
             action = f"mismatch task={task_id}"
-            log.info("Evaluation reported: %s", action)
+            log.info("Evaluation reported to platform: %s", action)
 
         self._record_action(action, {
             "type": "evaluation",
