@@ -116,8 +116,24 @@ class CrawlerRunner:
         )
 
     def _append_enrich_argv(self, argv: list[str], *, command: str, output_dir: Path) -> None:
-        """Attach LLM enrich args for run/enrich: prefer OpenClaw CLI, then gateway config."""
+        """Attach LLM enrich args for run/enrich: prefer OpenClaw CLI, then gateway config.
+
+        When no LLM backend is available (no openclaw, no gateway config),
+        enrichment is explicitly skipped via ``--field-group none``. Without
+        this the crawler falls through to the platform's full enrich plan
+        (e.g. arXiv has 42 field groups, many requiring LLM calls). Each
+        group times out individually → the subprocess blocks for many
+        minutes and appears hung.  Skipping enrichment is safe: the base
+        structured_data (title, abstract, authors, etc.) is already extracted
+        and sufficient for platform submission and scoring.
+        """
         if command not in {"run", "enrich"}:
+            return
+        # User-level override: MINE_SKIP_ENRICH=1 forces enrichment off
+        # regardless of LLM availability. Useful for rapid testing or
+        # low-resource hosts.
+        if os.environ.get("MINE_SKIP_ENRICH", "").strip() == "1":
+            argv.extend(["--field-group", "none"])
             return
         import shutil
         if shutil.which("openclaw") or shutil.which("openclaw.cmd") or shutil.which("openclaw.mjs"):
@@ -129,6 +145,10 @@ class CrawlerRunner:
                 self.config.gateway_model_config,
             )
             argv.extend(["--model-config", str(config_path)])
+            return
+        # No LLM backend available — skip enrichment entirely rather than
+        # letting each field group time out and block the worker for minutes.
+        argv.extend(["--field-group", "none"])
 
 
 def _build_test_config(root: Path) -> WorkerConfig:
