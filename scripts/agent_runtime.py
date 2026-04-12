@@ -74,9 +74,11 @@ class CrawlerRunner:
         self.output_root = config.output_root
         self.default_backend = config.default_backend
 
-    # repeat_crawl only does fetch+extract (no enrich), so 120s is plenty.
-    # Discovery/run items may need longer for PDF extraction + LLM enrich.
-    REPEAT_CRAWL_TIMEOUT = 120
+    # repeat_crawl only does fetch+extract (no enrich). 180s covers the
+    # slowest path (Amazon Playwright: browser launch + page load + wait
+    # strategy ≈ 60-90s) with headroom for network jitter, while staying
+    # well within the platform's 6-minute reporting deadline.
+    REPEAT_CRAWL_TIMEOUT = 180
 
     def run_item(self, item: WorkItem, command: str) -> CrawlerRunResult:
         output_dir = resolve_item_output_dir(item, output_root=self.output_root)
