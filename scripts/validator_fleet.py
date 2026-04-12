@@ -242,10 +242,12 @@ class ValidatorInstance:
                 if isinstance(interval, (int, float)) and interval > 0:
                     self._min_task_interval = int(interval)
             except Exception as exc:
-                self.log.debug("Heartbeat failed: %s", exc)
+                self.log.warning("Heartbeat failed: %s", exc)
 
-            if not self._in_ready_pool:
-                self._try_join_ready_pool()
+            # 每次心跳都尝试重新加入 ready pool。平台可能因 503/断连/
+            # 超时等原因驱逐 validator，但我们本地的 _in_ready_pool
+            # 标志不知道。代价很低（一个 POST），保证恢复后马上收到任务。
+            self._try_join_ready_pool()
 
             self._stop_event.wait(timeout=HEARTBEAT_INTERVAL)
 
@@ -270,12 +272,16 @@ class ValidatorInstance:
         while not self._stop_event.is_set():
             # 重连
             if not self._ws.connected:
+                # WS 断连意味着平台可能已驱逐此 validator
+                self._in_ready_pool = False
                 try:
                     self._ws.reconnect_with_backoff()
                 except Exception:
                     pass
                 if self._ws.connected:
                     consecutive_ws_failures = 0
+                    # 重连后立即重新加入 ready pool
+                    self._try_join_ready_pool()
                 else:
                     consecutive_ws_failures += 1
                     if consecutive_ws_failures >= 3:
