@@ -255,15 +255,23 @@ class ValidatorInstance:
         try:
             with self._platform_lock:
                 self._platform.join_ready_pool()
+            if not self._in_ready_pool:
+                self.log.info("Joined ready pool")
             self._in_ready_pool = True
-            self.log.info("Joined ready pool")
         except PlatformApiError as err:
-            if err.status_code == 403:
+            if err.status_code == 409:
+                # 409 = already in ready pool, not an error
+                self._in_ready_pool = True
+            elif err.status_code == 403:
                 self.log.error("Cannot join ready pool (403): insufficient stake?")
             else:
                 self.log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
-            self.log.warning("join_ready_pool failed: %s", exc)
+            # httpx.HTTPStatusError 的 409 也静默处理
+            if "409" in str(exc):
+                self._in_ready_pool = True
+            else:
+                self.log.warning("join_ready_pool failed: %s", exc)
 
     # ── 主消息循环 ──
 
