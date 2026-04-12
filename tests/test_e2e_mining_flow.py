@@ -378,11 +378,13 @@ class TestErrorRecoveryFlow:
         error_text = " ".join(summary["errors"])
         assert "crashed" in error_text or "fail-task-1" in error_text
 
-        # Item should be re-queued to backlog
-        backlog = worker.state_store.load_backlog()
-        assert len(backlog) >= 1
-        requeued = backlog[0]
-        assert requeued.resume is True
+        # repeat_crawl failures are reported to platform (not re-queued)
+        # so the platform can reassign immediately instead of the miner
+        # retrying the same URL indefinitely.
+        mock_client.report_repeat_crawl_task_result.assert_called_once()
+        call_args = mock_client.report_repeat_crawl_task_result.call_args
+        assert call_args[0][1]["failed"] is True
+        assert call_args[0][1]["fail_reason"] == "crawl_failed"
 
 
 # ---------------------------------------------------------------------------
