@@ -89,6 +89,10 @@ class WorkerConfig:
     discovery_max_depth: int = 1
     auth_retry_interval_seconds: int = 300
     gateway_model_config: dict[str, Any] = field(default_factory=dict)
+    # Crawler subprocess timeout. 300s was too tight for arXiv (PDF
+    # extraction + merged LLM enrich). 600s gives headroom for heavy
+    # papers while still catching genuinely stuck processes.
+    crawl_timeout_seconds: int = 600
     # EIP-712 signature domain parameters
     eip712_domain_name: str = DEFAULT_EIP712_DOMAIN_NAME
     eip712_domain_version: str = "1"

@@ -11,4 +11,9 @@ class CrawlModePlanner:
             return "discover-crawl"
         if item.source == "manual_debug":
             return "crawl"
+        # repeat_crawl only needs cleaned_data (fetch + extract) — skip
+        # enrich entirely. "crawl" does fetch+extract without enrich,
+        # while "run" does the full pipeline including enrich.
+        if item.claim_task_type == "repeat_crawl":
+            return "crawl"
         return "run"
