@@ -1055,7 +1055,16 @@ class AgentWorker:
         return "processed"
 
     def _handle_preflight_common(self, item: WorkItem, writer: RunArtifactWriter | None, *, command: str) -> str | None:
-        """Pre-submission check: URL occupancy via public GET endpoint (no auth needed)."""
+        """Pre-submission check: URL occupancy via public GET endpoint (no auth needed).
+
+        Skipped for:
+        - discover-crawl: listing pages, not real submissions
+        - repeat_crawl: platform explicitly assigned this URL for re-crawl —
+          the URL is occupied *by design*; checking occupancy would block
+          every repeat_crawl task
+        """
+        if item.claim_task_type == "repeat_crawl":
+            return None
         if item.dataset_id and command != "discover-crawl":
             occupancy = self.client.check_url_occupancy_public(
                 item.dataset_id,
