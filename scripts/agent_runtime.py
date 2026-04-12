@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -203,6 +204,14 @@ class AgentWorker:
             self.state_store,
             retry_after_seconds=config.auth_retry_interval_seconds,
         )
+        # Dedicated repeat_crawl processing thread — runs independently
+        # from the main iteration loop so a slow discovery task can never
+        # block a repeat_crawl with a 6-minute platform deadline.
+        self._repeat_queue: list[WorkItem] = []
+        self._repeat_lock = threading.Lock()
+        self._repeat_thread: threading.Thread | None = None
+        self._repeat_stop = threading.Event()
+
         seed: dict[str, Any] = {}
         token_expires_at = os.environ.get("AWP_WALLET_TOKEN_EXPIRES_AT", "").strip()
         if token_expires_at.isdigit():
@@ -266,6 +275,9 @@ class AgentWorker:
             except Exception as exc:
                 heartbeat_errors.append(f"ws start failed (falling back to HTTP polling): {exc}")
 
+        # Start dedicated repeat_crawl processing thread
+        self._start_repeat_crawl_thread()
+
         session_update: dict[str, Any] = {
             "mining_state": "running",
             "selected_dataset_ids": requested_selected,
@@ -323,6 +335,7 @@ class AgentWorker:
         return self.check_status() | {"message": "Mining resumed.", "mining_state": session["mining_state"]}
 
     def stop(self) -> dict[str, Any]:
+        self._stop_repeat_crawl_thread()
         if self.ws_source is not None:
             self.ws_source.stop()
         session = self.state_store.save_session({
@@ -719,6 +732,112 @@ class AgentWorker:
                     summary.errors.append(f"join miner ready pool failed: {exc}")
         self._sync_wallet_refresh_state()
 
+    # ------------------------------------------------------------------
+    # Dedicated repeat_crawl thread
+    # ------------------------------------------------------------------
+
+    def _start_repeat_crawl_thread(self) -> None:
+        if self._repeat_thread is not None and self._repeat_thread.is_alive():
+            return
+        self._repeat_stop.clear()
+        self._repeat_thread = threading.Thread(
+            target=self._repeat_crawl_loop,
+            name="repeat-crawl",
+            daemon=True,
+        )
+        self._repeat_thread.start()
+
+    def _stop_repeat_crawl_thread(self) -> None:
+        self._repeat_stop.set()
+        if self._repeat_thread is not None:
+            self._repeat_thread.join(timeout=10)
+
+    def _enqueue_repeat_crawl(self, items: list[WorkItem]) -> None:
+        """Put repeat_crawl items into the dedicated queue, auto-starting the thread."""
+        with self._repeat_lock:
+            self._repeat_queue.extend(items)
+        # Lazy start: ensure the processing thread is running
+        if self._repeat_thread is None or not self._repeat_thread.is_alive():
+            self._start_repeat_crawl_thread()
+
+    def _repeat_crawl_loop(self) -> None:
+        """Process repeat_crawl items independently from the main iteration.
+
+        Runs in its own thread so a slow discovery/enrich task can never
+        block a repeat_crawl that has a 6-minute platform deadline.
+        Each item is processed synchronously (fetch+extract, no enrich)
+        with a 120s timeout.
+        """
+        log = logging.getLogger("agent.repeat_crawl")
+        log.info("Repeat-crawl thread started")
+        while not self._repeat_stop.is_set():
+            # Drain queue
+            with self._repeat_lock:
+                batch = list(self._repeat_queue)
+                self._repeat_queue.clear()
+            if not batch:
+                self._repeat_stop.wait(timeout=5)
+                continue
+            for item in batch:
+                if self._repeat_stop.is_set():
+                    break
+                self._process_single_repeat_crawl(item, log)
+        log.info("Repeat-crawl thread stopped")
+
+    def _process_single_repeat_crawl(
+        self,
+        item: WorkItem,
+        log: logging.Logger,
+    ) -> None:
+        """Process one repeat_crawl item: fetch+extract → report cleaned_data."""
+        try:
+            command = self.crawl_mode_planner.choose_command(item)
+            result = self.runner.run_item(item, command)
+        except SkipItemError as exc:
+            log.warning("repeat_crawl skipped %s: %s", item.claim_task_id, exc)
+            self._report_repeat_crawl_failure(
+                item, "crawl_timeout", WorkerIterationSummary(iteration=0),
+            )
+            return
+        except Exception as exc:
+            log.error("repeat_crawl failed %s: %s", item.claim_task_id, exc)
+            self._report_repeat_crawl_failure(
+                item, "crawl_failed", WorkerIterationSummary(iteration=0),
+            )
+            return
+
+        if not result.records:
+            # 抓取失败——分类 fail_reason 后上报
+            fail_reason = "crawl_failed"
+            for error in result.errors:
+                code = str(error.get("error_code") or "")
+                if "CAPTCHA" in code:
+                    fail_reason = "captcha_detected"
+                    break
+                elif "AUTH" in code:
+                    fail_reason = "auth_required"
+                    break
+                elif "CONTENT_EMPTY" in code:
+                    fail_reason = "content_empty"
+                    break
+            try:
+                self.client.report_repeat_crawl_task_result(
+                    item.claim_task_id,
+                    {"failed": True, "fail_reason": fail_reason},
+                )
+                log.info("repeat_crawl %s reported as failed (%s)", item.claim_task_id, fail_reason)
+            except Exception as exc:
+                log.error("report repeat_crawl failure failed: %s", exc)
+            return
+
+        record = result.records[0]
+        report_payload = build_report_payload(item, record)
+        try:
+            self.client.report_repeat_crawl_task_result(item.claim_task_id, report_payload)
+            log.info("repeat_crawl %s reported successfully", item.claim_task_id)
+        except Exception as exc:
+            log.error("report repeat_crawl result failed for %s: %s", item.claim_task_id, exc)
+
     def _collect_work_items(self, summary: WorkerIterationSummary) -> list[WorkItem]:
         session = self.state_store.load_session()
         selected_dataset_ids = {
@@ -754,7 +873,19 @@ class AgentWorker:
             summary.messages.extend(getattr(self.backend_source, "last_skips", []))
             items.extend(claimed)
 
-        summary.claimed_items = len([item for item in items if item.source == "backend_claim"])
+        # Route repeat_crawl items to the dedicated thread — they have a
+        # 6-minute platform deadline and must not wait behind slow discovery
+        # tasks in the main iteration pool.
+        repeat_items = [i for i in items if i.claim_task_type == "repeat_crawl"]
+        items = [i for i in items if i.claim_task_type != "repeat_crawl"]
+        if repeat_items:
+            self._enqueue_repeat_crawl(repeat_items)
+            summary.claimed_items = len(repeat_items)
+            summary.messages.append(
+                f"{len(repeat_items)} repeat_crawl task(s) routed to dedicated thread"
+            )
+
+        summary.claimed_items += len([item for item in items if item.source == "backend_claim"])
         try:
             discoveries = self.dataset_source.collect(min_interval_seconds=self.config.dataset_refresh_seconds)
         except Exception as exc:
@@ -782,7 +913,9 @@ class AgentWorker:
         filtered = list(merged.values())[: self.config.max_parallel]
         summary.discovery_items = len([item for item in filtered if item.source == "dataset_discovery"])
         summary.resumed_items = len([item for item in filtered if item.source in ("backlog", "resume", "auth_pending")])
-        summary.claimed_items = len([item for item in filtered if item.source == "backend_claim"])
+        # Add non-repeat claimed items; repeat_crawl count was already added
+        # when they were routed to the dedicated thread above.
+        summary.claimed_items += len([item for item in filtered if item.source == "backend_claim"])
         return filtered
 
     def _process_items(self, items: list[WorkItem], summary: WorkerIterationSummary) -> None:

@@ -212,7 +212,8 @@ class TestBackendClaimCrawlReportFlow:
     """Test the backend claim -> crawl -> report flow."""
 
     def test_claim_crawl_report(self, tmp_work_dir: Path) -> None:
-        """Obtain task via claim_repeat_crawl_task -> crawl -> report_repeat_crawl_task_result."""
+        """Obtain task via claim_repeat_crawl_task -> dedicated thread crawls -> report_repeat_crawl_task_result."""
+        import time as _time
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
@@ -245,18 +246,25 @@ class TestBackendClaimCrawlReportFlow:
             "selected_dataset_ids": ["ds-wiki"],
         })
 
-        with patch("agent_runtime.build_submission_request") as mock_build_sub:
-            mock_build_sub.return_value = {"records": [{"url": "https://en.wikipedia.org/wiki/Claimed_Page"}]}
-            summary = worker.run_iteration(1)
+        # run_iteration routes repeat_crawl to the dedicated thread
+        summary = worker.run_iteration(1)
 
-        # Verify: should have claimed_items
+        # Verify: should have claimed_items (routed to repeat_crawl thread)
         assert summary["claimed_items"] >= 1
-        # runner should be called
+
+        # Wait for the dedicated thread to process
+        for _ in range(20):
+            if mock_client.report_repeat_crawl_task_result.called:
+                break
+            _time.sleep(0.1)
+
+        # runner should be called (by the repeat_crawl thread)
         assert mock_runner.run_item.called
         # report_repeat_crawl_task_result should be called
         mock_client.report_repeat_crawl_task_result.assert_called_once()
         call_args = mock_client.report_repeat_crawl_task_result.call_args
         assert call_args[0][0] == "rct-100"  # task_id
+        worker._stop_repeat_crawl_thread()
         # report payload should contain cleaned_data
         report_body = call_args[0][1]
         assert "cleaned_data" in report_body
@@ -346,12 +354,13 @@ class TestErrorRecoveryFlow:
     """Test error recovery flow when crawling fails."""
 
     def test_runner_exception_recorded_and_item_requeued(self, tmp_work_dir: Path) -> None:
-        """runner.run_item raises exception -> error recorded in summary -> item re-queued to backlog."""
+        """runner.run_item raises exception for repeat_crawl -> failure reported to platform via dedicated thread."""
+        import time as _time
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # Configure claim to return a task
+        # Configure claim to return a repeat_crawl task
         mock_client.claim_repeat_crawl_task.return_value = {
             "id": "fail-task-1",
             "url": "https://en.wikipedia.org/wiki/Will_Fail",
@@ -371,20 +380,22 @@ class TestErrorRecoveryFlow:
             "selected_dataset_ids": ["ds-test"],
         })
 
+        # run_iteration routes repeat_crawl to the dedicated thread
         summary = worker.run_iteration(1)
+        assert summary["claimed_items"] >= 1
 
-        # Verify: error should be recorded
-        assert len(summary["errors"]) >= 1
-        error_text = " ".join(summary["errors"])
-        assert "crashed" in error_text or "fail-task-1" in error_text
+        # Wait for the dedicated repeat_crawl thread to process it
+        for _ in range(20):
+            if mock_client.report_repeat_crawl_task_result.called:
+                break
+            _time.sleep(0.1)
 
         # repeat_crawl failures are reported to platform (not re-queued)
-        # so the platform can reassign immediately instead of the miner
-        # retrying the same URL indefinitely.
         mock_client.report_repeat_crawl_task_result.assert_called_once()
         call_args = mock_client.report_repeat_crawl_task_result.call_args
         assert call_args[0][1]["failed"] is True
         assert call_args[0][1]["fail_reason"] == "crawl_failed"
+        worker._stop_repeat_crawl_thread()
 
 
 # ---------------------------------------------------------------------------
