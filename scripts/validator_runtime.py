@@ -447,7 +447,9 @@ class ValidatorRuntime:
     # ------------------------------------------------------------------
 
     def _set_phase(self, phase: str, detail: str = "") -> None:
-        """Update the externally visible phase and write status."""
+        """Update the externally visible phase and write status (skip if unchanged)."""
+        if self._phase == phase and self._phase_detail == detail:
+            return
         self._phase = phase
         self._phase_detail = detail
         self._write_status()

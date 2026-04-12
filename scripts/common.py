@@ -80,6 +80,28 @@ def resolve_local_venv_python(root: Path | None = None) -> Path | None:
     return None
 
 
+def resolve_worker_python(project_root: Path) -> str:
+    """Pick the best Python for background workers.
+
+    Prefers the project .venv so workers always run inside the venv even
+    when the parent process is system Python.
+    """
+    venv_python = resolve_local_venv_python(project_root)
+    return str(venv_python) if venv_python is not None else sys.executable
+
+
+def worker_subprocess_env() -> dict[str, str]:
+    """Build the environment dict for background worker subprocesses.
+
+    Forces unbuffered output and removes the venv re-exec skip flag so
+    the child can self-correct.
+    """
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env.pop("MINE_SKIP_VENV_REEXEC", None)
+    return env
+
+
 def resolve_output_root() -> Path:
     return Path(os.environ.get("CRAWLER_OUTPUT_ROOT", str(resolve_crawler_root() / "output" / "agent-runs"))).resolve()
 
@@ -1056,13 +1078,17 @@ def resolve_validator_model_config() -> dict[str, Any]:
     Returns an empty dict when no gateway/API config is set — in that case the
     CLI path must be available for evaluation to work.
     """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     try:
         from crawler.schema_runtime.model_config import load_model_config
-    except ImportError:
+    except ImportError as exc:
+        _log.warning("model_config import failed: %s", exc)
         return {}
     try:
         return load_model_config(None, use_openclaw=True) or {}
-    except Exception:
+    except Exception as exc:
+        _log.warning("model_config load failed: %s", exc)
         return {}
 
 

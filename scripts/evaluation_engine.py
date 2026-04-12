@@ -24,23 +24,20 @@ class EvaluationResult:
     score: int  # 0-100, meaningful only when result="match"
 
 
+import concurrent.futures
+
+# 单例线程池，用于在已有 event loop 的情况下执行 async LLM 调用。
+# 避免每次 evaluate 都创建新的 ThreadPoolExecutor。
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+
 def _default_llm_call(
     prompt: str,
     *,
     timeout: float,
     model_config: dict[str, Any] | None,
 ) -> str:
-    """Sync wrapper around the shared llm_enrich routing.
-
-    Priority: OpenClaw CLI → OpenClaw gateway → direct API. Raises RuntimeError
-    with the underlying failure reason when nothing is available so validator
-    callers can handle it uniformly.
-
-    This lets the validator keep running via gateway/API even on hosts where the
-    ``openclaw`` binary is not installed (e.g. when the skill is invoked from a
-    different agent host). The miner already uses this routing — sharing the
-    path avoids a second parallel LLM integration.
-    """
+    """Sync wrapper around the shared llm_enrich routing."""
     from crawler.enrich.generative.llm_enrich import enrich_with_llm
 
     async def _run() -> str:
@@ -56,15 +53,8 @@ def _default_llm_call(
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # Called from inside an already-running loop (rare for the
-            # validator, but be defensive). Offload to a fresh loop in a thread
-            # to avoid nested-loop errors.
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(lambda: asyncio.run(_run())).result()
+            return _LLM_EXECUTOR.submit(lambda: asyncio.run(_run())).result()
     except RuntimeError:
-        # No current loop — create one.
         pass
     return asyncio.run(_run())
 

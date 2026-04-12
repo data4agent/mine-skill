@@ -80,6 +80,12 @@ class CrawlerRunner:
     # well within the platform's 6-minute reporting deadline.
     REPEAT_CRAWL_TIMEOUT = 180
 
+    # Sentinel value for --field-group to skip enrichment entirely.
+    SKIP_ENRICH_SENTINEL = "none"
+
+    # Cached openclaw CLI availability — PATH doesn't change mid-run.
+    _openclaw_available: bool | None = None
+
     def run_item(self, item: WorkItem, command: str) -> CrawlerRunResult:
         output_dir = resolve_item_output_dir(item, output_root=self.output_root)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -142,14 +148,14 @@ class CrawlerRunner:
         """
         if command not in {"run", "enrich"}:
             return
-        # User-level override: MINE_SKIP_ENRICH=1 forces enrichment off
-        # regardless of LLM availability. Useful for rapid testing or
-        # low-resource hosts.
         if os.environ.get("MINE_SKIP_ENRICH", "").strip() == "1":
-            argv.extend(["--field-group", "none"])
+            argv.extend(["--field-group", self.SKIP_ENRICH_SENTINEL])
             return
-        import shutil
-        if shutil.which("openclaw") or shutil.which("openclaw.cmd") or shutil.which("openclaw.mjs"):
+        # Cache openclaw CLI check — PATH doesn't change mid-run
+        if CrawlerRunner._openclaw_available is None:
+            from crawler.enrich.generative.openclaw_agent import openclaw_cli_available
+            CrawlerRunner._openclaw_available = openclaw_cli_available()
+        if CrawlerRunner._openclaw_available:
             argv.append("--use-openclaw")
             return
         if self.config.gateway_model_config:
@@ -159,9 +165,7 @@ class CrawlerRunner:
             )
             argv.extend(["--model-config", str(config_path)])
             return
-        # No LLM backend available — skip enrichment entirely rather than
-        # letting each field group time out and block the worker for minutes.
-        argv.extend(["--field-group", "none"])
+        argv.extend(["--field-group", self.SKIP_ENRICH_SENTINEL])
 
 
 def _build_test_config(root: Path) -> WorkerConfig:
@@ -797,39 +801,16 @@ class AgentWorker:
             result = self.runner.run_item(item, command)
         except SkipItemError as exc:
             log.warning("repeat_crawl skipped %s: %s", item.claim_task_id, exc)
-            self._report_repeat_crawl_failure(
-                item, "crawl_timeout", WorkerIterationSummary(iteration=0),
-            )
+            self._report_repeat_crawl_failure(item, "crawl_timeout")
             return
         except Exception as exc:
             log.error("repeat_crawl failed %s: %s", item.claim_task_id, exc)
-            self._report_repeat_crawl_failure(
-                item, "crawl_failed", WorkerIterationSummary(iteration=0),
-            )
+            self._report_repeat_crawl_failure(item, "crawl_failed")
             return
 
         if not result.records:
-            # 抓取失败——分类 fail_reason 后上报
-            fail_reason = "crawl_failed"
-            for error in result.errors:
-                code = str(error.get("error_code") or "")
-                if "CAPTCHA" in code:
-                    fail_reason = "captcha_detected"
-                    break
-                elif "AUTH" in code:
-                    fail_reason = "auth_required"
-                    break
-                elif "CONTENT_EMPTY" in code:
-                    fail_reason = "content_empty"
-                    break
-            try:
-                self.client.report_repeat_crawl_task_result(
-                    item.claim_task_id,
-                    {"failed": True, "fail_reason": fail_reason},
-                )
-                log.info("repeat_crawl %s reported as failed (%s)", item.claim_task_id, fail_reason)
-            except Exception as exc:
-                log.error("report repeat_crawl failure failed: %s", exc)
+            fail_reason = self._classify_crawl_fail_reason(result.errors)
+            self._report_repeat_crawl_failure(item, fail_reason)
             return
 
         record = result.records[0]
@@ -875,11 +856,12 @@ class AgentWorker:
             summary.messages.extend(getattr(self.backend_source, "last_skips", []))
             items.extend(claimed)
 
-        # Route repeat_crawl items to the dedicated thread — they have a
-        # 6-minute platform deadline and must not wait behind slow discovery
-        # tasks in the main iteration pool.
-        repeat_items = [i for i in items if i.claim_task_type == "repeat_crawl"]
-        items = [i for i in items if i.claim_task_type != "repeat_crawl"]
+        # Single-pass partition: route repeat_crawl to dedicated thread
+        repeat_items: list[WorkItem] = []
+        non_repeat: list[WorkItem] = []
+        for i in items:
+            (repeat_items if i.claim_task_type == "repeat_crawl" else non_repeat).append(i)
+        items = non_repeat
         if repeat_items:
             self._enqueue_repeat_crawl(repeat_items)
             summary.claimed_items = len(repeat_items)
@@ -913,11 +895,14 @@ class AgentWorker:
                 if allowed is not None:
                     merged[allowed.item_id] = allowed
         filtered = list(merged.values())[: self.config.max_parallel]
-        summary.discovery_items = len([item for item in filtered if item.source == "dataset_discovery"])
-        summary.resumed_items = len([item for item in filtered if item.source in ("backlog", "resume", "auth_pending")])
-        # Add non-repeat claimed items; repeat_crawl count was already added
-        # when they were routed to the dedicated thread above.
-        summary.claimed_items += len([item for item in filtered if item.source == "backend_claim"])
+        # Single-pass counting (repeat_crawl count already added above)
+        for item in filtered:
+            if item.source == "dataset_discovery":
+                summary.discovery_items += 1
+            elif item.source in ("backlog", "resume", "auth_pending"):
+                summary.resumed_items += 1
+            elif item.source == "backend_claim":
+                summary.claimed_items += 1
         return filtered
 
     def _process_items(self, items: list[WorkItem], summary: WorkerIterationSummary) -> None:
@@ -937,20 +922,11 @@ class AgentWorker:
                 except SkipItemError as exc:
                     summary.skipped_items += 1
                     summary.messages.append(f"skipped {item.item_id}: {exc}")
-                    # repeat_crawl: report failure to platform so it can
-                    # reassign immediately. Re-queuing just causes infinite
-                    # timeout loops since the same URL will time out again.
-                    if item.claim_task_id and item.claim_task_type == "repeat_crawl":
-                        self._report_repeat_crawl_failure(item, "crawl_timeout", summary)
-                    elif item.claim_task_id:
-                        self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
+                    self._handle_item_failure(item, "crawl_timeout", summary)
                     continue
                 except Exception as exc:
                     summary.errors.append(f"{item.item_id}: {exc}")
-                    if item.claim_task_id and item.claim_task_type == "repeat_crawl":
-                        self._report_repeat_crawl_failure(item, "crawl_failed", summary)
-                    else:
-                        self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
+                    self._handle_item_failure(item, "crawl_failed", summary)
                     continue
                 try:
                     self._handle_result(item, result, summary)
@@ -997,16 +973,10 @@ class AgentWorker:
                     if isinstance(result, SkipItemError):
                         summary.skipped_items += 1
                         summary.messages.append(f"skipped {item.item_id}: {result}")
-                        if item.claim_task_id and item.claim_task_type == "repeat_crawl":
-                            self._report_repeat_crawl_failure(item, "crawl_timeout", summary)
-                        elif item.claim_task_id:
-                            self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
+                        self._handle_item_failure(item, "crawl_timeout", summary)
                     elif isinstance(result, Exception):
                         summary.errors.append(f"{item.item_id}: {result}")
-                        if item.claim_task_id and item.claim_task_type == "repeat_crawl":
-                            self._report_repeat_crawl_failure(item, "crawl_failed", summary)
-                        else:
-                            self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
+                        self._handle_item_failure(item, "crawl_failed", summary)
                     else:
                         try:
                             self._handle_result(item, result, summary)
@@ -1076,26 +1046,9 @@ class AgentWorker:
                 summary.errors.append(f"{item.item_id}: {error.get('error_code') or 'UNKNOWN'}")
             # Report failure to server so it can reassign immediately
             if item.claim_task_id and item.claim_task_type == "repeat_crawl":
-                fail_reason = "crawl_failed"
-                for error in result.errors:
-                    code = str(error.get("error_code") or "")
-                    if "CAPTCHA" in code:
-                        fail_reason = "captcha_detected"
-                        break
-                    elif "AUTH" in code:
-                        fail_reason = "auth_required"
-                        break
-                    elif "CONTENT_EMPTY" in code:
-                        fail_reason = "content_empty"
-                        break
-                try:
-                    self.client.report_repeat_crawl_task_result(
-                        item.claim_task_id,
-                        {"failed": True, "fail_reason": fail_reason},
-                    )
-                    summary.messages.append(f"repeat_crawl {item.claim_task_id} reported as failed ({fail_reason})")
-                except Exception as exc:
-                    summary.errors.append(f"report repeat_crawl failure failed: {exc}")
+                fail_reason = self._classify_crawl_fail_reason(result.errors)
+                self._report_repeat_crawl_failure(item, fail_reason)
+                summary.messages.append(f"repeat_crawl {item.claim_task_id} failed ({fail_reason})")
             return
 
         record = result.records[0]
@@ -1229,29 +1182,47 @@ class AgentWorker:
         )
         return "processed"
 
+    @staticmethod
+    def _classify_crawl_fail_reason(errors: list[dict[str, Any]]) -> str:
+        """Classify crawl errors into a platform fail_reason code."""
+        for error in errors:
+            code = str(error.get("error_code") or "")
+            if "CAPTCHA" in code:
+                return "captcha_detected"
+            if "AUTH" in code:
+                return "auth_required"
+            if "CONTENT_EMPTY" in code:
+                return "content_empty"
+        return "crawl_failed"
+
     def _report_repeat_crawl_failure(
         self,
         item: WorkItem,
         fail_reason: str,
-        summary: WorkerIterationSummary,
     ) -> None:
-        """Report repeat_crawl failure to platform so it can reassign.
-
-        Called when repeat_crawl times out or errors before reaching
-        _handle_result. Without this, failed repeat_crawl tasks were
-        re-queued into the backlog and retried indefinitely — timing out
-        each time on the same URL.
-        """
+        """Report repeat_crawl failure to platform so it can reassign."""
+        log = logging.getLogger("agent.repeat_crawl")
         try:
             self.client.report_repeat_crawl_task_result(
                 item.claim_task_id,
                 {"failed": True, "fail_reason": fail_reason},
             )
-            summary.messages.append(
-                f"repeat_crawl {item.claim_task_id} reported as failed ({fail_reason})"
-            )
+            log.info("repeat_crawl %s reported as failed (%s)", item.claim_task_id, fail_reason)
         except Exception as exc:
-            summary.errors.append(f"report repeat_crawl failure failed: {exc}")
+            log.error("report repeat_crawl failure failed: %s", exc)
+
+    def _handle_item_failure(
+        self,
+        item: WorkItem,
+        fail_reason: str,
+        summary: WorkerIterationSummary,
+    ) -> None:
+        """Route a failed item: repeat_crawl → report to platform, others → re-queue."""
+        if item.claim_task_id and item.claim_task_type == "repeat_crawl":
+            self._report_repeat_crawl_failure(item, fail_reason)
+            summary.messages.append(f"repeat_crawl {item.claim_task_id} failed ({fail_reason})")
+        else:
+            self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
 
     def _handle_preflight_common(self, item: WorkItem, writer: RunArtifactWriter | None, *, command: str) -> str | None:
         """Pre-submission check: URL occupancy via public GET endpoint (no auth needed).
