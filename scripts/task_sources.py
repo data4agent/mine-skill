@@ -272,12 +272,25 @@ class WebSocketClaimSource:
     def _receive_loop(self) -> None:
         import logging
         log = logging.getLogger("miner.ws")
+
+        # 预检查 websockets 是否可导入——如果不可用，直接退出线程，
+        # 让 miner 使用 HTTP polling fallback。避免无限循环报
+        # "No module named 'websockets'" 警告。
+        try:
+            import websockets.sync.client  # noqa: F401
+        except ImportError:
+            log.info(
+                "websockets not installed — WS push disabled, using HTTP polling for repeat_crawl tasks. "
+                "Install websockets (pip install websockets) for faster task reception."
+            )
+            self._running = False
+            return
+
         first_connect = True
         while self._running:
             if not self.ws_client.connected:
                 try:
                     if first_connect:
-                        # First connection — connect immediately, no backoff
                         self.ws_client.connect()
                         first_connect = False
                     else:

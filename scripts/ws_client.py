@@ -89,7 +89,13 @@ class ValidatorWSClient:
 
     def connect(self) -> None:
         """Establish WebSocket connection with auth headers."""
-        import websockets.sync.client as ws_sync
+        try:
+            import websockets.sync.client as ws_sync
+        except ImportError as exc:
+            self._connected = False
+            raise WSDisconnected(
+                "websockets not installed — run: pip install websockets"
+            ) from exc
 
         try:
             extra_headers = dict(self._auth_headers)
