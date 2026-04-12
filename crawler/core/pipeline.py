@@ -427,8 +427,14 @@ async def _run_new_pipeline_async(config: CrawlerConfig) -> tuple[list[dict], li
                 {"document_blocks": extracted_doc.structured.platform_fields.get("pdf_document_blocks", [])},
             )
 
-            # Step 4: Enrich (if field_groups specified or running full pipeline)
-            if config.command in (CrawlCommand.RUN, CrawlCommand.ENRICH):
+            # Step 4: Enrich (if field_groups specified or running full pipeline).
+            # "none" is a sentinel: the worker passes --field-group none when no
+            # LLM backend is available, explicitly skipping enrichment so the
+            # subprocess doesn't block for minutes timing out on every field group.
+            _skip_enrich = config.field_groups == ("none",) or (
+                len(config.field_groups) == 1 and config.field_groups[0] == "none"
+            )
+            if config.command in (CrawlCommand.RUN, CrawlCommand.ENRICH) and not _skip_enrich:
                 enrichment_request = adapter.build_enrichment_request(record, config.field_groups)
                 field_groups = list(enrichment_request.get("field_groups") or ["summaries"])
                 # Prepare document for enrichment
