@@ -214,6 +214,19 @@ class PlatformClient:
         data = resp.get("data")
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def _parse_cooldown(error_body: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Extract cooldown sentinel from a 409 validator_cooldown response."""
+        if not isinstance(error_body, dict):
+            return None
+        err_obj = error_body.get("error")
+        if not isinstance(err_obj, dict) or err_obj.get("code") != "validator_cooldown":
+            return None
+        retry = err_obj.get("retry_after_seconds")
+        if isinstance(retry, (int, float)) and retry > 0:
+            return {"_cooldown": True, "retry_after_seconds": int(retry)}
+        return None
+
     def _claim(self, path: str) -> dict[str, Any] | None:
         """POST a claim request. Returns task data, None (no task), or a
         cooldown sentinel ``{"_cooldown": True, "retry_after_seconds": N}``
@@ -225,32 +238,18 @@ class PlatformClient:
             if api_err.status_code == 404:
                 return None
             if api_err.status_code == 409:
-                # 409 validator_cooldown carries retry_after_seconds — surface
-                # it so callers can sleep precisely instead of guessing.
-                if api_err.code == "validator_cooldown" and api_err.response:
-                    err_body = api_err.response if isinstance(api_err.response, dict) else {}
-                    error_data = err_body.get("error") if isinstance(err_body.get("error"), dict) else {}
-                    retry_after = error_data.get("retry_after_seconds")
-                    if isinstance(retry_after, (int, float)) and retry_after > 0:
-                        return {"_cooldown": True, "retry_after_seconds": int(retry_after)}
-                return None
+                body = api_err.response if isinstance(api_err.response, dict) else {}
+                return self._parse_cooldown(body)
             raise
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:
                 return None
             if error.response.status_code == 409:
-                # Parse 409 body for validator_cooldown + retry_after_seconds
                 try:
                     body = error.response.json()
                 except ValueError:
                     return None
-                if isinstance(body, dict):
-                    err_obj = body.get("error")
-                    if isinstance(err_obj, dict) and err_obj.get("code") == "validator_cooldown":
-                        retry = err_obj.get("retry_after_seconds")
-                        if isinstance(retry, (int, float)) and retry > 0:
-                            return {"_cooldown": True, "retry_after_seconds": int(retry)}
-                return None
+                return self._parse_cooldown(body)
             raise
         data = payload.get("data")
         if data in (None, {}, []):

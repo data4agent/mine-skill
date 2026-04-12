@@ -79,26 +79,10 @@ def start_background(state_root: Path | None = None) -> dict[str, Any]:
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / f"{session_id}.log"
 
-    # Explicitly resolve venv Python — don't trust sys.executable which may
-    # be system Python if the host agent's invocation bypassed the re-exec.
-    from common import resolve_local_venv_python
-    venv_python = resolve_local_venv_python(project_root)
-    python_bin = str(venv_python) if venv_python is not None else sys.executable
-
-    # -u forces stdout/stderr unbuffered; without it Python block-buffers
-    # when stdout is redirected to a file, producing a 0-byte log file that
-    # looks like a hung worker. See matching fix in scripts/background_worker.py.
-    command = [
-        python_bin,
-        "-u",
-        str(script_path),
-        "run-validator-worker",
-        session_id,
-    ]
-
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env.pop("MINE_SKIP_VENV_REEXEC", None)
+    from common import resolve_worker_python, worker_subprocess_env
+    python_bin = resolve_worker_python(project_root)
+    command = [python_bin, "-u", str(script_path), "run-validator-worker", session_id]
+    env = worker_subprocess_env()
 
     with log_path.open("a", encoding="utf-8") as handle:
         process = subprocess.Popen(

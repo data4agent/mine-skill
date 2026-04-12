@@ -437,14 +437,20 @@ class EnrichPipeline:
         if not eligible:
             return skipped_results
 
-        # Build a single combined prompt. Source fields are shared (same
-        # document), so we collect them once from the broadest spec.
-        source_fields = self._collect_source_fields(eligible[0], document)
-        for spec in eligible[1:]:
-            extra = self._collect_source_fields(spec, document)
-            for k, v in extra.items():
-                if k not in source_fields:
-                    source_fields[k] = v
+        # Collect source fields once using a synthetic spec that unions all
+        # required_source_fields — avoids calling _collect_source_fields N times.
+        all_required: list[str] = []
+        seen_fields: set[str] = set()
+        for spec in eligible:
+            for f in spec.required_source_fields:
+                if f not in seen_fields:
+                    seen_fields.add(f)
+                    all_required.append(f)
+        union_spec = FieldGroupSpec(
+            name="_merged", description="", required_source_fields=all_required,
+            output_fields=[], strategy="generative_only",
+        )
+        source_fields = self._collect_source_fields(union_spec, document)
 
         # Build combined output schema — one flat object with all fields,
         # keyed by "{group_name}.{field_name}" to avoid collisions.
