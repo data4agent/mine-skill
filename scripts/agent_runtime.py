@@ -218,8 +218,15 @@ class AgentWorker:
         self._submit_queue: _queue_mod.Queue[tuple[WorkItem, dict[str, Any], dict[str, Any] | None] | None] = _queue_mod.Queue()
         self._submit_thread: threading.Thread | None = None
         self._submit_stop = threading.Event()
+        # Auto-updater — polls upstream every 10min, pulls + requests stop on update
+        self._auto_updater: Any = None
+
         self._submit_stats_lock = threading.Lock()
         self._submit_stats = {"submitted": 0, "deferred": 0, "discarded": 0}
+        # Track last-seen submit count so each iteration can report the delta.
+        # Without this, the async submit path never updates session_totals
+        # and status keeps showing submitted=0 despite successful submissions.
+        self._submit_stats_baseline = {"submitted": 0, "discarded": 0}
         self._submit_retries: dict[str, int] = {}  # item_id → retry count
         self._MAX_SUBMIT_RETRIES = 5
 
@@ -300,6 +307,9 @@ class AgentWorker:
         # Start submit thread — sequential submission with rate limit backoff
         self._start_submit_thread()
 
+        # Start auto-update thread — pulls from upstream and signals stop on update
+        self._start_auto_updater()
+
         session_update: dict[str, Any] = {
             "mining_state": "running",
             "selected_dataset_ids": requested_selected,
@@ -357,6 +367,7 @@ class AgentWorker:
         return self.check_status() | {"message": "Mining resumed.", "mining_state": session["mining_state"]}
 
     def stop(self) -> dict[str, Any]:
+        self._stop_auto_updater()
         self._stop_submit_thread()
         self._stop_repeat_crawl_thread()
         if self.ws_source is not None:
@@ -781,6 +792,44 @@ class AgentWorker:
         # Persist any items still in the queue (not the in-flight one,
         # which was already popped by the thread).
         self._persist_remaining_queue()
+
+    # ------------------------------------------------------------------
+    # Auto-updater
+    # ------------------------------------------------------------------
+
+    def _start_auto_updater(self) -> None:
+        try:
+            from auto_updater import AutoUpdater
+        except ImportError:
+            return
+        if self._auto_updater is not None:
+            return
+        project_root = Path(__file__).resolve().parents[1]
+        self._auto_updater = AutoUpdater(
+            project_root,
+            on_update_applied=self._on_auto_update_applied,
+        )
+        self._auto_updater.start()
+
+    def _stop_auto_updater(self) -> None:
+        if self._auto_updater is not None:
+            self._auto_updater.stop()
+
+    def _on_auto_update_applied(self) -> None:
+        """Called by AutoUpdater after a successful fast-forward pull.
+
+        Marks mining_state=stopped so the next iteration exits cleanly.
+        The host supervisor's next agent-start call will launch with the
+        new code.
+        """
+        log = logging.getLogger("agent.auto_update")
+        log.info("Marking mining_state=stopped for restart with new code")
+        self.state_store.save_session({
+            "mining_state": "stopped",
+            "stop_reason": "auto_update",
+            "last_control_action": "auto-update",
+            "last_state_change_at": int(time.time()),
+        })
 
     def _persist_remaining_queue(self) -> None:
         """Persist any items remaining in the submit queue to disk.
@@ -1604,6 +1653,23 @@ class AgentWorker:
         current_batch: dict[str, Any] | None = None,
         stop_reason: str | None = None,
     ) -> dict[str, Any]:
+        # Merge async submit thread progress into the iteration summary.
+        # Without this, status displays submitted=0 forever because the
+        # submit path is now async and no longer increments summary counters
+        # directly. We compute the delta since last iteration and attribute
+        # it to this iteration.
+        with self._submit_stats_lock:
+            submitted_now = self._submit_stats.get("submitted", 0)
+            discarded_now = self._submit_stats.get("discarded", 0)
+        submitted_delta = submitted_now - self._submit_stats_baseline["submitted"]
+        discarded_delta = discarded_now - self._submit_stats_baseline["discarded"]
+        self._submit_stats_baseline["submitted"] = submitted_now
+        self._submit_stats_baseline["discarded"] = discarded_now
+        if submitted_delta > 0:
+            summary.submitted_items += submitted_delta
+        if discarded_delta > 0:
+            summary.messages.append(f"{discarded_delta} submission(s) discarded by platform")
+
         payload = summary.to_dict()
         if current_batch:
             payload["current_batch"] = current_batch

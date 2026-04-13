@@ -413,6 +413,7 @@ class ValidatorFleet:
         self.instances: list[ValidatorInstance] = []
         self.threads: list[threading.Thread] = []
         self._stop_event = threading.Event()
+        self._auto_updater: Any = None
 
     def start(self) -> None:
         keys = ensure_keys(self.count)
@@ -445,6 +446,18 @@ class ValidatorFleet:
             if i < len(self.threads) - 1:
                 time.sleep(2)
 
+        # Start auto-updater
+        try:
+            from auto_updater import AutoUpdater
+            project_root = Path(__file__).resolve().parents[1]
+            self._auto_updater = AutoUpdater(
+                project_root,
+                on_update_applied=self.stop,  # update → gracefully stop fleet
+            )
+            self._auto_updater.start()
+        except Exception as exc:
+            print(f"Auto-updater start failed: {exc}")
+
         print(f"All {self.count} validators started. Press Ctrl+C to stop.\n")
 
         # 定期打印汇总
@@ -460,6 +473,11 @@ class ValidatorFleet:
 
     def stop(self) -> None:
         print("\nStopping all validators...")
+        if self._auto_updater is not None:
+            try:
+                self._auto_updater.stop()
+            except Exception:
+                pass
         self._stop_event.set()
         for instance in self.instances:
             instance.stop()

@@ -63,6 +63,7 @@ class ValidatorRuntime:
         self._platform_lock = threading.Lock()
         self._heartbeat_thread: threading.Thread | None = None
         self._main_thread: threading.Thread | None = None
+        self._auto_updater: Any = None
         self._stop_event = threading.Event()
 
         self._stats_lock = threading.Lock()
@@ -369,9 +370,33 @@ class ValidatorRuntime:
         )
         self._main_thread.start()
 
+        # Auto-updater — pulls from upstream on new commits, triggers graceful stop
+        try:
+            from auto_updater import AutoUpdater
+            from pathlib import Path as _Path
+            project_root = _Path(__file__).resolve().parents[1]
+            self._auto_updater = AutoUpdater(
+                project_root,
+                on_update_applied=self._on_auto_update_applied,
+            )
+            self._auto_updater.start()
+        except Exception as exc:
+            log.warning("Auto-updater start failed: %s", exc)
+            self._auto_updater = None
+
         self._record_action("started")
         self._write_status()
         return self.status()
+
+    def _on_auto_update_applied(self) -> None:
+        """Called by AutoUpdater after a successful pull. Triggers graceful stop."""
+        log.info("Auto-update applied; stopping validator for restart")
+        self._record_action("auto_update_applied")
+        # Set _running=False to exit loops; supervisor will restart us.
+        with self._lock:
+            self._running = False
+        self._stop_event.set()
+        self._ws.close()
 
     def stop(self) -> dict[str, Any]:
         """Gracefully stop the validator runtime."""
@@ -384,6 +409,13 @@ class ValidatorRuntime:
         self._phase = "stopped"
         self._phase_detail = ""
         log.info("ValidatorRuntime stopping")
+
+        # Stop auto-updater thread
+        if getattr(self, "_auto_updater", None) is not None:
+            try:
+                self._auto_updater.stop()
+            except Exception:
+                pass
 
         try:
             with self._platform_lock:
