@@ -11,7 +11,7 @@ description: >
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
-version: 0.12.1
+version: 0.13.0
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
