@@ -406,19 +406,18 @@ class TestErrorRecoveryFlow:
 class TestRateLimitBackoffFlow:
     """Test 429 Rate Limit triggering dataset cooldown and re-queuing."""
 
-    def test_429_marks_cooldown_and_requeues(self, tmp_work_dir: Path) -> None:
-        """submit_core_submissions returns 429 → dataset cooldown → item re-queued."""
+    def test_429_marks_cooldown_and_defers(self, tmp_work_dir: Path) -> None:
+        """submit_core_submissions returns 429 → submit thread backs off → item deferred."""
+        import time as _time
         config = _make_worker_config(tmp_work_dir)
         mock_client = _build_mock_client()
         mock_runner = _build_mock_runner()
 
-        # Use a discovery item (not repeat_crawl, since repeat_crawl skips submission)
         item = _make_work_item(
             item_id="discovery:ds-rate-limited:https://en.wikipedia.org/wiki/Test",
             dataset_id="ds-rate-limited",
         )
 
-        # Create crawler result
         result = _make_crawler_result(
             tmp_work_dir,
             records=[{
@@ -439,7 +438,6 @@ class TestRateLimitBackoffFlow:
             "selected_dataset_ids": ["ds-rate-limited"],
         })
 
-        # Simulate report success, but submit_core_submissions returns 429
         mock_response = MagicMock()
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "120"}
@@ -450,24 +448,25 @@ class TestRateLimitBackoffFlow:
             response=mock_response,
         )
 
+        # _handle_result now enqueues to submit thread instead of submitting inline
         summary = WorkerIterationSummary(iteration=1)
-
-        # Directly call _handle_result, making submit throw 429
-        with patch("agent_runtime.build_submission_request") as mock_build_sub, \
-             patch("agent_runtime._export_and_submit_core_submissions_for_task") as mock_export:
+        with patch("agent_runtime._export_and_submit_core_submissions_for_task") as mock_export:
             mock_export.side_effect = http_error
             worker._handle_result(item, result, summary)
 
-        # Verify: dataset cooldown is marked
+        # Wait for submit thread to process and hit the 429
+        for _ in range(30):
+            stats = worker.get_submit_stats()
+            if stats.get("deferred", 0) > 0:
+                break
+            _time.sleep(0.1)
+
+        # Submit thread should have deferred the item and marked cooldown
+        stats = worker.get_submit_stats()
+        assert stats["deferred"] >= 1
+
         cooldowns = worker.state_store.active_dataset_cooldowns()
         assert "ds-rate-limited" in cooldowns
 
-        # Item should be re-queued
-        backlog = worker.state_store.load_backlog()
-        assert len(backlog) >= 1
-        requeued_item = backlog[0]
-        assert requeued_item.resume is True
-
-        # Summary should contain 429-related error
-        all_text = " ".join(summary.errors + summary.messages)
-        assert "429" in all_text or "Rate Limited" in all_text
+        worker._stop_submit_thread()
+        worker._stop_repeat_crawl_thread()
