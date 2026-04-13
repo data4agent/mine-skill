@@ -220,6 +220,10 @@ class AgentWorker:
         self._submit_stop = threading.Event()
         self._submit_stats_lock = threading.Lock()
         self._submit_stats = {"submitted": 0, "deferred": 0, "discarded": 0}
+        # Track last-seen submit count so each iteration can report the delta.
+        # Without this, the async submit path never updates session_totals
+        # and status keeps showing submitted=0 despite successful submissions.
+        self._submit_stats_baseline = {"submitted": 0, "discarded": 0}
         self._submit_retries: dict[str, int] = {}  # item_id → retry count
         self._MAX_SUBMIT_RETRIES = 5
 
@@ -1604,6 +1608,23 @@ class AgentWorker:
         current_batch: dict[str, Any] | None = None,
         stop_reason: str | None = None,
     ) -> dict[str, Any]:
+        # Merge async submit thread progress into the iteration summary.
+        # Without this, status displays submitted=0 forever because the
+        # submit path is now async and no longer increments summary counters
+        # directly. We compute the delta since last iteration and attribute
+        # it to this iteration.
+        with self._submit_stats_lock:
+            submitted_now = self._submit_stats.get("submitted", 0)
+            discarded_now = self._submit_stats.get("discarded", 0)
+        submitted_delta = submitted_now - self._submit_stats_baseline["submitted"]
+        discarded_delta = discarded_now - self._submit_stats_baseline["discarded"]
+        self._submit_stats_baseline["submitted"] = submitted_now
+        self._submit_stats_baseline["discarded"] = discarded_now
+        if submitted_delta > 0:
+            summary.submitted_items += submitted_delta
+        if discarded_delta > 0:
+            summary.messages.append(f"{discarded_delta} submission(s) discarded by platform")
+
         payload = summary.to_dict()
         if current_batch:
             payload["current_batch"] = current_batch
