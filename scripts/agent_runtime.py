@@ -1275,8 +1275,10 @@ class AgentWorker:
     def _drain_submit_pending(self, summary: WorkerIterationSummary) -> None:
         """Re-enqueue persisted submit_pending items to the submit thread.
 
-        Items stay in the persistent store until the submit thread confirms
-        success or discards them — never clear before enqueue (data loss risk).
+        Each item is cleared from the persistent store BEFORE enqueuing to
+        the submit thread. If the submission fails, the submit thread
+        re-persists it via enqueue_submit_pending. This prevents the same
+        item from being drained again on the next iteration (double submit).
         """
         pending = self.state_store.load_submit_pending()
         if not pending:
@@ -1292,10 +1294,11 @@ class AgentWorker:
             report_result = payload.get("report_result")
             if not isinstance(record, dict):
                 continue
-            # Enqueue to submit thread. Don't clear from persistent store here
-            # — the submit thread calls clear_submit_pending on success/discard.
-            # Clearing here would race with the submit thread and could wipe
-            # a re-deferred entry.
+            # Clear first, then enqueue. If we crash between clear and enqueue,
+            # the item is lost — but this is the only way to prevent double
+            # submission (drain seeing the same item every iteration). The submit
+            # thread re-persists on failure, so the window is tiny.
+            self.state_store.clear_submit_pending(item.item_id)
             self._enqueue_submission(
                 item, record,
                 report_result if isinstance(report_result, dict) else None,
