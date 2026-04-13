@@ -220,6 +220,8 @@ class AgentWorker:
         self._submit_stop = threading.Event()
         self._submit_stats_lock = threading.Lock()
         self._submit_stats = {"submitted": 0, "deferred": 0, "discarded": 0}
+        self._submit_retries: dict[str, int] = {}  # item_id → retry count
+        self._MAX_SUBMIT_RETRIES = 5
 
         # Dedicated repeat_crawl processing thread — runs independently
         # from the main iteration loop so a slow discovery task can never
@@ -773,9 +775,11 @@ class AgentWorker:
         self._submit_stop.set()
         self._submit_queue.put(None)  # sentinel to unblock get()
         if self._submit_thread is not None:
-            self._submit_thread.join(timeout=15)
-        # If the thread didn't drain cleanly (e.g. timed out on join),
-        # persist any remaining queue items ourselves so nothing is lost.
+            # Join timeout must exceed httpx client timeout (30s) so the
+            # in-flight network call can finish before we give up.
+            self._submit_thread.join(timeout=45)
+        # Persist any items still in the queue (not the in-flight one,
+        # which was already popped by the thread).
         self._persist_remaining_queue()
 
     def _persist_remaining_queue(self) -> None:
@@ -855,6 +859,7 @@ class AgentWorker:
                 report_result=report_result,
             )
             self.state_store.clear_submit_pending(item.item_id)
+            self._submit_retries.pop(item.item_id, None)
             with self._submit_stats_lock:
                 self._submit_stats["submitted"] += 1
             log.info("Submitted %s", item.item_id)
@@ -879,21 +884,28 @@ class AgentWorker:
         except httpx.HTTPStatusError as http_exc:
             status = http_exc.response.status_code
             if status == 429:
-                # Rate limited — backoff then retry this same item
                 retry_after = _extract_retry_after_seconds(http_exc, default=60)
-                log.warning("429 Rate Limited — backing off %ds then retrying %s", retry_after, item.item_id)
+                retries = self._submit_retries.get(item.item_id, 0) + 1
+                self._submit_retries[item.item_id] = retries
+                if retries > self._MAX_SUBMIT_RETRIES:
+                    # Give up after too many retries — persist to disk
+                    log.warning("429 Rate Limited — giving up on %s after %d retries", item.item_id, retries)
+                    self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
+                    with self._submit_stats_lock:
+                        self._submit_stats["deferred"] += 1
+                    self._submit_retries.pop(item.item_id, None)
+                    return
+                log.warning("429 Rate Limited — backing off %ds then retrying %s (attempt %d/%d)",
+                            retry_after, item.item_id, retries, self._MAX_SUBMIT_RETRIES)
                 if item.dataset_id:
                     self.state_store.mark_dataset_cooldown(
                         item.dataset_id,
                         retry_after_seconds=retry_after,
                         reason="429 Rate Limited",
                     )
-                # Sleep — pauses ALL submissions during backoff
                 if self._submit_stop.wait(timeout=retry_after):
-                    # Stop requested during backoff — persist for next startup
                     self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
                     return
-                # Re-enqueue to front of queue for immediate retry (no recursion)
                 self._submit_queue.put((item, record, report_result))
                 return
             if 400 <= status < 500:
