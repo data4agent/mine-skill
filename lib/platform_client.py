@@ -352,14 +352,19 @@ class PlatformClient:
                     msg = error_obj.get("message", "") if isinstance(error_obj, dict) else str(error_obj)
                     category = error_obj.get("category", "") if isinstance(error_obj, dict) else ""
                     status_map = {"not_found": 404, "authentication": 401, "permission": 403, "validation": 422, "state_conflict": 409, "precondition": 428, "rate_limit": 429, "internal": 500, "dependency": 503}
-                    raise PlatformApiError(code, msg, category, status_map.get(category, 500), body)
+                    # Store both parsed body (for _claim cooldown parsing) and
+                    # raw httpx response (for Retry-After header in retry loop).
+                    err = PlatformApiError(code, msg, category, status_map.get(category, 500), body)
+                    err.http_response = response  # type: ignore[attr-defined]
+                    raise err
                 return body
             except PlatformApiError as api_err:
                 last_error = api_err
                 status_code = api_err.status_code
                 if (status_code >= 500 or status_code == 429) and attempt < max_attempts:
-                    if status_code == 429 and api_err.response is not None:
-                        retry_after = getattr(api_err.response, "headers", {}).get("Retry-After")
+                    http_resp = getattr(api_err, "http_response", None)
+                    if status_code == 429 and http_resp is not None:
+                        retry_after = getattr(http_resp, "headers", {}).get("Retry-After")
                         if retry_after and str(retry_after).isdigit():
                             backoff = min(float(retry_after), 60.0)
                         else:

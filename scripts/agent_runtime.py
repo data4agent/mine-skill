@@ -890,11 +890,11 @@ class AgentWorker:
                     )
                 # Sleep — pauses ALL submissions during backoff
                 if self._submit_stop.wait(timeout=retry_after):
-                    # Stop requested during backoff — persist item for next startup
+                    # Stop requested during backoff — persist for next startup
                     self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
                     return
-                # Retry this item immediately after backoff
-                self._submit_single(item, record, report_result, log)
+                # Re-enqueue to front of queue for immediate retry (no recursion)
+                self._submit_queue.put((item, record, report_result))
                 return
             if 400 <= status < 500:
                 with self._submit_stats_lock:

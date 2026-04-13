@@ -128,9 +128,10 @@ class WorkerStateStore:
         self._write_json(self._dataset_cursors_path, cursors)
 
     def load_session(self) -> dict[str, Any]:
-        if self._session_cache is None:
-            self._session_cache = self._normalize_session(self._read_object(self._session_path))
-        return self._normalize_session(self._session_cache)
+        with self._file_lock:
+            if self._session_cache is None:
+                self._session_cache = self._normalize_session(self._read_object(self._session_path))
+            return self._normalize_session(self._session_cache)
 
     def load_background_session(self) -> dict[str, Any]:
         payload = self._read_object(self._background_session_path)
@@ -150,29 +151,41 @@ class WorkerStateStore:
         return True
 
     def save_session(self, partial: dict[str, Any], *, flush: bool = True) -> dict[str, Any]:
-        session = self.load_session()
-        for key in ("session_totals", "last_summary", "settlement", "reward_summary"):
-            value = partial.get(key)
-            if isinstance(value, dict):
-                merged = dict(session.get(key) or {})
-                merged.update(value)
-                session[key] = merged
-        for key, value in partial.items():
-            if key in {"session_totals", "last_summary", "settlement", "reward_summary"} and isinstance(value, dict):
-                continue
-            session[key] = value
-        self._session_cache = self._normalize_session(session)
-        self._session_dirty = True
-        if flush:
-            return self.flush_session()
-        return self.load_session()
+        with self._file_lock:
+            session = self._load_session_unlocked()
+            for key in ("session_totals", "last_summary", "settlement", "reward_summary"):
+                value = partial.get(key)
+                if isinstance(value, dict):
+                    merged = dict(session.get(key) or {})
+                    merged.update(value)
+                    session[key] = merged
+            for key, value in partial.items():
+                if key in {"session_totals", "last_summary", "settlement", "reward_summary"} and isinstance(value, dict):
+                    continue
+                session[key] = value
+            self._session_cache = self._normalize_session(session)
+            self._session_dirty = True
+            if flush:
+                return self._flush_session_unlocked()
+            return self._normalize_session(self._session_cache)
 
-    def flush_session(self) -> dict[str, Any]:
-        session = self.load_session()
+    def _load_session_unlocked(self) -> dict[str, Any]:
+        """Load session without acquiring _file_lock (caller must hold it)."""
+        if self._session_cache is None:
+            self._session_cache = self._normalize_session(self._read_object(self._session_path))
+        return self._normalize_session(self._session_cache)
+
+    def _flush_session_unlocked(self) -> dict[str, Any]:
+        """Flush session without acquiring _file_lock (caller must hold it)."""
+        session = self._load_session_unlocked()
         if self._session_dirty:
             self._write_json(self._session_path, session)
             self._session_dirty = False
         return session
+
+    def flush_session(self) -> dict[str, Any]:
+        with self._file_lock:
+            return self._flush_session_unlocked()
 
     def load_lock(self) -> dict[str, Any] | None:
         payload = self._read_object(self._lock_path)
@@ -302,14 +315,15 @@ class WorkerStateStore:
         reason: str,
         now: int | None = None,
     ) -> None:
-        current = int(time.time()) if now is None else now
-        payload = self._read_object(self._dataset_cooldowns_path)
-        payload[dataset_id] = {
-            "available_at": current + max(0, retry_after_seconds),
-            "reason": reason,
-            "updated_at": current,
-        }
-        self._write_json(self._dataset_cooldowns_path, payload)
+        with self._file_lock:
+            current = int(time.time()) if now is None else now
+            payload = self._read_object(self._dataset_cooldowns_path)
+            payload[dataset_id] = {
+                "available_at": current + max(0, retry_after_seconds),
+                "reason": reason,
+                "updated_at": current,
+            }
+            self._write_json(self._dataset_cooldowns_path, payload)
 
     def is_dataset_available(self, dataset_id: str, *, now: int | None = None) -> bool:
         current = int(time.time()) if now is None else now
