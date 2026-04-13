@@ -72,13 +72,27 @@ class WalletSigner:
         return self._signer_address
 
     def sign_typed_data(self, typed_data: dict[str, Any]) -> str:
-        resp = self._run(
-            "sign-typed-data",
-            "--token",
-            self._token,
-            "--data",
-            json.dumps(typed_data, separators=(",", ":")),
-        )
+        data_json = json.dumps(typed_data, separators=(",", ":"))
+        try:
+            resp = self._run(
+                "sign-typed-data",
+                "--token",
+                self._token,
+                "--data",
+                data_json,
+            )
+        except RuntimeError as exc:
+            if "expired" not in str(exc).lower() and "invalid" not in str(exc).lower():
+                raise
+            # Auto-renew expired token and retry once
+            self.renew_session()
+            resp = self._run(
+                "sign-typed-data",
+                "--token",
+                self._token,
+                "--data",
+                data_json,
+            )
         sig = resp.get("signature", "")
         if not sig:
             raise RuntimeError("awp-wallet sign-typed-data returned empty signature")
