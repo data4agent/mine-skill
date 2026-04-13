@@ -1292,13 +1292,14 @@ class AgentWorker:
             report_result = payload.get("report_result")
             if not isinstance(record, dict):
                 continue
-            # Enqueue first, then clear — if we crash between these two ops,
-            # the item survives in the persistent store for the next restart.
+            # Enqueue to submit thread. Don't clear from persistent store here
+            # — the submit thread calls clear_submit_pending on success/discard.
+            # Clearing here would race with the submit thread and could wipe
+            # a re-deferred entry.
             self._enqueue_submission(
                 item, record,
                 report_result if isinstance(report_result, dict) else None,
             )
-            self.state_store.clear_submit_pending(item.item_id)
             count += 1
         if count:
             summary.messages.append(f"re-enqueued {count} pending submission(s) to submit thread")

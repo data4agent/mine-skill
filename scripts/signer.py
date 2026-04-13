@@ -78,18 +78,21 @@ class WalletSigner:
         """Detect whether awp-wallet supports tokenless signing (v1.4.0+)."""
         if self._token_optional is not None:
             return self._token_optional
+        import re
         import subprocess
         try:
             result = subprocess.run(
                 [self._bin, "--version"],
                 capture_output=True, text=True, timeout=10,
             )
-            version = result.stdout.strip()
-            parts = version.split(".")
-            major = int(parts[0]) if parts else 0
-            minor = int(parts[1]) if len(parts) > 1 else 0
-            # v1.4.0+ and v0.17.* support optional token
-            self._token_optional = (major, minor) >= (1, 4) or (major == 0 and minor >= 17)
+            # Output may be "1.4.0", "v1.4.0", "awp-wallet 1.4.0", etc.
+            m = re.search(r"(\d+)\.(\d+)", result.stdout.strip())
+            if m:
+                major, minor = int(m.group(1)), int(m.group(2))
+                # v0.17.0+ and v1.4.0+ support optional token
+                self._token_optional = (major, minor) >= (1, 4) or (major == 0 and minor >= 17)
+            else:
+                self._token_optional = False
         except Exception:
             self._token_optional = False
         return self._token_optional
