@@ -244,10 +244,10 @@ class ValidatorInstance:
             except Exception as exc:
                 self.log.warning("Heartbeat failed: %s", exc)
 
-            # 每次心跳都尝试重新加入 ready pool。平台可能因 503/断连/
-            # 超时等原因驱逐 validator，但我们本地的 _in_ready_pool
-            # 标志不知道。代价很低（一个 POST），保证恢复后马上收到任务。
-            self._try_join_ready_pool()
+            # Re-join ready pool if not in it. After 503/disconnect the
+            # platform may evict the validator, so we retry periodically.
+            if not self._in_ready_pool:
+                self._try_join_ready_pool()
 
             self._stop_event.wait(timeout=HEARTBEAT_INTERVAL)
 
@@ -267,8 +267,8 @@ class ValidatorInstance:
             else:
                 self.log.warning("join_ready_pool failed: %s", err)
         except Exception as exc:
-            # httpx.HTTPStatusError 的 409 也静默处理
-            if "409" in str(exc):
+            status = getattr(getattr(exc, "response", None), "status_code", 0)
+            if status == 409:
                 self._in_ready_pool = True
             else:
                 self.log.warning("join_ready_pool failed: %s", exc)

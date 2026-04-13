@@ -771,6 +771,30 @@ class AgentWorker:
         self._submit_queue.put(None)  # sentinel to unblock get()
         if self._submit_thread is not None:
             self._submit_thread.join(timeout=15)
+        # If the thread didn't drain cleanly (e.g. timed out on join),
+        # persist any remaining queue items ourselves so nothing is lost.
+        self._persist_remaining_queue()
+
+    def _persist_remaining_queue(self) -> None:
+        """Persist any items remaining in the submit queue to disk.
+
+        Called after the submit thread stops (or fails to stop) so items
+        survive across restarts. Safe to call from any thread.
+        """
+        log = logging.getLogger("agent.submit")
+        count = 0
+        while True:
+            try:
+                entry = self._submit_queue.get_nowait()
+            except Exception:
+                break
+            if entry is None:
+                continue
+            item, record, report_result = entry
+            self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
+            count += 1
+        if count:
+            log.info("Persisted %d remaining queue item(s) to submit_pending", count)
 
     def _enqueue_submission(
         self,
@@ -779,6 +803,10 @@ class AgentWorker:
         report_result: dict[str, Any] | None,
     ) -> None:
         """Put a crawled item into the submit queue. Auto-starts the thread."""
+        # Don't revive a stopped submit thread — persist directly instead.
+        if self._submit_stop.is_set():
+            self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
+            return
         self._submit_queue.put((item, record, report_result))
         if self._submit_thread is None or not self._submit_thread.is_alive():
             self._start_submit_thread()
@@ -801,17 +829,8 @@ class AgentWorker:
                 break  # stop sentinel
             item, record, report_result = entry
             self._submit_single(item, record, report_result, log)
-        # Drain remaining items to submit_pending so they survive restart
-        while not self._submit_queue.empty():
-            try:
-                entry = self._submit_queue.get_nowait()
-            except Exception:
-                break
-            if entry is None:
-                continue
-            item, record, report_result = entry
-            self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
-            log.info("Persisted pending submission for %s (worker stopping)", item.item_id)
+        # Remaining queue items are persisted by _stop_submit_thread →
+        # _persist_remaining_queue after this thread exits.
         log.info("Submit thread stopped")
 
     def _submit_single(
@@ -839,12 +858,14 @@ class AgentWorker:
         except PlatformApiError as api_exc:
             if api_exc.code == "address_not_registered":
                 log.error("Wallet not registered — cannot submit")
+                self.state_store.clear_submit_pending(item.item_id)
                 return
             if api_exc.code in ("dedup_hash_conflict", "dedup_hash_in_cooldown",
                                 "url_pattern_mismatch", "duplicate",
                                 "submission_not_found", "dataset_not_found"):
                 with self._submit_stats_lock:
                     self._submit_stats["discarded"] += 1
+                self.state_store.clear_submit_pending(item.item_id)
                 log.info("Discarded %s: %s", item.item_id, api_exc.code)
                 return
             # Unknown API error — defer
@@ -875,6 +896,7 @@ class AgentWorker:
             if 400 <= status < 500:
                 with self._submit_stats_lock:
                     self._submit_stats["discarded"] += 1
+                self.state_store.clear_submit_pending(item.item_id)
                 log.info("Discarded %s: HTTP %d", item.item_id, status)
                 return
             # 5xx — defer
@@ -1251,7 +1273,11 @@ class AgentWorker:
             summary.messages.append(f"processed {item.item_id} in {result.output_dir}")
 
     def _drain_submit_pending(self, summary: WorkerIterationSummary) -> None:
-        """Re-enqueue persisted submit_pending items to the submit thread."""
+        """Re-enqueue persisted submit_pending items to the submit thread.
+
+        Items stay in the persistent store until the submit thread confirms
+        success or discards them — never clear before enqueue (data loss risk).
+        """
         pending = self.state_store.load_submit_pending()
         if not pending:
             return
@@ -1266,11 +1292,13 @@ class AgentWorker:
             report_result = payload.get("report_result")
             if not isinstance(record, dict):
                 continue
-            self.state_store.clear_submit_pending(item.item_id)
+            # Enqueue first, then clear — if we crash between these two ops,
+            # the item survives in the persistent store for the next restart.
             self._enqueue_submission(
                 item, record,
                 report_result if isinstance(report_result, dict) else None,
             )
+            self.state_store.clear_submit_pending(item.item_id)
             count += 1
         if count:
             summary.messages.append(f"re-enqueued {count} pending submission(s) to submit thread")
