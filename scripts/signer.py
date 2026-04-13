@@ -85,11 +85,11 @@ class WalletSigner:
                 capture_output=True, text=True, timeout=10,
             )
             version = result.stdout.strip()
-            # v1.4.0+ supports optional token
             parts = version.split(".")
             major = int(parts[0]) if parts else 0
             minor = int(parts[1]) if len(parts) > 1 else 0
-            self._token_optional = (major, minor) >= (1, 4)
+            # v1.4.0+ and v0.17.* support optional token
+            self._token_optional = (major, minor) >= (1, 4) or (major == 0 and minor >= 17)
         except Exception:
             self._token_optional = False
         return self._token_optional
