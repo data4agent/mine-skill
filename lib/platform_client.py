@@ -352,7 +352,7 @@ class PlatformClient:
                     msg = error_obj.get("message", "") if isinstance(error_obj, dict) else str(error_obj)
                     category = error_obj.get("category", "") if isinstance(error_obj, dict) else ""
                     status_map = {"not_found": 404, "authentication": 401, "permission": 403, "validation": 422, "state_conflict": 409, "precondition": 428, "rate_limit": 429, "internal": 500, "dependency": 503}
-                    raise PlatformApiError(code, msg, category, status_map.get(category, 500), response)
+                    raise PlatformApiError(code, msg, category, status_map.get(category, 500), body)
                 return body
             except PlatformApiError as api_err:
                 last_error = api_err

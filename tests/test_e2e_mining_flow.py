@@ -454,19 +454,17 @@ class TestRateLimitBackoffFlow:
             mock_export.side_effect = http_error
             worker._handle_result(item, result, summary)
 
-        # Wait for submit thread to process and hit the 429
+        # Wait for submit thread to hit the 429 and set cooldown
         for _ in range(30):
-            stats = worker.get_submit_stats()
-            if stats.get("deferred", 0) > 0:
+            cooldowns = worker.state_store.active_dataset_cooldowns()
+            if "ds-rate-limited" in cooldowns:
                 break
             _time.sleep(0.1)
 
-        # Submit thread should have deferred the item and marked cooldown
-        stats = worker.get_submit_stats()
-        assert stats["deferred"] >= 1
-
+        # Submit thread should have marked dataset cooldown
         cooldowns = worker.state_store.active_dataset_cooldowns()
         assert "ds-rate-limited" in cooldowns
 
+        # Stop the submit thread (it may be in backoff sleep — stop event wakes it)
         worker._stop_submit_thread()
         worker._stop_repeat_crawl_thread()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,10 @@ class WorkerStateStore:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        # Protects all file read-modify-write operations. The submit thread,
+        # repeat_crawl thread, and main iteration thread all access the same
+        # JSON files concurrently.
+        self._file_lock = threading.Lock()
         self._backlog_path = self.root / "backlog.json"
         self._auth_pending_path = self.root / "auth_pending.json"
         self._submit_pending_path = self.root / "submit_pending.json"
@@ -32,77 +37,83 @@ class WorkerStateStore:
         return [WorkItem.from_dict(item) for item in self._read_list(self._backlog_path)]
 
     def enqueue_backlog(self, items: list[WorkItem]) -> None:
-        payload = self._read_list(self._backlog_path)
-        merged = {str(item.get("item_id") or ""): item for item in payload if item.get("item_id")}
-        for item in items:
-            merged[item.item_id] = item.to_dict()
-        self._write_json(self._backlog_path, list(merged.values()))
+        with self._file_lock:
+            payload = self._read_list(self._backlog_path)
+            merged = {str(item.get("item_id") or ""): item for item in payload if item.get("item_id")}
+            for item in items:
+                merged[item.item_id] = item.to_dict()
+            self._write_json(self._backlog_path, list(merged.values()))
 
     def pop_backlog(self, limit: int) -> list[WorkItem]:
-        items = self.load_backlog()
-        popped = items[:limit]
-        remaining = items[limit:]
-        self._write_json(self._backlog_path, [item.to_dict() for item in remaining])
-        return popped
+        with self._file_lock:
+            items = self.load_backlog()
+            popped = items[:limit]
+            remaining = items[limit:]
+            self._write_json(self._backlog_path, [item.to_dict() for item in remaining])
+            return popped
 
     def load_auth_pending(self) -> list[dict[str, Any]]:
         return self._read_list(self._auth_pending_path)
 
     def upsert_auth_pending(self, item: WorkItem, error: dict[str, Any], *, retry_after_seconds: int) -> None:
-        payload = self._read_list(self._auth_pending_path)
-        merged = {str(entry.get("item_id") or ""): entry for entry in payload if entry.get("item_id")}
-        merged[item.item_id] = {
-            "item_id": item.item_id,
-            "item": item.to_dict(),
-            "error": dict(error),
-            "available_at": int(time.time()) + max(0, retry_after_seconds),
-            "updated_at": int(time.time()),
-        }
-        self._write_json(self._auth_pending_path, list(merged.values()))
+        with self._file_lock:
+            payload = self._read_list(self._auth_pending_path)
+            merged = {str(entry.get("item_id") or ""): entry for entry in payload if entry.get("item_id")}
+            merged[item.item_id] = {
+                "item_id": item.item_id,
+                "item": item.to_dict(),
+                "error": dict(error),
+                "available_at": int(time.time()) + max(0, retry_after_seconds),
+                "updated_at": int(time.time()),
+            }
+            self._write_json(self._auth_pending_path, list(merged.values()))
 
     def clear_auth_pending(self, item_id: str) -> None:
-        payload = [entry for entry in self._read_list(self._auth_pending_path) if str(entry.get("item_id")) != item_id]
-        self._write_json(self._auth_pending_path, payload)
+        with self._file_lock:
+            payload = [entry for entry in self._read_list(self._auth_pending_path) if str(entry.get("item_id")) != item_id]
+            self._write_json(self._auth_pending_path, payload)
 
     def pop_due_auth_pending(self, limit: int, *, now: int | None = None) -> list[WorkItem]:
-        current = int(time.time()) if now is None else now
-        payload = self._read_list(self._auth_pending_path)
-        due: list[dict[str, Any]] = []
-        remaining: list[dict[str, Any]] = []
-        for entry in payload:
-            available_at = int(entry.get("available_at") or 0)
-            in_flight = entry.get("in_flight")
-            in_flight_since = int(entry.get("in_flight_since") or 0)
-            # Recover stuck in-flight items after 10 minutes
-            if in_flight and in_flight_since and (current - in_flight_since) > 600:
-                entry["in_flight"] = False
-                in_flight = False
-            if available_at <= current and not in_flight and len(due) < limit:
-                # Mark as in-flight with timestamp — cleared by caller via clear_auth_pending
-                entry["in_flight"] = True
-                entry["in_flight_since"] = current
-                due.append(entry)
-            remaining.append(entry)
-        self._write_json(self._auth_pending_path, remaining)
-        return [WorkItem.from_dict(dict(entry.get("item") or {})) for entry in due]
+        with self._file_lock:
+            current = int(time.time()) if now is None else now
+            payload = self._read_list(self._auth_pending_path)
+            due: list[dict[str, Any]] = []
+            remaining: list[dict[str, Any]] = []
+            for entry in payload:
+                available_at = int(entry.get("available_at") or 0)
+                in_flight = entry.get("in_flight")
+                in_flight_since = int(entry.get("in_flight_since") or 0)
+                if in_flight and in_flight_since and (current - in_flight_since) > 600:
+                    entry["in_flight"] = False
+                    in_flight = False
+                if available_at <= current and not in_flight and len(due) < limit:
+                    entry["in_flight"] = True
+                    entry["in_flight_since"] = current
+                    due.append(entry)
+                remaining.append(entry)
+            self._write_json(self._auth_pending_path, remaining)
+            return [WorkItem.from_dict(dict(entry.get("item") or {})) for entry in due]
 
     def enqueue_submit_pending(self, item: WorkItem, payload: dict[str, Any]) -> None:
-        entries = self._read_list(self._submit_pending_path)
-        merged = {str(e.get("item_id") or ""): e for e in entries if e.get("item_id")}
-        merged[item.item_id] = {
-            "item_id": item.item_id,
-            "item": item.to_dict(),
-            "payload": payload,
-            "updated_at": int(time.time()),
-        }
-        self._write_json(self._submit_pending_path, list(merged.values()))
+        with self._file_lock:
+            entries = self._read_list(self._submit_pending_path)
+            merged = {str(e.get("item_id") or ""): e for e in entries if e.get("item_id")}
+            merged[item.item_id] = {
+                "item_id": item.item_id,
+                "item": item.to_dict(),
+                "payload": payload,
+                "updated_at": int(time.time()),
+            }
+            self._write_json(self._submit_pending_path, list(merged.values()))
 
     def load_submit_pending(self) -> list[dict[str, Any]]:
-        return self._read_list(self._submit_pending_path)
+        with self._file_lock:
+            return self._read_list(self._submit_pending_path)
 
     def clear_submit_pending(self, item_id: str) -> None:
-        payload = [entry for entry in self._read_list(self._submit_pending_path) if str(entry.get("item_id")) != item_id]
-        self._write_json(self._submit_pending_path, payload)
+        with self._file_lock:
+            payload = [entry for entry in self._read_list(self._submit_pending_path) if str(entry.get("item_id")) != item_id]
+            self._write_json(self._submit_pending_path, payload)
 
     def should_schedule_dataset(self, dataset_id: str, *, min_interval_seconds: int, now: int | None = None) -> bool:
         current = int(time.time()) if now is None else now

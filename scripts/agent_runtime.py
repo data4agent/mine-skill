@@ -632,6 +632,7 @@ class AgentWorker:
                 print(f"[worker] stopped after {iteration} iterations")
                 return f"stopped after {iteration} iterations"
 
+        self.stop()
         return f"completed {iteration} iterations"
 
     def run_worker(self, *, interval: int = 60, max_iterations: int = 1) -> dict[str, Any]:
@@ -696,6 +697,8 @@ class AgentWorker:
             log.info("iteration %d: sleeping %ds", iteration, wait)
             time.sleep(wait)
         log.info("worker finished: total_iterations=%d", iteration)
+        # Ensure daemon threads are stopped and pending items persisted.
+        self.stop()
         return {
             "completed_iterations": iteration,
             "iterations": iterations,
@@ -876,22 +879,22 @@ class AgentWorker:
         except httpx.HTTPStatusError as http_exc:
             status = http_exc.response.status_code
             if status == 429:
-                # Rate limited — backoff then continue
+                # Rate limited — backoff then retry this same item
                 retry_after = _extract_retry_after_seconds(http_exc, default=60)
-                log.warning("429 Rate Limited — backing off %ds before next submission", retry_after)
-                # Defer this item
-                self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
-                with self._submit_stats_lock:
-                    self._submit_stats["deferred"] += 1
-                # Cooldown the dataset
+                log.warning("429 Rate Limited — backing off %ds then retrying %s", retry_after, item.item_id)
                 if item.dataset_id:
                     self.state_store.mark_dataset_cooldown(
                         item.dataset_id,
                         retry_after_seconds=retry_after,
                         reason="429 Rate Limited",
                     )
-                # Sleep — this pauses ALL submissions, not just this dataset
-                self._submit_stop.wait(timeout=retry_after)
+                # Sleep — pauses ALL submissions during backoff
+                if self._submit_stop.wait(timeout=retry_after):
+                    # Stop requested during backoff — persist item for next startup
+                    self.state_store.enqueue_submit_pending(item, {"record": record, "report_result": report_result})
+                    return
+                # Retry this item immediately after backoff
+                self._submit_single(item, record, report_result, log)
                 return
             if 400 <= status < 500:
                 with self._submit_stats_lock:
@@ -1071,7 +1074,12 @@ class AgentWorker:
                 if allowed is not None:
                     merged[allowed.item_id] = allowed
         filtered = list(merged.values())[: self.config.max_parallel]
-        # Single-pass counting (repeat_crawl count already added above)
+        # Final counts from the filtered set only. Reset pre-filter counts
+        # to avoid double-counting (they were set during collection above).
+        repeat_claimed = summary.claimed_items  # preserve repeat_crawl count
+        summary.discovery_items = 0
+        summary.resumed_items = 0
+        summary.claimed_items = repeat_claimed
         for item in filtered:
             if item.source == "dataset_discovery":
                 summary.discovery_items += 1
