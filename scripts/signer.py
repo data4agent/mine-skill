@@ -1,11 +1,15 @@
-"""EIP-712 signing via awp-wallet CLI subprocess."""
+"""EIP-712 signing via awp-wallet CLI subprocess.
+
+Since awp-wallet v1.4.0, the --token parameter is optional — plaintext
+wallets don't need session auth. This signer no longer manages session
+tokens; it calls awp-wallet directly without --token.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import secrets
-import subprocess
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -14,8 +18,6 @@ from common import (
     DEFAULT_EIP712_CHAIN_ID,
     DEFAULT_EIP712_DOMAIN_NAME,
     DEFAULT_EIP712_VERIFYING_CONTRACT,
-    WALLET_SESSION_DURATION_SECONDS,
-    persist_wallet_session,
 )
 
 from eip712_primitives import (
@@ -28,10 +30,15 @@ from eip712_primitives import (
 
 
 class WalletSigner:
-    """Bridge to awp-wallet CLI for EIP-712 request signing."""
+    """Bridge to awp-wallet CLI for EIP-712 request signing.
+
+    Since awp-wallet v1.4.0, --token is optional. This signer calls
+    sign-typed-data without --token, eliminating session expiry issues.
+    """
 
     def __init__(self, wallet_bin: str = "awp-wallet", session_token: str = "") -> None:
         self._bin = wallet_bin
+        # session_token kept for backward compat but no longer used for signing
         self._token = session_token
         self._signer_address: str | None = None
 
@@ -40,6 +47,7 @@ class WalletSigner:
         return self._token
 
     def _run(self, *args: str) -> dict[str, Any]:
+        import subprocess
         cmd = [self._bin, *args]
         env = os.environ.copy()
         if not env.get("HOME") and env.get("USERPROFILE"):
@@ -47,12 +55,6 @@ class WalletSigner:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode != 0:
             stderr = result.stderr.strip()
-            if "Invalid or expired session token" in stderr:
-                raise RuntimeError(
-                    "The auto-managed wallet session expired or is invalid; rerun "
-                    "`awp-wallet unlock --duration 3600 --scope full` or rerun bootstrap before retrying. "
-                    f"awp-wallet stderr: {stderr}"
-                )
             raise RuntimeError(f"awp-wallet failed (exit {result.returncode}): {stderr}")
         return json.loads(result.stdout)
 
@@ -72,33 +74,21 @@ class WalletSigner:
         return self._signer_address
 
     def sign_typed_data(self, typed_data: dict[str, Any]) -> str:
-        data_json = json.dumps(typed_data, separators=(",", ":"))
-        try:
-            resp = self._run(
-                "sign-typed-data",
-                "--token",
-                self._token,
-                "--data",
-                data_json,
-            )
-        except RuntimeError as exc:
-            if "expired" not in str(exc).lower() and "invalid" not in str(exc).lower():
-                raise
-            # Auto-renew expired token and retry once
-            self.renew_session()
-            resp = self._run(
-                "sign-typed-data",
-                "--token",
-                self._token,
-                "--data",
-                data_json,
-            )
+        """Sign EIP-712 typed data. No --token needed since awp-wallet v1.4.0."""
+        resp = self._run(
+            "sign-typed-data",
+            "--data",
+            json.dumps(typed_data, separators=(",", ":")),
+        )
         sig = resp.get("signature", "")
         if not sig:
             raise RuntimeError("awp-wallet sign-typed-data returned empty signature")
         return sig
 
-    def renew_session(self, *, duration_seconds: int = WALLET_SESSION_DURATION_SECONDS) -> dict[str, int | str]:
+    def renew_session(self, *, duration_seconds: int = 86400) -> dict[str, int | str]:
+        """Renew wallet session. Kept for backward compat but no longer
+        required for signing since v1.4.0."""
+        from common import WALLET_SESSION_DURATION_SECONDS, persist_wallet_session
         issued_at = int(time.time())
         resp = self._run("unlock", "--duration", str(max(1, duration_seconds)), "--scope", "full")
         session_token = str(resp.get("sessionToken") or "").strip()
