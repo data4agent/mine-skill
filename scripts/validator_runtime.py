@@ -392,11 +392,7 @@ class ValidatorRuntime:
         """Called by AutoUpdater after a successful pull. Triggers graceful stop."""
         log.info("Auto-update applied; stopping validator for restart")
         self._record_action("auto_update_applied")
-        # Set _running=False to exit loops; supervisor will restart us.
-        with self._lock:
-            self._running = False
-        self._stop_event.set()
-        self._ws.close()
+        self.stop()
 
     def stop(self) -> dict[str, Any]:
         """Gracefully stop the validator runtime."""
@@ -732,12 +728,21 @@ class ValidatorRuntime:
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to the platform.
 
-        WS 连接维持在线状态时跳过 HTTP 心跳——只在 WS 断连时发。
-        但 ready pool 重试和 status 写入仍然每周期执行。
+        WS 连接时降频发 HTTP 心跳（每 5 个周期发一次）——仍需从
+        heartbeat 响应更新 _eligible 和 _min_task_interval。
+        完全跳过会导致这些状态永久过期。
         """
+        ws_skip_counter = 0
         while self._running:
-            if not self._ws.connected:
+            if self._ws.connected:
+                ws_skip_counter += 1
+                # WS 连接时每 5 个心跳周期发一次 HTTP 心跳刷新状态
+                if ws_skip_counter >= 5:
+                    self._send_heartbeat()
+                    ws_skip_counter = 0
+            else:
                 self._send_heartbeat()
+                ws_skip_counter = 0
             # Retry joining ready pool if not yet in it
             with self._lock:
                 in_pool = self._in_ready_pool

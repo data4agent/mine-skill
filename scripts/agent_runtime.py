@@ -220,6 +220,9 @@ class AgentWorker:
         self._submit_stop = threading.Event()
         # Auto-updater — polls upstream every 10min, pulls + requests stop on update
         self._auto_updater: Any = None
+        # WS heartbeat skip counter — send HTTP heartbeat every 5th iteration
+        # when WS is connected to keep session state (credit_score, epoch etc.)
+        self._ws_heartbeat_skip = 0
 
         self._submit_stats_lock = threading.Lock()
         self._submit_stats = {"submitted": 0, "deferred": 0, "discarded": 0}
@@ -744,28 +747,37 @@ class AgentWorker:
 
     def _send_heartbeats(self, summary: WorkerIterationSummary) -> None:
         self._ensure_wallet_session(summary)
-        # WS 连接着时不需要发 HTTP 心跳——WS 本身维持在线状态。
-        # 只在 WS 不可用时才走 HTTP 心跳。
+        # WS 连接时跳过 HTTP 心跳请求（WS 维持在线），但仍然执行
+        # ready pool 维护和 wallet refresh 等非心跳逻辑。
         ws_connected = (
             self.ws_source is not None
             and hasattr(self.ws_source, "ws_client")
             and getattr(self.ws_source.ws_client, "connected", False)
         )
+        # WS 连接时降频发心跳（每 5 轮发一次），保持 credit/epoch 等状态更新
+        send_hb = True
         if ws_connected:
+            self._ws_heartbeat_skip += 1
+            send_hb = self._ws_heartbeat_skip >= 5
+            if send_hb:
+                self._ws_heartbeat_skip = 0
+        else:
+            self._ws_heartbeat_skip = 0
+        if send_hb:
+            try:
+                unified = self.client.send_unified_heartbeat(client_name=self.config.client_name)
+                summary.unified_heartbeat_sent = True
+                self._update_session_from_heartbeat(unified)
+            except Exception as exc:
+                summary.errors.append(f"unified heartbeat failed: {exc}")
+            try:
+                self.client.send_miner_heartbeat(client_name=self.config.client_name)
+                summary.heartbeat_sent = True
+                self.state_store.save_session({"last_heartbeat_at": int(time.time())})
+            except Exception as exc:
+                summary.errors.append(f"miner heartbeat failed: {exc}")
+        else:
             summary.heartbeat_sent = True
-            return
-        try:
-            unified = self.client.send_unified_heartbeat(client_name=self.config.client_name)
-            summary.unified_heartbeat_sent = True
-            self._update_session_from_heartbeat(unified)
-        except Exception as exc:
-            summary.errors.append(f"unified heartbeat failed: {exc}")
-        try:
-            self.client.send_miner_heartbeat(client_name=self.config.client_name)
-            summary.heartbeat_sent = True
-            self.state_store.save_session({"last_heartbeat_at": int(time.time())})
-        except Exception as exc:
-            summary.errors.append(f"miner heartbeat failed: {exc}")
         # Join miner ready pool (with backoff on persistent failure)
         pool_failures = getattr(self, "_pool_join_failures", 0)
         if not getattr(self, "_miner_ready_pool_joined", False) and pool_failures < 10:
@@ -828,18 +840,20 @@ class AgentWorker:
     def _on_auto_update_applied(self) -> None:
         """Called by AutoUpdater after a successful fast-forward pull.
 
-        Marks mining_state=stopped so the next iteration exits cleanly.
-        The host supervisor's next agent-start call will launch with the
-        new code.
+        Calls stop() directly to shut down all threads (submit, repeat_crawl,
+        WS) cleanly — same approach as ValidatorRuntime. Merely setting
+        mining_state=stopped was insufficient because it only takes effect
+        at the next iteration boundary, leaving old code running.
         """
         log = logging.getLogger("agent.auto_update")
-        log.info("Marking mining_state=stopped for restart with new code")
+        log.info("Auto-update applied — stopping worker for restart")
         self.state_store.save_session({
             "mining_state": "stopped",
             "stop_reason": "auto_update",
             "last_control_action": "auto-update",
             "last_state_change_at": int(time.time()),
         })
+        self.stop()
 
     def _persist_remaining_queue(self) -> None:
         """Persist any items remaining in the submit queue to disk.
@@ -1671,10 +1685,10 @@ class AgentWorker:
         with self._submit_stats_lock:
             submitted_now = self._submit_stats.get("submitted", 0)
             discarded_now = self._submit_stats.get("discarded", 0)
-        submitted_delta = submitted_now - self._submit_stats_baseline["submitted"]
-        discarded_delta = discarded_now - self._submit_stats_baseline["discarded"]
-        self._submit_stats_baseline["submitted"] = submitted_now
-        self._submit_stats_baseline["discarded"] = discarded_now
+            submitted_delta = submitted_now - self._submit_stats_baseline["submitted"]
+            discarded_delta = discarded_now - self._submit_stats_baseline["discarded"]
+            self._submit_stats_baseline["submitted"] = submitted_now
+            self._submit_stats_baseline["discarded"] = discarded_now
         if submitted_delta > 0:
             summary.submitted_items += submitted_delta
         if discarded_delta > 0:

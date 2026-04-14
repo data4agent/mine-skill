@@ -231,9 +231,17 @@ class ValidatorInstance:
     # ── 心跳 ──
 
     def _heartbeat_loop(self) -> None:
+        ws_skip_counter = 0
         while not self._stop_event.is_set():
-            # WS 连接维持在线时跳过 HTTP 心跳
-            if not self._ws.connected:
+            send_hb = True
+            if self._ws.connected:
+                ws_skip_counter += 1
+                send_hb = ws_skip_counter >= 5
+                if send_hb:
+                    ws_skip_counter = 0
+            else:
+                ws_skip_counter = 0
+            if send_hb:
                 try:
                     with self._platform_lock:
                         hb = self._platform.send_unified_heartbeat(
@@ -246,7 +254,6 @@ class ValidatorInstance:
                 except Exception as exc:
                     self.log.warning("Heartbeat failed: %s", exc)
 
-            # Re-join ready pool if not in it
             if not self._in_ready_pool:
                 self._try_join_ready_pool()
 
