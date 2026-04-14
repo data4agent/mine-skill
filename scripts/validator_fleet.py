@@ -232,20 +232,21 @@ class ValidatorInstance:
 
     def _heartbeat_loop(self) -> None:
         while not self._stop_event.is_set():
-            try:
-                with self._platform_lock:
-                    hb = self._platform.send_unified_heartbeat(
-                        client_name=f"mine-fleet-v{self.index}",
-                    )
-                data = hb.get("data") if isinstance(hb.get("data"), dict) else hb
-                interval = data.get("min_task_interval_seconds")
-                if isinstance(interval, (int, float)) and interval > 0:
-                    self._min_task_interval = int(interval)
-            except Exception as exc:
-                self.log.warning("Heartbeat failed: %s", exc)
+            # WS 连接维持在线时跳过 HTTP 心跳
+            if not self._ws.connected:
+                try:
+                    with self._platform_lock:
+                        hb = self._platform.send_unified_heartbeat(
+                            client_name=f"mine-fleet-v{self.index}",
+                        )
+                    data = hb.get("data") if isinstance(hb.get("data"), dict) else hb
+                    interval = data.get("min_task_interval_seconds")
+                    if isinstance(interval, (int, float)) and interval > 0:
+                        self._min_task_interval = int(interval)
+                except Exception as exc:
+                    self.log.warning("Heartbeat failed: %s", exc)
 
-            # Re-join ready pool if not in it. After 503/disconnect the
-            # platform may evict the validator, so we retry periodically.
+            # Re-join ready pool if not in it
             if not self._in_ready_pool:
                 self._try_join_ready_pool()
 

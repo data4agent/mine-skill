@@ -744,6 +744,16 @@ class AgentWorker:
 
     def _send_heartbeats(self, summary: WorkerIterationSummary) -> None:
         self._ensure_wallet_session(summary)
+        # WS 连接着时不需要发 HTTP 心跳——WS 本身维持在线状态。
+        # 只在 WS 不可用时才走 HTTP 心跳。
+        ws_connected = (
+            self.ws_source is not None
+            and hasattr(self.ws_source, "ws_client")
+            and getattr(self.ws_source.ws_client, "connected", False)
+        )
+        if ws_connected:
+            summary.heartbeat_sent = True
+            return
         try:
             unified = self.client.send_unified_heartbeat(client_name=self.config.client_name)
             summary.unified_heartbeat_sent = True

@@ -616,17 +616,29 @@ class ValidatorRuntime:
                 log.warning("HTTP poll claim failed: %s", exc)
 
     def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
-        """Process a single evaluation task assignment."""
+        """Process a single evaluation task assignment.
+
+        WS flow (推荐):
+          1. WS 推送 evaluation_task 通知 (只有 task_id + assignment_id)
+          2. WS ack_eval → 服务端 claim (占位，不返回数据)
+          3. HTTP POST /evaluation-tasks/claim → 获取完整数据
+          4. 评估 + HTTP report
+
+        HTTP polling flow:
+          1. HTTP POST /evaluation-tasks/claim → 直接返回完整数据
+          2. 评估 + HTTP report
+        """
         assignment_id = msg.assignment_id
         task_id = msg.task_id
-        submission_id = msg.submission_id
 
-        # Step 1: ACK (HTTP claim is implicit ACK, WS needs explicit ACK)
+        # Step 1: ACK via WS (占位) or skip (HTTP claim already includes claim)
         if not via_http:
             self._ws.send_ack_eval(assignment_id)
         log.info("Task claimed: assignment=%s task=%s http=%s", assignment_id, task_id, via_http)
 
-        # Step 2: Extract evaluation data from claim payload or fetch via HTTP
+        # Step 2: Get full evaluation data via HTTP.
+        # WS 通知只携带 task_id + assignment_id，不包含完整数据。
+        # HTTP claim/get_evaluation_task 才返回 cleaned_data, structured_data 等。
         claim_data = msg.data
         dataset_id = str(claim_data.get("dataset_id") or "")
         cleaned_data = str(claim_data.get("cleaned_data") or "")
@@ -635,10 +647,11 @@ class ValidatorRuntime:
         schema_fields = claim_data.get("schema_fields") or []
         dataset_schema = claim_data.get("dataset_schema") or {}
 
-        # Fallback: fetch task details via HTTP if claim payload is incomplete
+        # WS 通知通常不含完整数据——必须通过 HTTP 获取
         if not cleaned_data or not structured_data:
             try:
-                task_detail = self._platform.get_evaluation_task(task_id)
+                with self._platform_lock:
+                    task_detail = self._platform.get_evaluation_task(task_id)
                 if isinstance(task_detail, dict):
                     cleaned_data = cleaned_data or str(task_detail.get("cleaned_data") or "")
                     repeat_cleaned_data = repeat_cleaned_data or str(task_detail.get("repeat_cleaned_data") or "")
@@ -647,8 +660,10 @@ class ValidatorRuntime:
                         schema_fields = task_detail.get("schema_fields") or []
                     if not dataset_schema:
                         dataset_schema = task_detail.get("dataset_schema") or {}
+                    if not dataset_id:
+                        dataset_id = str(task_detail.get("dataset_id") or "")
             except Exception as exc:
-                log.warning("Fallback fetch for task %s failed: %s", task_id, exc)
+                log.warning("HTTP fetch for task %s failed: %s", task_id, exc)
 
         if not isinstance(structured_data, dict):
             structured_data = {}
@@ -715,9 +730,14 @@ class ValidatorRuntime:
             self._stop_event.wait(timeout=wait_seconds)
 
     def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeats to the platform."""
+        """Send periodic heartbeats to the platform.
+
+        WS 连接维持在线状态时跳过 HTTP 心跳——只在 WS 断连时发。
+        但 ready pool 重试和 status 写入仍然每周期执行。
+        """
         while self._running:
-            self._send_heartbeat()
+            if not self._ws.connected:
+                self._send_heartbeat()
             # Retry joining ready pool if not yet in it
             with self._lock:
                 in_pool = self._in_ready_pool
