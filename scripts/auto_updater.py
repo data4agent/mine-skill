@@ -69,8 +69,12 @@ class AutoUpdater:
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
+        t = self._thread
+        # Don't join if called from the auto-updater thread itself (e.g.
+        # on_update_applied → stop() → _stop_auto_updater → here).
+        # Thread.join() on the current thread raises RuntimeError.
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=5)
 
     # ── Internal ──
 

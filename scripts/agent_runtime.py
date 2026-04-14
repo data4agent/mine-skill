@@ -835,7 +835,10 @@ class AgentWorker:
 
     def _stop_auto_updater(self) -> None:
         if self._auto_updater is not None:
-            self._auto_updater.stop()
+            try:
+                self._auto_updater.stop()
+            except Exception:
+                pass  # Safe to ignore — daemon thread dies with process
 
     def _on_auto_update_applied(self) -> None:
         """Called by AutoUpdater after a successful fast-forward pull.
