@@ -153,16 +153,14 @@ class ValidatorRuntime:
             "recent_actions": self._recent_actions[-30:],
             "min_task_interval": min_interval,
         }
+        tmp = str(self._status_file) + f".tmp-{os.getpid()}-{threading.get_ident()}"
         try:
             self._status_file.parent.mkdir(parents=True, exist_ok=True)
-            # 用 PID + thread ID 避免多线程 tmp 文件冲突
-            tmp = str(self._status_file) + f".tmp-{os.getpid()}-{threading.get_ident()}"
             with open(tmp, "w") as f:
                 json.dump(status, f, indent=2)
             os.replace(tmp, str(self._status_file))
         except OSError as e:
             log.warning("Failed to write status file: %s", e)
-            # 清理残留 tmp
             try:
                 os.unlink(tmp)
             except OSError:

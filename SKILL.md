@@ -351,7 +351,7 @@ The platform pushes these message types via `/api/mining/v1/ws`:
 
 | Type | When | What the validator does |
 |------|------|------------------------|
-| `evaluation_task` | New task assigned | ACK within 30s → fetch details → evaluate → report |
+| `evaluation_task` | New task assigned (task_id only) | HTTP POST /evaluation-tasks/claim → get assignment_id + data → evaluate → report |
 | `cooldown` | After task completion | Sleep `retry_after_seconds` before accepting next task |
 | `error` | Claim/ack/reject failure | Log the error; if `code=validator_cooldown`, sleep `retry_after_seconds` |
 
