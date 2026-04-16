@@ -612,30 +612,47 @@ class ValidatorRuntime:
                 log.warning("HTTP poll claim failed: %s", exc)
 
     def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
-        """Process a single evaluation task assignment.
+        """Process a single evaluation task.
 
-        WS flow (推荐):
-          1. WS 推送 evaluation_task 通知 (只有 task_id + assignment_id)
-          2. WS ack_eval → 服务端 claim (占位，不返回数据)
-          3. HTTP POST /evaluation-tasks/claim → 获取完整数据
-          4. 评估 + HTTP report
+        Per API spec, the complete flow is:
+          1. WS push: {"type":"evaluation_task","data":{"task_id":"evt_xxx"}} (task_id only)
+          2. WS ack: {"ack_eval":"evt_xxx"} (triggers claim on server side)
+          3. HTTP POST /evaluation-tasks/claim → returns assignment_id + full data
+          4. Evaluate
+          5. HTTP POST /evaluation-tasks/{id}/report with assignment_id
 
-        HTTP polling flow:
-          1. HTTP POST /evaluation-tasks/claim → 直接返回完整数据
-          2. 评估 + HTTP report
+        The assignment_id comes from the claim response, NOT from WS push.
+
+        HTTP polling flow (WS unavailable):
+          1. HTTP POST /evaluation-tasks/claim → directly returns full data
+          2. Evaluate + report
         """
-        assignment_id = msg.assignment_id
         task_id = msg.task_id
 
-        # Step 1: ACK via WS (占位) or skip (HTTP claim already includes claim)
+        # Step 1: ACK via WS (triggers claim on server)
         if not via_http:
-            self._ws.send_ack_eval(assignment_id)
-        log.info("Task claimed: assignment=%s task=%s http=%s", assignment_id, task_id, via_http)
+            self._ws.send_ack_eval(task_id)
 
-        # Step 2: Get full evaluation data via HTTP.
-        # WS 通知只携带 task_id + assignment_id，不包含完整数据。
-        # HTTP claim/get_evaluation_task 才返回 cleaned_data, structured_data 等。
-        claim_data = msg.data
+        # Step 2: HTTP POST /evaluation-tasks/claim to get assignment_id + full data.
+        # WS push only carries task_id. The claim response is the authoritative
+        # source for assignment_id (REQUIRED in report) and all evaluation data.
+        if via_http:
+            # HTTP polling path — msg.data already contains full claim response
+            claim_data = msg.data
+        else:
+            # WS path — must call HTTP claim to get assignment_id + data
+            try:
+                with self._platform_lock:
+                    claim_data = self._platform.claim_evaluation_task()
+                if not claim_data or claim_data.get("_cooldown"):
+                    log.warning("Claim returned no data for task %s", task_id)
+                    return
+            except Exception as exc:
+                log.warning("HTTP claim for task %s failed: %s", task_id, exc)
+                return
+
+        assignment_id = str(claim_data.get("assignment_id") or "")
+        task_id = str(claim_data.get("task_id") or task_id)
         dataset_id = str(claim_data.get("dataset_id") or "")
         cleaned_data = str(claim_data.get("cleaned_data") or "")
         repeat_cleaned_data = str(claim_data.get("repeat_cleaned_data") or "")
@@ -643,23 +660,11 @@ class ValidatorRuntime:
         schema_fields = claim_data.get("schema_fields") or []
         dataset_schema = claim_data.get("dataset_schema") or {}
 
-        # WS 通知通常不含完整数据——必须通过 HTTP 获取
-        if not cleaned_data or not structured_data:
-            try:
-                with self._platform_lock:
-                    task_detail = self._platform.get_evaluation_task(task_id)
-                if isinstance(task_detail, dict):
-                    cleaned_data = cleaned_data or str(task_detail.get("cleaned_data") or "")
-                    repeat_cleaned_data = repeat_cleaned_data or str(task_detail.get("repeat_cleaned_data") or "")
-                    structured_data = structured_data or task_detail.get("structured_data") or {}
-                    if not schema_fields:
-                        schema_fields = task_detail.get("schema_fields") or []
-                    if not dataset_schema:
-                        dataset_schema = task_detail.get("dataset_schema") or {}
-                    if not dataset_id:
-                        dataset_id = str(task_detail.get("dataset_id") or "")
-            except Exception as exc:
-                log.warning("HTTP fetch for task %s failed: %s", task_id, exc)
+        if not assignment_id:
+            log.warning("No assignment_id from claim for task %s — cannot report", task_id)
+            return
+
+        log.info("Task claimed: task=%s assignment=%s dataset=%s", task_id, assignment_id, dataset_id)
 
         if not isinstance(structured_data, dict):
             structured_data = {}
