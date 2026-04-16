@@ -60,11 +60,10 @@ class ValidatorWSClient:
       Server -> Client: {"type": "evaluation_task", "data": {"task_id": "evt_xxx"}}
       Server -> Client: {"type": "repeat_crawl_task", "data": {...full task...}}
       Server -> Client: {"type": "error", "code": "...", "message": "...", "retry_after_seconds": N}
-      Client -> Server: {"ack_eval": "<task_id>"}    (evaluation task ACK, triggers claim)
       Client -> Server: {"ack": "<task_id>"}          (repeat crawl task ACK, triggers claim)
       Client -> Server: {"reject": "<task_id>"}       (reject repeat crawl task)
 
-    Evaluation flow: WS notify (task_id only) → WS ack_eval → HTTP POST /evaluation-tasks/claim
+    Evaluation flow: WS notify (task_id only) → HTTP POST /evaluation-tasks/claim
     (gets assignment_id + full data) → evaluate → HTTP POST /evaluation-tasks/{id}/report
 
     Reconnection:

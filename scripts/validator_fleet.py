@@ -354,15 +354,6 @@ class ValidatorInstance:
         task_id = msg.task_id
         self._inc_stat("tasks_received")
 
-        # WS ACK (triggers claim on server)
-        if not via_http:
-            try:
-                self._ws.send_ack_eval(task_id)
-            except Exception as exc:
-                self.log.warning("ACK failed: %s", exc)
-                self._inc_stat("errors")
-                return
-
         # HTTP POST /evaluation-tasks/claim → get assignment_id + full data
         if via_http:
             claim_data = msg.data
