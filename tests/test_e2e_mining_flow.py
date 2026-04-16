@@ -394,7 +394,7 @@ class TestErrorRecoveryFlow:
         mock_client.report_repeat_crawl_task_result.assert_called_once()
         call_args = mock_client.report_repeat_crawl_task_result.call_args
         assert call_args[0][1]["failed"] is True
-        assert call_args[0][1]["fail_reason"] == "crawl_failed"
+        assert call_args[0][1]["cleaned_data"] == ""
         worker._stop_repeat_crawl_thread()
 
 
