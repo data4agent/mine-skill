@@ -602,6 +602,12 @@ class ValidatorRuntime:
                 log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
                 self._stop_event.wait(timeout=retry_after)
                 return
+            # Handle 428 PoW required — solve and retry claim
+            if isinstance(claim_data, dict) and claim_data.get("_pow_required"):
+                if self._handle_pow_challenge(claim_data):
+                    # PoW passed — retry claim immediately
+                    self._poll_evaluation_task_http()
+                return
             msg = WSMessage({"type": "evaluation_task", "data": claim_data})
             self._inc_stat("tasks_received")
             try:
@@ -645,9 +651,24 @@ class ValidatorRuntime:
             try:
                 with self._platform_lock:
                     claim_data = self._platform.claim_evaluation_task()
-                if not claim_data or claim_data.get("_cooldown"):
+                if not claim_data:
                     log.warning("Claim returned no data for task %s", task_id)
                     return
+                if claim_data.get("_cooldown"):
+                    retry_after = int(claim_data.get("retry_after_seconds", 30))
+                    log.info("Validator cooldown on WS claim: sleeping %ds", retry_after)
+                    self._stop_event.wait(timeout=retry_after)
+                    return
+                # 428 PoW required — solve and retry claim
+                if claim_data.get("_pow_required"):
+                    if self._handle_pow_challenge(claim_data):
+                        # PoW passed — retry claim immediately
+                        with self._platform_lock:
+                            claim_data = self._platform.claim_evaluation_task()
+                        if not claim_data or claim_data.get("_cooldown") or claim_data.get("_pow_required"):
+                            return
+                    else:
+                        return
             except Exception as exc:
                 log.warning("HTTP claim for task %s failed: %s", task_id, exc)
                 return
@@ -730,6 +751,81 @@ class ValidatorRuntime:
             log.info("Waiting %ds (min_task_interval) before next task", wait_seconds)
             self._set_phase("cooldown", f"{wait_seconds}s (min_task_interval)")
             self._stop_event.wait(timeout=wait_seconds)
+
+    # ------------------------------------------------------------------
+    # PoW (Proof of Work) challenge handling
+    # ------------------------------------------------------------------
+
+    def _handle_pow_challenge(self, pow_data: dict[str, Any]) -> bool:
+        """Handle a 428 PoW challenge. Returns True if passed.
+
+        Per doc: after passing, caller should retry claim immediately.
+        After failing, next claim returns 409 cooldown (handled upstream).
+        """
+        challenge = pow_data.get("challenge") or {}
+        challenge_id = str(challenge.get("id") or pow_data.get("challenge_id") or "")
+        prompt = str(challenge.get("prompt") or "")
+
+        if not challenge_id or not prompt:
+            log.warning("PoW challenge missing id or prompt: %s", pow_data)
+            return False
+
+        log.info("PoW challenge: id=%s type=%s", challenge_id, challenge.get("question_type"))
+        self._record_action("pow_challenge", {"challenge_id": challenge_id})
+        self._set_phase("solving_pow", f"challenge {challenge_id}")
+
+        answer = self._solve_logic_puzzle(prompt)
+        if not answer:
+            log.warning("Failed to solve PoW puzzle")
+            self._record_action("pow_failed", {"challenge_id": challenge_id, "reason": "no_answer"})
+            self._set_phase("waiting_for_task")
+            return False
+
+        log.info("Submitting PoW answer: %s", answer)
+        try:
+            with self._platform_lock:
+                result = self._platform.answer_pow_challenge(challenge_id, answer)
+            data = result.get("data") if isinstance(result, dict) else {}
+            passed = data.get("passed", False) if isinstance(data, dict) else False
+
+            if passed:
+                log.info("PoW challenge passed!")
+                self._record_action("pow_passed", {"challenge_id": challenge_id})
+                self._set_phase("waiting_for_task")
+                return True
+            else:
+                log.warning("PoW challenge failed (wrong answer)")
+                self._record_action("pow_failed", {"challenge_id": challenge_id, "reason": "wrong_answer"})
+                self._inc_stat("errors")
+                self._set_phase("waiting_for_task")
+                return False
+        except Exception as exc:
+            log.error("PoW answer submit failed: %s", exc)
+            self._record_action("pow_error", {"challenge_id": challenge_id, "error": str(exc)})
+            self._inc_stat("errors")
+            self._set_phase("waiting_for_task")
+            return False
+
+    def _solve_logic_puzzle(self, prompt: str) -> str:
+        """Use the evaluation engine's LLM to solve a logic grid puzzle.
+
+        Returns ONLY the answer value (e.g. "bird", "coffee", "red").
+        """
+        try:
+            system = (
+                "You are solving a logic puzzle. Read the clues carefully, "
+                "use elimination to deduce the answer. "
+                "Respond with ONLY the answer value (a single word), nothing else. "
+                "No explanation, no punctuation."
+            )
+            full_prompt = system + "\n\n" + prompt
+            answer = self._engine.llm_call(full_prompt)
+            if answer:
+                answer = answer.strip().split("\n")[0].strip().strip(".").strip('"').strip("'").lower()
+            return answer or ""
+        except Exception as exc:
+            log.error("LLM solve failed: %s", exc)
+            return ""
 
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to the platform.

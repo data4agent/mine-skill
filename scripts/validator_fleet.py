@@ -342,6 +342,10 @@ class ValidatorInstance:
             if isinstance(claim, dict) and claim.get("_cooldown"):
                 self._stop_event.wait(timeout=int(claim.get("retry_after_seconds", 30)))
                 return
+            if isinstance(claim, dict) and claim.get("_pow_required"):
+                self.log.warning("PoW challenge received — fleet uses random scoring, cannot solve. Waiting.")
+                self._stop_event.wait(timeout=60)
+                return
             msg = WSMessage({"type": "evaluation_task", "data": claim})
             self._handle_task(msg, via_http=True)
         except Exception as exc:
@@ -361,7 +365,7 @@ class ValidatorInstance:
             try:
                 with self._platform_lock:
                     claim_data = self._platform.claim_evaluation_task()
-                if not claim_data or claim_data.get("_cooldown"):
+                if not claim_data or claim_data.get("_cooldown") or claim_data.get("_pow_required"):
                     return
             except Exception as exc:
                 self.log.warning("Claim failed: %s", exc)
