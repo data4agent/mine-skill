@@ -242,12 +242,8 @@ class PlatformClient:
             if api_err.status_code == 409:
                 body = api_err.response if isinstance(api_err.response, dict) else {}
                 return self._parse_cooldown(body)
-            if api_err.status_code == 428:
-                body = api_err.response if isinstance(api_err.response, dict) else {}
-                data = body.get("data") if isinstance(body, dict) else {}
-                if isinstance(data, dict) and data.get("pow_required"):
-                    return {"_pow_required": True, **data}
-                return None
+            # 428 with success:true never reaches PlatformApiError (raise_for_status
+            # fires first → httpx.HTTPStatusError). Handled below.
             raise
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:

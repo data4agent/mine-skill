@@ -591,36 +591,39 @@ class ValidatorRuntime:
             paused = self._paused
         if not eligible or paused:
             return
-        try:
-            with self._platform_lock:
-                claim_data = self._platform.claim_evaluation_task()
-            if not claim_data:
-                return
-            # Handle 409 validator_cooldown sentinel from _claim
-            if isinstance(claim_data, dict) and claim_data.get("_cooldown"):
-                retry_after = int(claim_data.get("retry_after_seconds", 30))
-                log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
-                self._stop_event.wait(timeout=retry_after)
-                return
-            # Handle 428 PoW required — solve and retry claim
-            if isinstance(claim_data, dict) and claim_data.get("_pow_required"):
-                if self._handle_pow_challenge(claim_data):
-                    # PoW passed — retry claim immediately
-                    self._poll_evaluation_task_http()
-                return
-            msg = WSMessage({"type": "evaluation_task", "data": claim_data})
-            self._inc_stat("tasks_received")
+        # Iterative claim loop with PoW retry (max 3 attempts to avoid infinite loop)
+        for _attempt in range(3):
             try:
-                self._handle_evaluation_task(msg, via_http=True)
-            except Exception as eval_exc:
-                self._inc_stat("errors")
-                self._inc_stat("consecutive_failures")
-                log.error("HTTP fallback eval failed: %s", eval_exc)
-                self._write_status()
-        except Exception as exc:
-            error_str = str(exc)
-            if "404" not in error_str and "409" not in error_str:
-                log.warning("HTTP poll claim failed: %s", exc)
+                with self._platform_lock:
+                    claim_data = self._platform.claim_evaluation_task()
+                if not claim_data:
+                    return
+                if isinstance(claim_data, dict) and claim_data.get("_cooldown"):
+                    retry_after = int(claim_data.get("retry_after_seconds", 30))
+                    log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
+                    self._stop_event.wait(timeout=retry_after)
+                    return
+                if isinstance(claim_data, dict) and claim_data.get("_pow_required"):
+                    if self._handle_pow_challenge(claim_data):
+                        log.info("PoW passed — retrying claim")
+                        continue  # retry claim in next loop iteration
+                    return  # PoW failed — next claim will return 409 cooldown
+                # Normal claim success
+                msg = WSMessage({"type": "evaluation_task", "data": claim_data})
+                self._inc_stat("tasks_received")
+                try:
+                    self._handle_evaluation_task(msg, via_http=True)
+                except Exception as eval_exc:
+                    self._inc_stat("errors")
+                    self._inc_stat("consecutive_failures")
+                    log.error("HTTP fallback eval failed: %s", eval_exc)
+                    self._write_status()
+                return
+            except Exception as exc:
+                error_str = str(exc)
+                if "404" not in error_str and "409" not in error_str:
+                    log.warning("HTTP poll claim failed: %s", exc)
+                return
 
     def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
         """Process a single evaluation task.
@@ -662,10 +665,19 @@ class ValidatorRuntime:
                 # 428 PoW required — solve and retry claim
                 if claim_data.get("_pow_required"):
                     if self._handle_pow_challenge(claim_data):
-                        # PoW passed — retry claim immediately
+                        log.info("PoW passed — retrying claim for task %s", task_id)
                         with self._platform_lock:
                             claim_data = self._platform.claim_evaluation_task()
-                        if not claim_data or claim_data.get("_cooldown") or claim_data.get("_pow_required"):
+                        if not claim_data:
+                            log.info("No task available after PoW pass")
+                            return
+                        if claim_data.get("_cooldown"):
+                            retry = int(claim_data.get("retry_after_seconds", 30))
+                            log.info("Cooldown after PoW retry: %ds", retry)
+                            self._stop_event.wait(timeout=retry)
+                            return
+                        if claim_data.get("_pow_required"):
+                            log.warning("Second PoW challenge on retry — dropping")
                             return
                     else:
                         return
@@ -807,22 +819,50 @@ class ValidatorRuntime:
             return False
 
     def _solve_logic_puzzle(self, prompt: str) -> str:
-        """Use the evaluation engine's LLM to solve a logic grid puzzle.
+        """Use the LLM to solve a logic grid puzzle.
+
+        Calls enrich_with_llm directly (not via self._engine.llm_call) so the
+        system_prompt is passed as a separate role — important for models that
+        distinguish system vs user turns.
 
         Returns ONLY the answer value (e.g. "bird", "coffee", "red").
         """
+        import asyncio
         try:
-            system = (
+            from crawler.enrich.generative.llm_enrich import enrich_with_llm
+
+            system_prompt = (
                 "You are solving a logic puzzle. Read the clues carefully, "
                 "use elimination to deduce the answer. "
                 "Respond with ONLY the answer value (a single word), nothing else. "
                 "No explanation, no punctuation."
             )
-            full_prompt = system + "\n\n" + prompt
-            answer = self._engine.llm_call(full_prompt)
-            if answer:
-                answer = answer.strip().split("\n")[0].strip().strip(".").strip('"').strip("'").lower()
-            return answer or ""
+
+            async def _run() -> str:
+                result = await enrich_with_llm(
+                    prompt,
+                    model_config=getattr(self._engine, "model_config", None),
+                    system_prompt=system_prompt,
+                    timeout=60.0,
+                )
+                if not result.success:
+                    raise RuntimeError(result.error or "LLM call failed")
+                return result.content
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        raw = pool.submit(lambda: asyncio.run(_run())).result()
+                else:
+                    raw = asyncio.run(_run())
+            except RuntimeError:
+                raw = asyncio.run(_run())
+
+            if raw:
+                raw = raw.strip().split("\n")[0].strip().strip(".").strip('"').strip("'").lower()
+            return raw or ""
         except Exception as exc:
             log.error("LLM solve failed: %s", exc)
             return ""
