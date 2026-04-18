@@ -1454,18 +1454,46 @@ class AgentWorker:
         except Exception as exc:
             log.error("report repeat_crawl failure failed: %s", exc)
 
+    # Discovery items 最多重试 3 次后丢弃——防止坏 URL（502/timeout）
+    # 反复进 backlog 占住 max_parallel 槽位，挤掉新 discovery。
+    _MAX_ITEM_RETRIES = 3
+
     def _handle_item_failure(
         self,
         item: WorkItem,
         fail_reason: str,
         summary: WorkerIterationSummary,
     ) -> None:
-        """Route a failed item: repeat_crawl → report to platform, others → re-queue."""
+        """Route a failed item: repeat_crawl → report to platform, others → re-queue with retry limit."""
         if item.claim_task_id and item.claim_task_type == "repeat_crawl":
             self._report_repeat_crawl_failure(item, fail_reason)
             summary.messages.append(f"repeat_crawl {item.claim_task_id} failed ({fail_reason})")
-        else:
-            self.state_store.enqueue_backlog([_clone_item(item, resume=True)])
+            return
+        # Track retry count in metadata to prevent infinite re-queue loops
+        retries = int(item.metadata.get("_retries", 0)) + 1
+        if retries > self._MAX_ITEM_RETRIES:
+            summary.messages.append(
+                f"discarded {item.item_id} after {retries - 1} retries ({fail_reason})"
+            )
+            return
+        cloned = _clone_item(item, resume=True)
+        # WorkItem is frozen — rebuild with updated metadata
+        updated = WorkItem(
+            item_id=cloned.item_id,
+            source=cloned.source,
+            url=cloned.url,
+            dataset_id=cloned.dataset_id,
+            platform=cloned.platform,
+            resource_type=cloned.resource_type,
+            record=cloned.record,
+            crawler_command=cloned.crawler_command,
+            claim_task_id=cloned.claim_task_id,
+            claim_task_type=cloned.claim_task_type,
+            metadata={**cloned.metadata, "_retries": retries},
+            resume=cloned.resume,
+            output_dir=cloned.output_dir,
+        )
+        self.state_store.enqueue_backlog([updated])
 
     def _handle_preflight_common(self, item: WorkItem, writer: RunArtifactWriter | None, *, command: str) -> str | None:
         """Pre-submission check: URL occupancy via public GET endpoint (no auth needed).
