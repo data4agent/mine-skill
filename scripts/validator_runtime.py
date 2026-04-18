@@ -624,6 +624,7 @@ class ValidatorRuntime:
                 if "404" not in error_str and "409" not in error_str:
                     log.warning("HTTP poll claim failed: %s", exc)
                 return
+        log.warning("HTTP poll: PoW retry limit reached (3 attempts) without claiming a task")
 
     def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
         """Process a single evaluation task.
@@ -849,12 +850,11 @@ class ValidatorRuntime:
                     raise RuntimeError(result.error or "LLM call failed")
                 return result.content
 
+            from evaluation_engine import _LLM_EXECUTOR
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        raw = pool.submit(lambda: asyncio.run(_run())).result()
+                    raw = _LLM_EXECUTOR.submit(lambda: asyncio.run(_run())).result()
                 else:
                     raw = asyncio.run(_run())
             except RuntimeError:

@@ -365,7 +365,16 @@ class ValidatorInstance:
             try:
                 with self._platform_lock:
                     claim_data = self._platform.claim_evaluation_task()
-                if not claim_data or claim_data.get("_cooldown") or claim_data.get("_pow_required"):
+                if not claim_data:
+                    return
+                if claim_data.get("_cooldown"):
+                    retry = int(claim_data.get("retry_after_seconds", 30))
+                    self.log.info("Cooldown on WS claim: %ds", retry)
+                    self._stop_event.wait(timeout=retry)
+                    return
+                if claim_data.get("_pow_required"):
+                    self.log.warning("PoW challenge on WS claim — fleet cannot solve, waiting 60s")
+                    self._stop_event.wait(timeout=60)
                     return
             except Exception as exc:
                 self.log.warning("Claim failed: %s", exc)
