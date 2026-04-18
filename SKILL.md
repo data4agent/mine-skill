@@ -11,7 +11,7 @@ description: >
   online", "start earning", "check my submissions", "why is my miner stuck",
   "how much have I earned", "validator not working". NOT for AWP transfers,
   RootNet staking, smart contracts, or general server ops.
-version: 0.15.2
+version: 0.17.0
 bootstrap: ./scripts/bootstrap.sh
 windows_bootstrap: ./scripts/bootstrap.cmd
 smoke_test: ./scripts/smoke_test.py
@@ -356,8 +356,12 @@ The platform pushes these message types via `/api/mining/v1/ws`:
 | `error` | Claim/ack/reject failure | Log the error; if `code=validator_cooldown`, sleep `retry_after_seconds` |
 
 If the validator falls back to HTTP polling (`POST /api/mining/v1/evaluation-tasks/claim`):
+- 200 = task claimed successfully with assignment_id + full data
 - 404 = no task available (normal)
 - 409 `validator_cooldown` = cooldown active; response includes `retry_after_seconds`
+- 428 `pow_required` = PoW challenge; validator must solve a logic puzzle via LLM
+  and POST answer to `/api/mining/v1/pow-challenges/{id}/answer`. After passing,
+  retry claim immediately. After failing, next claim returns 409 cooldown.
 
 ### Start Validating — exact command sequence
 

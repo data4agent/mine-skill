@@ -591,30 +591,40 @@ class ValidatorRuntime:
             paused = self._paused
         if not eligible or paused:
             return
-        try:
-            with self._platform_lock:
-                claim_data = self._platform.claim_evaluation_task()
-            if not claim_data:
-                return
-            # Handle 409 validator_cooldown sentinel from _claim
-            if isinstance(claim_data, dict) and claim_data.get("_cooldown"):
-                retry_after = int(claim_data.get("retry_after_seconds", 30))
-                log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
-                self._stop_event.wait(timeout=retry_after)
-                return
-            msg = WSMessage({"type": "evaluation_task", "data": claim_data})
-            self._inc_stat("tasks_received")
+        # Iterative claim loop with PoW retry (max 3 attempts to avoid infinite loop)
+        for _attempt in range(3):
             try:
-                self._handle_evaluation_task(msg, via_http=True)
-            except Exception as eval_exc:
-                self._inc_stat("errors")
-                self._inc_stat("consecutive_failures")
-                log.error("HTTP fallback eval failed: %s", eval_exc)
-                self._write_status()
-        except Exception as exc:
-            error_str = str(exc)
-            if "404" not in error_str and "409" not in error_str:
-                log.warning("HTTP poll claim failed: %s", exc)
+                with self._platform_lock:
+                    claim_data = self._platform.claim_evaluation_task()
+                if not claim_data:
+                    return
+                if isinstance(claim_data, dict) and claim_data.get("_cooldown"):
+                    retry_after = int(claim_data.get("retry_after_seconds", 30))
+                    log.info("Validator cooldown via HTTP: sleeping %ds", retry_after)
+                    self._stop_event.wait(timeout=retry_after)
+                    return
+                if isinstance(claim_data, dict) and claim_data.get("_pow_required"):
+                    if self._handle_pow_challenge(claim_data):
+                        log.info("PoW passed — retrying claim")
+                        continue  # retry claim in next loop iteration
+                    return  # PoW failed — next claim will return 409 cooldown
+                # Normal claim success
+                msg = WSMessage({"type": "evaluation_task", "data": claim_data})
+                self._inc_stat("tasks_received")
+                try:
+                    self._handle_evaluation_task(msg, via_http=True)
+                except Exception as eval_exc:
+                    self._inc_stat("errors")
+                    self._inc_stat("consecutive_failures")
+                    log.error("HTTP fallback eval failed: %s", eval_exc)
+                    self._write_status()
+                return
+            except Exception as exc:
+                error_str = str(exc)
+                if "404" not in error_str and "409" not in error_str:
+                    log.warning("HTTP poll claim failed: %s", exc)
+                return
+        log.warning("HTTP poll: PoW retry limit reached (3 attempts) without claiming a task")
 
     def _handle_evaluation_task(self, msg: WSMessage, *, via_http: bool = False) -> None:
         """Process a single evaluation task.
@@ -645,9 +655,33 @@ class ValidatorRuntime:
             try:
                 with self._platform_lock:
                     claim_data = self._platform.claim_evaluation_task()
-                if not claim_data or claim_data.get("_cooldown"):
+                if not claim_data:
                     log.warning("Claim returned no data for task %s", task_id)
                     return
+                if claim_data.get("_cooldown"):
+                    retry_after = int(claim_data.get("retry_after_seconds", 30))
+                    log.info("Validator cooldown on WS claim: sleeping %ds", retry_after)
+                    self._stop_event.wait(timeout=retry_after)
+                    return
+                # 428 PoW required — solve and retry claim
+                if claim_data.get("_pow_required"):
+                    if self._handle_pow_challenge(claim_data):
+                        log.info("PoW passed — retrying claim for task %s", task_id)
+                        with self._platform_lock:
+                            claim_data = self._platform.claim_evaluation_task()
+                        if not claim_data:
+                            log.info("No task available after PoW pass")
+                            return
+                        if claim_data.get("_cooldown"):
+                            retry = int(claim_data.get("retry_after_seconds", 30))
+                            log.info("Cooldown after PoW retry: %ds", retry)
+                            self._stop_event.wait(timeout=retry)
+                            return
+                        if claim_data.get("_pow_required"):
+                            log.warning("Second PoW challenge on retry — dropping")
+                            return
+                    else:
+                        return
             except Exception as exc:
                 log.warning("HTTP claim for task %s failed: %s", task_id, exc)
                 return
@@ -730,6 +764,108 @@ class ValidatorRuntime:
             log.info("Waiting %ds (min_task_interval) before next task", wait_seconds)
             self._set_phase("cooldown", f"{wait_seconds}s (min_task_interval)")
             self._stop_event.wait(timeout=wait_seconds)
+
+    # ------------------------------------------------------------------
+    # PoW (Proof of Work) challenge handling
+    # ------------------------------------------------------------------
+
+    def _handle_pow_challenge(self, pow_data: dict[str, Any]) -> bool:
+        """Handle a 428 PoW challenge. Returns True if passed.
+
+        Per doc: after passing, caller should retry claim immediately.
+        After failing, next claim returns 409 cooldown (handled upstream).
+        """
+        challenge = pow_data.get("challenge") or {}
+        challenge_id = str(challenge.get("id") or pow_data.get("challenge_id") or "")
+        prompt = str(challenge.get("prompt") or "")
+
+        if not challenge_id or not prompt:
+            log.warning("PoW challenge missing id or prompt: %s", pow_data)
+            return False
+
+        log.info("PoW challenge: id=%s type=%s", challenge_id, challenge.get("question_type"))
+        self._record_action("pow_challenge", {"challenge_id": challenge_id})
+        self._set_phase("solving_pow", f"challenge {challenge_id}")
+
+        answer = self._solve_logic_puzzle(prompt)
+        if not answer:
+            log.warning("Failed to solve PoW puzzle")
+            self._record_action("pow_failed", {"challenge_id": challenge_id, "reason": "no_answer"})
+            self._set_phase("waiting_for_task")
+            return False
+
+        log.info("Submitting PoW answer: %s", answer)
+        try:
+            with self._platform_lock:
+                result = self._platform.answer_pow_challenge(challenge_id, answer)
+            data = result.get("data") if isinstance(result, dict) else {}
+            passed = data.get("passed", False) if isinstance(data, dict) else False
+
+            if passed:
+                log.info("PoW challenge passed!")
+                self._record_action("pow_passed", {"challenge_id": challenge_id})
+                self._set_phase("waiting_for_task")
+                return True
+            else:
+                log.warning("PoW challenge failed (wrong answer)")
+                self._record_action("pow_failed", {"challenge_id": challenge_id, "reason": "wrong_answer"})
+                self._inc_stat("errors")
+                self._set_phase("waiting_for_task")
+                return False
+        except Exception as exc:
+            log.error("PoW answer submit failed: %s", exc)
+            self._record_action("pow_error", {"challenge_id": challenge_id, "error": str(exc)})
+            self._inc_stat("errors")
+            self._set_phase("waiting_for_task")
+            return False
+
+    def _solve_logic_puzzle(self, prompt: str) -> str:
+        """Use the LLM to solve a logic grid puzzle.
+
+        Calls enrich_with_llm directly (not via self._engine.llm_call) so the
+        system_prompt is passed as a separate role — important for models that
+        distinguish system vs user turns.
+
+        Returns ONLY the answer value (e.g. "bird", "coffee", "red").
+        """
+        import asyncio
+        try:
+            from crawler.enrich.generative.llm_enrich import enrich_with_llm
+
+            system_prompt = (
+                "You are solving a logic puzzle. Read the clues carefully, "
+                "use elimination to deduce the answer. "
+                "Respond with ONLY the answer value (a single word), nothing else. "
+                "No explanation, no punctuation."
+            )
+
+            async def _run() -> str:
+                result = await enrich_with_llm(
+                    prompt,
+                    model_config=getattr(self._engine, "model_config", None),
+                    system_prompt=system_prompt,
+                    timeout=60.0,
+                )
+                if not result.success:
+                    raise RuntimeError(result.error or "LLM call failed")
+                return result.content
+
+            from evaluation_engine import _LLM_EXECUTOR
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    raw = _LLM_EXECUTOR.submit(lambda: asyncio.run(_run())).result()
+                else:
+                    raw = asyncio.run(_run())
+            except RuntimeError:
+                raw = asyncio.run(_run())
+
+            if raw:
+                raw = raw.strip().split("\n")[0].strip().strip(".").strip('"').strip("'").lower()
+            return raw or ""
+        except Exception as exc:
+            log.error("LLM solve failed: %s", exc)
+            return ""
 
     def _heartbeat_loop(self) -> None:
         """Send periodic heartbeats to the platform.
