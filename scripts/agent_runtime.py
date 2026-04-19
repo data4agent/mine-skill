@@ -1194,7 +1194,9 @@ class AgentWorker:
                 except SkipItemError as exc:
                     summary.skipped_items += 1
                     summary.messages.append(f"skipped {item.item_id}: {exc}")
-                    self._handle_item_failure(item, "crawl_timeout", summary)
+                    # Extract actual reason from SkipItemError message
+                    reason = "occupancy_blocked" if "occupancy_blocked" in str(exc) else "crawl_timeout"
+                    self._handle_item_failure(item, reason, summary)
                     continue
                 except Exception as exc:
                     summary.errors.append(f"{item.item_id}: {exc}")
@@ -1245,7 +1247,8 @@ class AgentWorker:
                     if isinstance(result, SkipItemError):
                         summary.skipped_items += 1
                         summary.messages.append(f"skipped {item.item_id}: {result}")
-                        self._handle_item_failure(item, "crawl_timeout", summary)
+                        reason = "occupancy_blocked" if "occupancy_blocked" in str(result) else "crawl_timeout"
+                        self._handle_item_failure(item, reason, summary)
                     elif isinstance(result, Exception):
                         summary.errors.append(f"{item.item_id}: {result}")
                         self._handle_item_failure(item, "crawl_failed", summary)
@@ -1458,6 +1461,11 @@ class AgentWorker:
     # 反复进 backlog 占住 max_parallel 槽位，挤掉新 discovery。
     _MAX_ITEM_RETRIES = 3
 
+    # 不可恢复的失败——永远不重试，立即丢弃
+    _NON_RETRYABLE_REASONS = frozenset({
+        "occupancy_blocked",  # URL 被其他 miner 占用，epoch 内不会释放
+    })
+
     def _handle_item_failure(
         self,
         item: WorkItem,
@@ -1469,6 +1477,10 @@ class AgentWorker:
             self._report_repeat_crawl_failure(item, fail_reason)
             summary.messages.append(f"repeat_crawl {item.claim_task_id} failed ({fail_reason})")
             return
+        # Non-retryable failures — discard immediately, don't waste slots
+        if fail_reason in self._NON_RETRYABLE_REASONS:
+            summary.messages.append(f"discarded {item.item_id}: {fail_reason} (non-retryable)")
+            return
         # Track retry count in metadata to prevent infinite re-queue loops
         retries = int(item.metadata.get("_retries", 0)) + 1
         if retries > self._MAX_ITEM_RETRIES:
@@ -1477,7 +1489,6 @@ class AgentWorker:
             )
             return
         cloned = _clone_item(item, resume=True)
-        # WorkItem is frozen — rebuild with updated metadata
         updated = WorkItem(
             item_id=cloned.item_id,
             source=cloned.source,
